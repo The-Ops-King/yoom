@@ -40,6 +40,10 @@ let recordingActive = false;
 let captureKind: "screen" | "window" = "screen";
 /** Suppresses the move→IPC echo while WE are the ones moving the window. */
 let applyingBounds = false;
+/** True once the current bubble window has painted its first frame. */
+let bubbleLoaded = false;
+/** Coalesces `moved` bursts into at most one `reportPosition` IPC per frame. */
+let reportPositionTimer: ReturnType<typeof setTimeout> | null = null;
 
 function alive(): BrowserWindow | null {
   return bubbleWindow && !bubbleWindow.isDestroyed() ? bubbleWindow : null;
@@ -69,6 +73,19 @@ function reportPosition(): void {
   sendToRecorder(IPC.bubbleMoved, pos);
 }
 
+/**
+ * `moved` fires far more often than once per frame while the user drags the
+ * bubble — coalesce those bursts into at most one `reportPosition` IPC per
+ * ~16ms so the renderer isn't flooded with redundant position updates.
+ */
+function scheduleReportPosition(): void {
+  if (reportPositionTimer) return;
+  reportPositionTimer = setTimeout(() => {
+    reportPositionTimer = null;
+    reportPosition();
+  }, 16);
+}
+
 function applySize(): void {
   const win = alive();
   if (!win) return;
@@ -77,6 +94,7 @@ function applySize(): void {
     appearance.shape,
     appearance.size,
     display.bounds.width,
+    appearance.cameraAspect,
   );
   const bounds = win.getBounds();
   const cx = bounds.x + bounds.width / 2;
@@ -108,6 +126,7 @@ function createBubbleWindow(): BrowserWindow {
     appearance.shape,
     appearance.size,
     display.bounds.width,
+    appearance.cameraAspect,
   );
   // Default position: bottom-right of the primary display with a 48px inset.
   const x = display.bounds.x + display.bounds.width - width - 48;
@@ -149,6 +168,8 @@ function createBubbleWindow(): BrowserWindow {
   // getUserMedia is allowed even though it is not the app origin.
   const wcId = win.webContents.id;
   registerShellWebContents(wcId);
+  // The bubble never legitimately opens a new window; deny anything that tries.
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
   // 'floating' keeps the bubble above ordinary windows without fighting menus
   // and panels the way 'screen-saver' does.
@@ -161,17 +182,25 @@ function createBubbleWindow(): BrowserWindow {
   // real defence is that the composited bubble is drawn over the same rect.
   win.setContentProtection(true);
 
-  win.on("moved", reportPosition);
+  win.on("moved", scheduleReportPosition);
   win.on("resized", reportPosition);
   win.on("closed", () => {
     unregisterShellWebContents(wcId);
     bubbleWindow = null;
   });
 
+  bubbleLoaded = false;
+  const onLoaded = (): void => {
+    if (bubbleLoaded) return;
+    bubbleLoaded = true;
+    if (shouldShow()) alive()?.showInactive();
+  };
   win.once("ready-to-show", () => {
     win.webContents.send(IPC.bubbleApply, appearance);
     win.webContents.send(IPC.bubbleCamera, cameraDeviceId);
+    onLoaded();
   });
+  win.webContents.once("did-finish-load", onLoaded);
 
   const entry = rendererEntry();
   void (entry.url ? win.loadURL(entry.url) : win.loadFile(entry.file!));
@@ -211,20 +240,22 @@ function sync(): void {
   win.webContents.send(IPC.bubbleCamera, cameraDeviceId);
   applySize();
   // showInactive keeps focus in the recorder window when the bubble appears.
-  win.showInactive();
+  // Showing before the renderer has painted flashes an unstyled/transparent
+  // frame, so a not-yet-loaded window is left hidden here — `onLoaded` shows
+  // it itself once `did-finish-load`/`ready-to-show` fires.
+  if (bubbleLoaded) win.showInactive();
   reportPosition();
 }
 
 export function setBubbleAppearance(next: BubbleAppearance): void {
-  const shapeOrSizeChanged =
-    next.shape !== appearance.shape || next.size !== appearance.size;
   appearance = next;
   if (!shouldShow()) {
     alive()?.hide();
     return;
   }
+  // `sync()` already calls `applySize()`, so shape/size changes need no
+  // second pass here.
   sync();
-  if (shapeOrSizeChanged) applySize();
 }
 
 export function setBubbleVisible(visible: boolean): void {
@@ -281,12 +312,17 @@ function parseAppearance(value: unknown): BubbleAppearance | null {
   const size = raw.size as BubbleSize;
   if (!SHAPES.includes(shape)) return null;
   if (!SIZES.includes(size)) return null;
+  const cameraAspect =
+    typeof raw.cameraAspect === "number" && Number.isFinite(raw.cameraAspect) && raw.cameraAspect > 0
+      ? raw.cameraAspect
+      : undefined;
   return {
     shape,
     size,
     mirror: !!raw.mirror,
     visible: !!raw.visible,
     framed: !!raw.framed,
+    ...(cameraAspect !== undefined ? { cameraAspect } : {}),
   };
 }
 

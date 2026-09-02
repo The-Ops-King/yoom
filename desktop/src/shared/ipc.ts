@@ -26,6 +26,13 @@ export interface BubbleAppearance {
    * working — `bubble.ts#shouldShow` hides the live window while recording.
    */
   framed: boolean;
+  /**
+   * The live camera track's width/height, when known. `rounded` bubbles
+   * follow the camera's real aspect ratio rather than assuming 16:9, so the
+   * floating window needs it too — otherwise a 4:3 webcam breaks
+   * self-occlusion. See `src/lib/recording/types.ts` in the root repo.
+   */
+  cameraAspect?: number;
 }
 
 export interface SourceInfo {

@@ -25,10 +25,11 @@ export const SIZE_FRACTION: Record<BubbleSize, number> = {
 
 /**
  * width / height for each shape, matching `computeBubbleRect`:
- * circle and square are 1:1, portrait is 9:16, rounded follows the camera
- * (16:9 for every webcam Yoom supports). `full` never gets a floating window —
- * it is camera-only mode, which has no desktop overlay — but it needs an entry
- * so the table is total.
+ * circle and square are 1:1, portrait is 9:16, rounded follows the live
+ * camera's aspect ratio (this 16:9 entry is only the fallback used when the
+ * camera aspect is not yet known — see `bubbleWindowSize`'s `cameraAspect`
+ * param). `full` never gets a floating window — it is camera-only mode, which
+ * has no desktop overlay — but it needs an entry so the table is total.
  */
 export const BUBBLE_ASPECT: Record<BubbleShape, number> = {
   circle: 1,
@@ -74,17 +75,25 @@ export function bubbleCentreToNormalized(
 /**
  * The window size that makes the live bubble line up with the composited one.
  * `displayWidthDip` is `Display.bounds.width` for the display the bubble is on.
+ * `cameraAspect` (width/height) overrides the `rounded` shape's aspect ratio —
+ * the web compositor uses the live camera's real aspect there instead of
+ * assuming 16:9, so the floating window has to match it or self-occlusion
+ * breaks for non-16:9 webcams.
  */
 export function bubbleWindowSize(
   shape: BubbleShape,
   size: BubbleSize,
   displayWidthDip: number,
+  cameraAspect?: number,
 ): { width: number; height: number } {
   // Defensive fallbacks: an unknown size or shape would otherwise multiply by
   // `undefined` and yield NaN bounds. `bubble.ts` validates IPC payloads too;
   // this is the second line of defence.
   const fraction = SIZE_FRACTION[size] ?? SIZE_FRACTION.medium;
-  const aspect = BUBBLE_ASPECT[shape] ?? BUBBLE_ASPECT.circle;
+  const aspect =
+    shape === "rounded"
+      ? (cameraAspect ?? BUBBLE_ASPECT.rounded)
+      : (BUBBLE_ASPECT[shape] ?? BUBBLE_ASPECT.circle);
   // A non-finite display width (a display that has gone away mid-drag) is
   // treated as 0 so the minimum takes over, instead of producing NaN bounds.
   const dip = Number.isFinite(displayWidthDip) ? displayWidthDip : 0;

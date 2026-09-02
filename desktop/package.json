@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Yoom desktop shell (macOS)",
+  "author": "J. Tyler Ray",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "YOOM_DEV=1 electron-vite dev",

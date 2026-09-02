@@ -120,6 +120,7 @@ describe("desktop-bridge", () => {
       mirror: false,
       visible: true,
       framed: true,
+      cameraAspect: 4 / 3,
     });
     setDesktopCameraDevice("cam-1");
     expect(calls).toEqual([
@@ -132,6 +133,7 @@ describe("desktop-bridge", () => {
           mirror: false,
           visible: true,
           framed: true,
+          cameraAspect: 4 / 3,
         },
       ],
       ["camera", "cam-1"],
@@ -157,6 +159,7 @@ describe("desktop-bridge", () => {
       mirror: false,
       visible: false,
       framed: false,
+      cameraAspect: 16 / 9,
     };
     emit!(next);
     expect(seen).toEqual([next]);

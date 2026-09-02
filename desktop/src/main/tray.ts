@@ -47,6 +47,7 @@ export function refreshTrayMenu(): void {
         label: "Open recorder",
         click: () => {
           createRecorderWindow();
+          refreshTrayMenu();
         },
       },
       {

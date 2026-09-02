@@ -79,6 +79,22 @@ describe("bubbleWindowSize", () => {
     });
   });
 
+  it("uses the live camera aspect for `rounded` when given one", () => {
+    // A 4:3 webcam: 422 wide (medium on a 1920 display) / (4/3) ≈ 317 tall —
+    // without this, `rounded` would hardcode 16:9 and break self-occlusion
+    // for any webcam that isn't 16:9.
+    expect(bubbleWindowSize("rounded", "medium", 1920, 4 / 3)).toEqual({
+      width: 422,
+      height: 317,
+    });
+  });
+
+  it("falls back to 16:9 for `rounded` when no camera aspect is given", () => {
+    expect(bubbleWindowSize("rounded", "medium", 1920)).toEqual(
+      bubbleWindowSize("rounded", "medium", 1920, 16 / 9),
+    );
+  });
+
   it("never returns a window narrower than the minimum usable size", () => {
     const { width, height } = bubbleWindowSize("circle", "small", 200);
     expect(width).toBe(120);

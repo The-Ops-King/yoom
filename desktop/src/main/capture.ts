@@ -47,11 +47,13 @@ export function installDisplayMediaHandler(ses: Session): void {
         sources = await listSources();
       } catch (err) {
         console.error("[yoom] desktopCapturer.getSources failed", err);
+        setCaptureKind("screen");
         callback({});
         return;
       }
 
       if (sources.length === 0) {
+        setCaptureKind("screen");
         callback({});
         return;
       }
@@ -66,6 +68,9 @@ export function installDisplayMediaHandler(ses: Session): void {
       if (!source) {
         // Cancelled: an empty callback surfaces as NotAllowedError in the page,
         // which the recorder already handles as "user dismissed the picker".
+        // Reset so a stale `window` kind from a previous pick never survives
+        // a cancelled reselect and mis-hides the bubble.
+        setCaptureKind("screen");
         callback({});
         return;
       }

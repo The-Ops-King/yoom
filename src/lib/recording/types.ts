@@ -59,6 +59,13 @@ export interface BubbleAppearance {
    * one and both would appear in the frame.
    */
   framed: boolean;
+  /**
+   * The live camera track's width/height, when known. `rounded` bubbles
+   * follow the camera's real aspect ratio (see `computeBubbleRect`) rather
+   * than assuming 16:9, so the shell needs it too to size the floating
+   * window identically — otherwise a 4:3 webcam breaks self-occlusion.
+   */
+  cameraAspect?: number;
 }
 
 export interface DesktopBridge {

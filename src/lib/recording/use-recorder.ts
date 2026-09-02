@@ -150,6 +150,10 @@ export function useRecorder(): UseRecorderResult {
     cameraWidth: 0,
     cameraHeight: 0,
   });
+  // The live camera track's width/height, forwarded to the desktop shell so
+  // its floating bubble window can match a `rounded` bubble's real aspect
+  // ratio instead of assuming 16:9. Set once per acquire, after `getCamera`.
+  const [cameraAspect, setCameraAspect] = useState<number | undefined>(undefined);
 
   const router = useRouter();
 
@@ -296,6 +300,12 @@ export function useRecorder(): UseRecorderResult {
         if (!canvasRef.current) throw new Error("Recorder canvas is not mounted");
         const camera = await provider.getCamera(current.cameraId || undefined);
         cameraStreamRef.current = camera;
+        const camSettings = camera.getVideoTracks()[0]?.getSettings();
+        setCameraAspect(
+          camSettings?.width && camSettings?.height && camSettings.width > 0 && camSettings.height > 0
+            ? camSettings.width / camSettings.height
+            : undefined,
+        );
         camera.getVideoTracks()[0]?.addEventListener("ended", () => {
           dispatch({ type: "STREAM_ENDED" });
         });
@@ -891,6 +901,7 @@ export function useRecorder(): UseRecorderResult {
       mirror: state.bubble.mirror,
       visible: state.bubble.visible,
       framed: state.frame.enabled,
+      ...(cameraAspect !== undefined ? { cameraAspect } : {}),
     });
   }, [
     state.bubble.shape,
@@ -898,6 +909,7 @@ export function useRecorder(): UseRecorderResult {
     state.bubble.mirror,
     state.bubble.visible,
     state.frame.enabled,
+    cameraAspect,
   ]);
 
   useEffect(() => {

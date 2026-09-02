@@ -79,7 +79,15 @@ function installNavigationGuard(win: BrowserWindow): void {
   const origin = appOrigin();
 
   win.webContents.on("will-navigate", (event, url) => {
-    if (new URL(url).origin !== origin) {
+    let navOrigin: string;
+    try {
+      navOrigin = new URL(url).origin;
+    } catch {
+      // Malformed/unparseable URL — never let it through to the recorder.
+      event.preventDefault();
+      return;
+    }
+    if (navOrigin !== origin) {
       event.preventDefault();
       void shell.openExternal(url);
     }

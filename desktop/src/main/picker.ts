@@ -95,6 +95,8 @@ export function openPicker(payload: PickerPayload): Promise<string | null> {
     pickerWindow = win;
     const wcId = win.webContents.id;
     registerShellWebContents(wcId);
+    // The picker never legitimately opens a new window; deny anything that tries.
+    win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
     win.once("ready-to-show", () => {
       win.show();
