@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MAX_KEYFRAMES } from "@/lib/edits";
 import type { CameraTrack } from "@/lib/edits";
+import type { CameraSample } from "./camera-track";
 import {
   bubbleHeightFor,
   cameraAt,
@@ -88,6 +89,22 @@ describe("cameraAt", () => {
     const before = cameraAt(withC, 5.099);
     const after = cameraAt(withC, 5.101);
     expect(Math.abs(after.rect.x - before.rect.x)).toBeLessThan(0.02);
+  });
+
+  it("does not pop the mode cross-fade weight when it reverses before settling", () => {
+    // bubble@0 -> full@5 -> bubble@5.1: the second keyframe reverses the
+    // mode change back before the first cross-fade (into "full") settles.
+    const toFull = upsertKeyframe(track, 5, { mode: "full", rect: { x: 0, y: 0, w: 1, h: 1 } });
+    const backToBubble = upsertKeyframe(toFull, 5.1, { mode: "bubble", rect: track.keyframes[0].rect });
+
+    const fullWeight = (s: CameraSample): number => {
+      if (s.fromMode === undefined) return s.mode === "full" ? 1 : 0;
+      return s.mode === "full" ? s.fade : 1 - s.fade;
+    };
+
+    const before = fullWeight(cameraAt(backToBubble, 5.099));
+    const after = fullWeight(cameraAt(backToBubble, 5.101));
+    expect(Math.abs(after - before)).toBeLessThan(0.02);
   });
 });
 

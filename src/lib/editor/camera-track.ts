@@ -67,13 +67,17 @@ export function defaultCameraTrack(shape: BubbleShape, size: BubbleSize, screenA
 function advanceTo(from: CameraSample, target: CameraKeyframe, t: number): CameraSample {
   const p = Math.min(1, Math.max(0, (t - target.t) / CAMERA_ANIM_S));
   const e = easeInOutCubic(p);
-  const rect: Rect = p >= 1 ? target.rect : lerpRect(from.rect, target.rect, e);
+  const rect: Rect = p >= 1 ? { ...target.rect } : lerpRect(from.rect, target.rect, e);
   if (from.mode === target.mode || p >= 1) {
     return { mode: target.mode, fade: 1, rect };
   }
   // Carry the incoming fade's own progress instead of resetting to 0, so a
   // re-target before the previous cross-fade settled doesn't pop either.
-  const carried = from.fromMode !== undefined ? from.fade : 0;
+  // `from.fade` is progress *toward* `from.mode`; with only two modes, a
+  // carried cross-fade is always a reversal back to `target.mode`, so the
+  // carried weight of `target.mode` is `1 - from.fade`, not `from.fade`
+  // (stays correct if a third mode is ever added).
+  const carried = from.fromMode === target.mode ? 1 - from.fade : 0;
   const fade = carried + (1 - carried) * e;
   return { mode: target.mode, fromMode: from.mode, fade, rect };
 }
@@ -82,7 +86,7 @@ export function cameraAt(track: CameraTrack, t: number): CameraSample {
   const ks = track.keyframes;
   let i = 0;
   while (i + 1 < ks.length && ks[i + 1].t <= t) i += 1;
-  if (i === 0) return { mode: ks[0].mode, fade: 1, rect: ks[0].rect };
+  if (i === 0) return { mode: ks[0].mode, fade: 1, rect: { ...ks[0].rect } };
 
   // Fold forward to the sample actually shown at ks[i].t, then animate that
   // into ks[i] for the query time. Still O(n) total: this loop plus the scan
