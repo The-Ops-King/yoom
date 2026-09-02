@@ -208,6 +208,87 @@ describe("countdown and recording", () => {
     expect(rec.countdown).toBe(3);
     expect(rec.elapsedMs).toBe(0);
   });
+
+  it("RESTART_NOW restarts straight into recording from every live state", () => {
+    const live = (extra: RecorderEvent[] = []) =>
+      run(setup(), [
+        { type: "START" },
+        { type: "SKIP_COUNTDOWN" },
+        { type: "TICK", elapsedMs: 5000 },
+        ...extra,
+      ]);
+
+    for (const from of [
+      run(setup(), [{ type: "START" }]), // countdown
+      live(), // recording
+      live([{ type: "PAUSE" }]), // paused
+    ]) {
+      const s = recorderReducer(from, { type: "RESTART_NOW" });
+      expect(s.status).toBe("recording");
+      expect(s.countdown).toBe(0);
+      expect(s.elapsedMs).toBe(0);
+      expect(s.blob).toBeNull();
+      expect(s.streamsAlive).toBe(true);
+    }
+  });
+
+  it("RESTART_NOW is a no-op outside countdown/recording/paused", () => {
+    const idle = init();
+    expect(recorderReducer(idle, { type: "RESTART_NOW" })).toBe(idle);
+    const s = setup();
+    expect(recorderReducer(s, { type: "RESTART_NOW" })).toBe(s);
+    const stopping = run(setup(), [
+      { type: "START" },
+      { type: "SKIP_COUNTDOWN" },
+      { type: "STOP" },
+    ]);
+    expect(recorderReducer(stopping, { type: "RESTART_NOW" })).toBe(stopping);
+  });
+
+  it("CANCEL throws the take away and returns to setup", () => {
+    const live = (extra: RecorderEvent[] = []) =>
+      run(setup(), [
+        { type: "START" },
+        { type: "SKIP_COUNTDOWN" },
+        { type: "TICK", elapsedMs: 5000 },
+        ...extra,
+      ]);
+
+    for (const from of [
+      run(setup(), [{ type: "START" }]), // countdown
+      live(), // recording
+      live([{ type: "PAUSE" }]), // paused
+      live([{ type: "STOP" }]), // stopping
+    ]) {
+      const s = recorderReducer(from, { type: "CANCEL" });
+      expect(s.status).toBe("setup");
+      expect(s.blob).toBeNull();
+      expect(s.elapsedMs).toBe(0);
+      expect(s.countdown).toBe(3);
+      expect(s.streamsAlive).toBe(true);
+      expect(s.error).toBe("");
+      expect(s.notice).toBe("");
+    }
+  });
+
+  it("CANCEL is a no-op in idle and review", () => {
+    const idle = init();
+    expect(recorderReducer(idle, { type: "CANCEL" })).toBe(idle);
+    const review = run(setup(), [
+      { type: "START" },
+      { type: "SKIP_COUNTDOWN" },
+      { type: "STOP" },
+      {
+        type: "BLOB_READY",
+        blob: new Blob(["x"]),
+        durationMs: 1000,
+        width: 1280,
+        height: 720,
+      },
+    ]);
+    expect(review.status).toBe("review");
+    expect(recorderReducer(review, { type: "CANCEL" })).toBe(review);
+  });
 });
 
 describe("STREAM_ENDED", () => {

@@ -83,6 +83,8 @@ export type RecorderEvent =
   | { type: "RESUME" }
   | { type: "STOP" }
   | { type: "RESTART" }
+  | { type: "RESTART_NOW" }
+  | { type: "CANCEL" }
   | { type: "MAX_DURATION" }
   | { type: "STREAM_ENDED" }
   | {
@@ -268,6 +270,35 @@ export function recorderReducer(
         elapsedMs: 0,
         blob: null,
         error: "",
+      };
+
+    // Restart without the countdown: the streams are already live, so drop
+    // straight back into `recording`. The hook discards the old MediaRecorder
+    // and starts a fresh one off `restartToken`, since the status does not
+    // change on a recording → recording restart.
+    case "RESTART_NOW":
+      if (!LIVE.includes(state.status)) return state;
+      return {
+        ...state,
+        status: "recording",
+        countdown: 0,
+        elapsedMs: 0,
+        blob: null,
+        error: "",
+      };
+
+    // Throw the take away and go back to setup with the capture still live.
+    case "CANCEL":
+      if (!LIVE.includes(state.status) && state.status !== "stopping") return state;
+      return {
+        ...state,
+        status: "setup",
+        countdown: COUNTDOWN_SECONDS,
+        elapsedMs: 0,
+        blob: null,
+        durationMs: 0,
+        error: "",
+        notice: "",
       };
 
     case "STREAM_ENDED": {

@@ -86,7 +86,12 @@ export interface UseRecorderResult {
     pause(): void;
     resume(): void;
     stop(): void;
+    /** Restart with the 3-2-1 countdown (kept for completeness). */
     restart(): void;
+    /** Restart immediately — no countdown. Bound to the Restart button / ⌘⇧K. */
+    restartNow(): void;
+    /** Throw the take away and go back to setup. Trash button / ⌘⇧X. */
+    cancel(): void;
     discard(): void;
     upload(): void;
     reset(): void;
@@ -114,6 +119,9 @@ export function useRecorder(): UseRecorderResult {
   });
   const [reviewUrl, setReviewUrl] = useState<string | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  // Bumped by `restartNow`: a recording → recording restart does not change
+  // `state.status`, so the "start the encoder" effect needs its own trigger.
+  const [restartToken, setRestartToken] = useState(0);
   const [dimensions, setDimensions] = useState({
     canvasWidth: 0,
     canvasHeight: 0,
@@ -466,15 +474,13 @@ export function useRecorder(): UseRecorderResult {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Enter `recording` for the first time → actually start the encoder.
-  const wasRecordingRef = useRef(false);
+  // Enter `recording` with no encoder behind it → start one. `recorderRef` is
+  // the guard: it is non-null for the whole take (including while paused) and
+  // is nulled by `restartNow` / `cancel` / `finishRecording`, so this fires on
+  // the first entry and again after an immediate restart, but never on resume.
   useEffect(() => {
-    const isRecording = state.status === "recording";
-    if (isRecording && !wasRecordingRef.current && !recorderRef.current) {
-      beginRecording();
-    }
-    wasRecordingRef.current = isRecording || state.status === "paused";
-  }, [state.status, beginRecording]);
+    if (state.status === "recording" && !recorderRef.current) beginRecording();
+  }, [state.status, restartToken, beginRecording]);
 
   // Elapsed timer: `performance.now()` deltas only, minus paused time.
   useEffect(() => {
@@ -656,6 +662,26 @@ export function useRecorder(): UseRecorderResult {
 
   // ---------- discard / reset ----------
 
+  /**
+   * Stop the current encoder and throw its bytes away. `onstop` is detached
+   * first so `finishRecording` never runs for a take the user abandoned.
+   */
+  const discardRecorder = useCallback(() => {
+    if (thumbnailTimerRef.current) {
+      window.clearTimeout(thumbnailTimerRef.current);
+      thumbnailTimerRef.current = null;
+    }
+    chunksRef.current = [];
+    thumbnailRef.current = null;
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.onstop = null;
+      recorder.ondataavailable = null;
+      recorder.stop();
+    }
+  }, []);
+
   const discard = useCallback(() => {
     thumbnailRef.current = null;
     dispatch({ type: "DISCARD" });
@@ -695,8 +721,9 @@ export function useRecorder(): UseRecorderResult {
   // ---------- hotkeys ----------
 
   // Cmd/Ctrl+Shift+L starts and stops (Loom's default). Cmd/Ctrl+Shift+P
-  // pauses and resumes. `R` is deliberately avoided: it is Chrome's hard
-  // reload, and a missed chord there destroys the recording in progress.
+  // pauses and resumes, K restarts immediately, X cancels. `R` is deliberately
+  // avoided: it is Chrome's hard reload, and a missed chord there destroys the
+  // recording in progress.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
@@ -712,11 +739,29 @@ export function useRecorder(): UseRecorderResult {
         e.preventDefault();
         if (status === "recording") dispatch({ type: "PAUSE" });
         else if (status === "paused") dispatch({ type: "RESUME" });
+      } else if (key === "k") {
+        if (status !== "countdown" && status !== "recording" && status !== "paused") return;
+        e.preventDefault();
+        discardRecorder();
+        dispatch({ type: "RESTART_NOW" });
+        setRestartToken((n) => n + 1);
+      } else if (key === "x") {
+        if (
+          status !== "countdown" &&
+          status !== "recording" &&
+          status !== "paused" &&
+          status !== "stopping"
+        ) {
+          return;
+        }
+        e.preventDefault();
+        discardRecorder();
+        dispatch({ type: "CANCEL" });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [acquire]);
+  }, [acquire, discardRecorder]);
 
   // Desktop shell forwards the same shortcuts even when the tab is unfocused.
   useEffect(() => {
@@ -784,14 +829,19 @@ export function useRecorder(): UseRecorderResult {
       resume: () => dispatch({ type: "RESUME" }),
       stop: () => dispatch({ type: "STOP" }),
       restart: () => {
-        chunksRef.current = [];
-        thumbnailRef.current = null;
-        if (recorderRef.current && recorderRef.current.state !== "inactive") {
-          recorderRef.current.onstop = null;
-          recorderRef.current.stop();
-          recorderRef.current = null;
-        }
+        discardRecorder();
         dispatch({ type: "RESTART" });
+      },
+      restartNow: () => {
+        discardRecorder();
+        dispatch({ type: "RESTART_NOW" });
+        // `recording → recording` leaves the status untouched, so nudge the
+        // encoder effect explicitly.
+        setRestartToken((n) => n + 1);
+      },
+      cancel: () => {
+        discardRecorder();
+        dispatch({ type: "CANCEL" });
       },
       discard,
       upload: () => void upload(),
@@ -801,7 +851,7 @@ export function useRecorder(): UseRecorderResult {
       setBubble: (patch: Partial<BubbleConfig>) => dispatch({ type: "SET_BUBBLE", patch }),
       setFrame: (patch: Partial<FrameConfig>) => dispatch({ type: "SET_FRAME", patch }),
     }),
-    [acquire, discard, reacquireWith, reset, upload],
+    [acquire, discard, discardRecorder, reacquireWith, reset, upload],
   );
 
   return {

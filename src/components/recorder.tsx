@@ -27,6 +27,9 @@ export function Recorder() {
   const [copied, setCopied] = useState(false);
 
   const live = state.status === "recording" || state.status === "paused";
+  // Restart and Cancel are reachable from the countdown too; Pause and Stop
+  // only make sense once the encoder is actually running.
+  const capturing = live || state.status === "countdown";
   const configuring = state.status === "idle" || state.status === "setup";
   const showsCamera = state.mode !== "screen";
 
@@ -236,36 +239,69 @@ export function Recorder() {
               </>
             )}
 
-            {live && (
+            {capturing && (
               <>
+                {live && (
+                  <button
+                    type="button"
+                    onClick={state.status === "paused" ? actions.resume : actions.pause}
+                    className="rounded-lg border border-border bg-surface-raised px-5 py-2.5 text-sm font-medium text-foreground transition-all hover:brightness-110"
+                  >
+                    {state.status === "paused" ? "Resume" : "Pause"}
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={state.status === "paused" ? actions.resume : actions.pause}
-                  className="rounded-lg border border-border bg-surface-raised px-5 py-2.5 text-sm font-medium text-foreground transition-all hover:brightness-110"
+                  onClick={actions.restartNow}
+                  title="Restart now (⌘⇧K)"
+                  aria-label="Restart recording"
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-4 py-2.5 text-sm font-medium text-muted transition-colors hover:text-foreground"
                 >
-                  {state.status === "paused" ? "Resume" : "Pause"}
-                </button>
-                <button
-                  type="button"
-                  onClick={actions.restart}
-                  className="rounded-lg border border-border bg-surface-raised px-5 py-2.5 text-sm font-medium text-muted transition-colors hover:text-foreground"
-                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <path
+                      d="M13.5 8a5.5 5.5 0 1 1-1.9-4.16M13.5 2.5V6H10"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                   Restart
                 </button>
                 <button
                   type="button"
-                  onClick={actions.stop}
-                  className="rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-accent-hover"
+                  onClick={actions.cancel}
+                  title="Cancel recording (⌘⇧X)"
+                  aria-label="Cancel recording"
+                  className="flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/5 px-4 py-2.5 text-sm font-medium text-red-400/90 transition-colors hover:bg-red-500/10 hover:text-red-300"
                 >
-                  Stop
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <path
+                      d="M2.5 4h11M6 4V2.5h4V4M4 4l.6 9a1 1 0 0 0 1 .95h4.8a1 1 0 0 0 1-.95L12 4M6.5 6.75v4.5M9.5 6.75v4.5"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  Cancel
                 </button>
+                {live && (
+                  <button
+                    type="button"
+                    onClick={actions.stop}
+                    className="rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-accent-hover"
+                  >
+                    Stop
+                  </button>
+                )}
               </>
             )}
           </div>
 
-          {(state.status === "setup" || live) && (
+          {(state.status === "setup" || capturing) && (
             <p className="text-center text-[11px] text-muted-dim">
-              ⌘⇧L start / stop · ⌘⇧P pause
+              ⌘⇧L start / stop · ⌘⇧P pause · ⌘⇧K restart · ⌘⇧X cancel
             </p>
           )}
         </div>
