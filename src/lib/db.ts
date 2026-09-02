@@ -415,3 +415,71 @@ export async function updateSettings(patch: SettingsPatch): Promise<Settings> {
     .single()) as QueryResult<Settings>;
   return unwrap(result);
 }
+
+export type VideoStats = {
+  views: number;
+  unique: number;
+  avgMaxPercent: number;
+  /** Ten retention buckets: 0–10%, 10–20% … 90–100%. */
+  buckets: number[];
+};
+
+export type ViewerRow = Pick<
+  ViewSession,
+  | "id"
+  | "viewer_name"
+  | "city"
+  | "country"
+  | "user_agent"
+  | "started_at"
+  | "last_seen_at"
+  | "max_percent"
+>;
+
+const VIEWER_COLUMNS =
+  "id,viewer_name,city,country,user_agent,started_at,last_seen_at,max_percent";
+
+/**
+ * Per-video analytics. The histogram is computed here rather than in SQL so the
+ * dashboard needs exactly one round trip and no extra view.
+ */
+export async function getVideoStats(videoId: string): Promise<VideoStats> {
+  const result = (await getSupabase()
+    .from("view_sessions")
+    .select("max_percent,viewer_name,ip_hash")
+    .eq("video_id", videoId)) as QueryResult<
+    { max_percent: number; viewer_name: string | null; ip_hash: string | null }[] | null
+  >;
+  const rows = unwrap(result) ?? [];
+
+  const buckets = new Array<number>(10).fill(0);
+  const viewers = new Set<string>();
+  let total = 0;
+
+  for (const [index, row] of rows.entries()) {
+    const percent = Math.max(0, Math.min(100, Number(row.max_percent) || 0));
+    buckets[Math.min(9, Math.floor(percent / 10))] += 1;
+    total += percent;
+    viewers.add(row.viewer_name ?? row.ip_hash ?? `session-${index}`);
+  }
+
+  return {
+    views: rows.length,
+    unique: viewers.size,
+    avgMaxPercent: rows.length === 0 ? 0 : Math.round(total / rows.length),
+    buckets,
+  };
+}
+
+export async function listRecentViewers(
+  videoId: string,
+  limit = 50,
+): Promise<ViewerRow[]> {
+  const result = (await getSupabase()
+    .from("view_sessions")
+    .select(VIEWER_COLUMNS)
+    .eq("video_id", videoId)
+    .order("started_at", { ascending: false })
+    .limit(limit)) as QueryResult<ViewerRow[] | null>;
+  return unwrap(result) ?? [];
+}

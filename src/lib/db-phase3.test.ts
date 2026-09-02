@@ -9,7 +9,9 @@ vi.mock("@/lib/supabase", () => ({
 
 import {
   changeSlug,
+  getVideoStats,
   isSlugTaken,
+  listRecentViewers,
   listVideos,
   setVideoEdits,
   softDeleteVideo,
@@ -337,5 +339,76 @@ describe("updateSettings", () => {
     await expect(updateSettings({ alert_on_completion: true })).rejects.toThrow(
       "nope",
     );
+  });
+});
+
+describe("getVideoStats", () => {
+  it("bins max_percent into ten buckets and averages them", async () => {
+    const builder = chain({
+      data: [
+        { max_percent: 0, viewer_name: null, ip_hash: "a" },
+        { max_percent: 5, viewer_name: null, ip_hash: "a" },
+        { max_percent: 55, viewer_name: "Jo", ip_hash: "b" },
+        { max_percent: 100, viewer_name: null, ip_hash: "c" },
+      ],
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const stats = await getVideoStats(ROW_A.id);
+
+    expect(from).toHaveBeenCalledWith("view_sessions");
+    expect(builder.eq).toHaveBeenCalledWith("video_id", ROW_A.id);
+    expect(stats.views).toBe(4);
+    expect(stats.unique).toBe(3);
+    expect(stats.avgMaxPercent).toBe(40);
+    expect(stats.buckets).toHaveLength(10);
+    // 0 and 5 both land in bucket 0; 55 in bucket 5; 100 clamps into bucket 9.
+    expect(stats.buckets).toEqual([2, 0, 0, 0, 0, 1, 0, 0, 0, 1]);
+  });
+
+  it("returns zeroed stats with ten empty buckets when there are no views", async () => {
+    from.mockReturnValue(chain({ data: [], error: null }));
+    const stats = await getVideoStats(ROW_A.id);
+    expect(stats).toEqual({
+      views: 0,
+      unique: 0,
+      avgMaxPercent: 0,
+      buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    });
+  });
+});
+
+describe("listRecentViewers", () => {
+  it("orders by start time and applies the limit", async () => {
+    const builder = chain({
+      data: [
+        {
+          id: "s1",
+          viewer_name: "Jo",
+          city: "Austin",
+          country: "US",
+          user_agent: "Mozilla/5.0 (Macintosh) Chrome/120",
+          started_at: "2026-09-02T10:00:00Z",
+          last_seen_at: "2026-09-02T10:05:00Z",
+          max_percent: 80,
+        },
+      ],
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const rows = await listRecentViewers(ROW_A.id);
+
+    expect(builder.order).toHaveBeenCalledWith("started_at", { ascending: false });
+    expect(builder.limit).toHaveBeenCalledWith(50);
+    expect(rows[0].viewer_name).toBe("Jo");
+  });
+
+  it("honours an explicit limit", async () => {
+    const builder = chain({ data: [], error: null });
+    from.mockReturnValue(builder);
+    await listRecentViewers(ROW_A.id, 5);
+    expect(builder.limit).toHaveBeenCalledWith(5);
   });
 });
