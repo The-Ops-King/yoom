@@ -126,6 +126,55 @@ export function bubblePath(rect: Rect, shape: BubbleShape): Path2D {
   return path;
 }
 
+// ---------- bubble transition animation ----------
+
+/** A bubble rect without its media crop — what the tween interpolates. */
+export interface RectBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Standard ease-in-out cubic over 0..1. Out-of-range input is clamped. */
+export function easeInOutCubic(t: number): number {
+  if (!Number.isFinite(t)) return 1;
+  const c = Math.min(1, Math.max(0, t));
+  return c < 0.5 ? 4 * c * c * c : 1 - Math.pow(-2 * c + 2, 3) / 2;
+}
+
+/** Component-wise linear interpolation between two rects. */
+export function lerpRect(a: RectBox, b: RectBox, t: number): RectBox {
+  const c = Number.isFinite(t) ? Math.min(1, Math.max(0, t)) : 1;
+  return {
+    x: a.x + (b.x - a.x) * c,
+    y: a.y + (b.y - a.y) * c,
+    w: a.w + (b.w - a.w) * c,
+    h: a.h + (b.h - a.h) * c,
+  };
+}
+
+/**
+ * The corner radius that renders `shape` at this size. Expressing every shape
+ * as a radius is what lets the compositor tween between them: a circle is just
+ * a very round rectangle, so circle → square is one animated number.
+ */
+export function shapeRadius(shape: BubbleShape, w: number, h: number): number {
+  const short = Math.max(0, Math.min(w, h));
+  switch (shape) {
+    case "circle":
+      return short / 2;
+    case "rounded":
+    case "portrait":
+      return short * 0.08;
+    case "square":
+      return short * 0.04;
+    case "full":
+    default:
+      return 0;
+  }
+}
+
 /**
  * Framed capture (for-later #1): enlarge the canvas and inset the screen.
  * Canvas dimensions are forced even because some encoders reject odd sizes.

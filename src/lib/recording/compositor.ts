@@ -1,8 +1,11 @@
 import {
-  bubblePath,
   computeBubbleRect,
   computeFrameLayout,
   coverCrop,
+  easeInOutCubic,
+  lerpRect,
+  shapeRadius,
+  type RectBox,
 } from "./geometry";
 import type {
   BackgroundConfig,
@@ -33,6 +36,36 @@ export type {
 } from "./types";
 
 export type CompositorLayout = "camera" | "screen+camera";
+
+/** How long a bubble shape/size/position/visibility change takes to settle. */
+export const BUBBLE_ANIM_MS = 300;
+
+/**
+ * A rounded-rect path at an arbitrary radius. Unlike `bubblePath` this is
+ * driven by a number rather than a shape name, which is what makes the
+ * circle → rounded → square transition a single interpolated value.
+ */
+function roundedBubblePath(box: RectBox, radius: number): Path2D {
+  const path = new Path2D();
+  const r = Math.max(0, Math.min(radius, Math.min(box.w, box.h) / 2));
+  const maybe = path as Path2D & {
+    roundRect?: (x: number, y: number, w: number, h: number, r: number) => void;
+  };
+  if (r > 0 && typeof maybe.roundRect === "function") {
+    maybe.roundRect(box.x, box.y, box.w, box.h, r);
+  } else if (r > 0) {
+    // Safari < 16.4: four arcs.
+    path.moveTo(box.x + r, box.y);
+    path.arcTo(box.x + box.w, box.y, box.x + box.w, box.y + box.h, r);
+    path.arcTo(box.x + box.w, box.y + box.h, box.x, box.y + box.h, r);
+    path.arcTo(box.x, box.y + box.h, box.x, box.y, r);
+    path.arcTo(box.x, box.y, box.x + box.w, box.y, r);
+    path.closePath();
+  } else {
+    path.rect(box.x, box.y, box.w, box.h);
+  }
+  return path;
+}
 
 export interface CompositorSources {
   screen?: MediaStream | null;
@@ -131,6 +164,18 @@ export class Compositor {
   private cachedPath: Path2D | null = null;
   private cacheKey = "";
 
+  // ---- bubble transition ----
+  /** Where the bubble actually is on screen right now. */
+  private drawnRect: RectBox | null = null;
+  private drawnRadius = 0;
+  private animFrom: RectBox | null = null;
+  private animFromRadius = 0;
+  private animTo: RectBox | null = null;
+  private animToRadius = 0;
+  private animStartMs = 0;
+  /** Set by `setBubble(cfg, { immediate: true })` — drags must not lag. */
+  private snapNext = false;
+
   private layerCanvas: HTMLCanvasElement;
   private layerCtx: CanvasRenderingContext2D;
 
@@ -165,8 +210,14 @@ export class Compositor {
     this.cacheKey = "";
   }
 
-  setBubble(cfg: BubbleConfig): void {
+  /**
+   * `immediate` snaps to the new geometry instead of tweening to it. The drag
+   * overlay passes it so the bubble tracks the pointer 1:1 rather than
+   * restarting a 300 ms tween on every pointermove.
+   */
+  setBubble(cfg: BubbleConfig, opts?: { immediate?: boolean }): void {
     this.bubble = cfg;
+    if (opts?.immediate) this.snapNext = true;
     this.cacheKey = "";
   }
 
@@ -271,6 +322,11 @@ export class Compositor {
     if (this.cameraVideo) this.cameraVideo.srcObject = null;
     this.screenVideo = null;
     this.cameraVideo = null;
+    this.drawnRect = null;
+    this.animFrom = null;
+    this.animTo = null;
+    this.cachedPath = null;
+    this.cacheKey = "";
     releaseBackground(this.frameBackground);
     this.frameBackground = null;
     this.overlays = [];
@@ -362,34 +418,17 @@ export class Compositor {
       ctx.fillRect(0, 0, W, H);
     }
 
-    // 2. camera bubble
+    // 2. camera bubble — tweened between shapes/sizes/positions
     let rect: Rect | null = null;
     const cam = this.cameraVideo;
     const bubble = this.bubble;
     const camW = cam?.videoWidth ?? 0;
     const camH = cam?.videoHeight ?? 0;
 
-    if (cam && bubble && bubble.visible && camW > 0 && camH > 0) {
-      const key = [
-        W,
-        H,
-        camW,
-        camH,
-        bubble.shape,
-        bubble.size,
-        bubble.pos.x.toFixed(4),
-        bubble.pos.y.toFixed(4),
-        bubble.visible,
-        bubble.mirror,
-      ].join("|");
-      if (key !== this.cacheKey) {
-        this.cachedRect = computeBubbleRect(W, H, camW, camH, bubble);
-        this.cachedPath = bubblePath(this.cachedRect, bubble.shape);
-        this.cacheKey = key;
-      }
-      rect = this.cachedRect;
+    if (cam && bubble && camW > 0 && camH > 0) {
+      rect = this.resolveBubbleRect(W, H, camW, camH, bubble, nowMs);
 
-      if (rect && rect.w > 0 && rect.h > 0) {
+      if (rect && rect.w >= 1 && rect.h >= 1) {
         this.drawCameraLayer(cam, rect, bubble);
         ctx.save();
         ctx.clip(this.cachedPath!);
@@ -402,10 +441,15 @@ export class Compositor {
           ctx.stroke(this.cachedPath!);
           ctx.restore();
         }
+      } else {
+        rect = null;
       }
+      this.cachedRect = rect;
     } else {
       this.cachedRect = null;
       this.cacheKey = "";
+      this.drawnRect = null;
+      this.animTo = null;
     }
 
     ctx.restore();
@@ -530,6 +574,90 @@ export class Compositor {
     const mh = media instanceof HTMLVideoElement ? media.videoHeight : media!.naturalHeight;
     const crop = coverCrop(mw, mh, W, H);
     ctx.drawImage(media!, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, W, H);
+  }
+
+  /** Collapse a rect to zero size around its own centre (the hide/show tween). */
+  private static collapse(box: RectBox): RectBox {
+    return { x: box.x + box.w / 2, y: box.y + box.h / 2, w: 0, h: 0 };
+  }
+
+  /**
+   * The bubble's rect for this frame. A change in shape / size / position /
+   * visibility starts a 300 ms ease-in-out from wherever the bubble currently
+   * is; `w`, `h` and the corner radius all interpolate, so circle → square and
+   * small → large are one continuous motion rather than a jump. Hiding
+   * animates down to zero around the centre; showing scales back up.
+   */
+  private resolveBubbleRect(
+    W: number,
+    H: number,
+    camW: number,
+    camH: number,
+    bubble: BubbleConfig,
+    nowMs: number,
+  ): Rect {
+    const base = computeBubbleRect(W, H, camW, camH, bubble);
+    const full: RectBox = { x: base.x, y: base.y, w: base.w, h: base.h };
+    const target = bubble.visible ? full : Compositor.collapse(full);
+    const targetRadius = bubble.visible ? shapeRadius(bubble.shape, full.w, full.h) : 0;
+
+    const key = [
+      W,
+      H,
+      camW,
+      camH,
+      bubble.shape,
+      bubble.size,
+      bubble.pos.x.toFixed(4),
+      bubble.pos.y.toFixed(4),
+      bubble.visible,
+    ].join("|");
+
+    if (key !== this.cacheKey) {
+      this.cacheKey = key;
+      // Nothing drawn yet (first frame, or the camera just arrived) and drags
+      // both snap: there is no "from" worth animating out of.
+      if (!this.drawnRect || this.snapNext) {
+        this.drawnRect = target;
+        this.drawnRadius = targetRadius;
+        this.animTo = null;
+      } else {
+        this.animFrom = this.drawnRect;
+        this.animFromRadius = this.drawnRadius;
+        this.animTo = target;
+        this.animToRadius = targetRadius;
+        this.animStartMs = nowMs;
+      }
+      this.snapNext = false;
+      this.cachedPath = null;
+    }
+
+    if (this.animTo && this.animFrom) {
+      const t = (nowMs - this.animStartMs) / BUBBLE_ANIM_MS;
+      const e = easeInOutCubic(t);
+      this.drawnRect = lerpRect(this.animFrom, this.animTo, e);
+      this.drawnRadius =
+        this.animFromRadius + (this.animToRadius - this.animFromRadius) * e;
+      if (t >= 1) {
+        this.drawnRect = this.animTo;
+        this.drawnRadius = this.animToRadius;
+        this.animTo = null;
+        this.animFrom = null;
+      }
+      // Mid-tween the path changes every frame, so it cannot be cached.
+      this.cachedPath = null;
+    }
+
+    const cur = this.drawnRect ?? target;
+    const x = Math.round(cur.x);
+    const y = Math.round(cur.y);
+    const w = Math.round(cur.w);
+    const h = Math.round(cur.h);
+    const out: Rect = { x, y, w, h, crop: coverCrop(camW, camH, w, h) };
+    // The radius can never exceed half the short side, or roundRect throws.
+    const radius = Math.min(this.drawnRadius, Math.min(w, h) / 2);
+    if (!this.cachedPath) this.cachedPath = roundedBubblePath(out, radius);
+    return out;
   }
 
   /**

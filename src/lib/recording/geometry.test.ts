@@ -7,7 +7,10 @@ import {
   computeFrameLayout,
   contentBox,
   coverCrop,
+  easeInOutCubic,
+  lerpRect,
   pointerToNormalized,
+  shapeRadius,
   SIZE_FRACTION,
 } from "./geometry";
 import type { BubbleConfig } from "./types";
@@ -254,5 +257,77 @@ describe("bubblePath", () => {
     vi.stubGlobal("Path2D", NoRoundRect);
     const rect = { x: 0, y: 0, w: 100, h: 60, crop: { sx: 0, sy: 0, sw: 1, sh: 1 } };
     expect((bubblePath(rect, "rounded") as unknown as NoRoundRect).ops).toEqual(["rect"]);
+  });
+});
+
+describe("easeInOutCubic", () => {
+  it("pins the endpoints and the midpoint", () => {
+    expect(easeInOutCubic(0)).toBe(0);
+    expect(easeInOutCubic(1)).toBe(1);
+    expect(easeInOutCubic(0.5)).toBeCloseTo(0.5, 10);
+  });
+
+  it("clamps out-of-range input", () => {
+    expect(easeInOutCubic(-2)).toBe(0);
+    expect(easeInOutCubic(4)).toBe(1);
+    expect(easeInOutCubic(Number.NaN)).toBe(1);
+  });
+
+  it("eases in below the midpoint and out above it", () => {
+    // Slow at both ends: below 0.5 the eased value trails t, above it leads.
+    expect(easeInOutCubic(0.25)).toBeLessThan(0.25);
+    expect(easeInOutCubic(0.75)).toBeGreaterThan(0.75);
+    expect(easeInOutCubic(0.25)).toBeCloseTo(0.0625, 10);
+    expect(easeInOutCubic(0.75)).toBeCloseTo(0.9375, 10);
+  });
+
+  it("is monotonic", () => {
+    let prev = -1;
+    for (let i = 0; i <= 20; i += 1) {
+      const v = easeInOutCubic(i / 20);
+      expect(v).toBeGreaterThan(prev);
+      prev = v;
+    }
+  });
+});
+
+describe("lerpRect", () => {
+  const a = { x: 0, y: 0, w: 100, h: 100 };
+  const b = { x: 200, y: 50, w: 300, h: 60 };
+
+  it("returns the endpoints at t = 0 and t = 1", () => {
+    expect(lerpRect(a, b, 0)).toEqual(a);
+    expect(lerpRect(a, b, 1)).toEqual(b);
+  });
+
+  it("interpolates every component independently", () => {
+    expect(lerpRect(a, b, 0.5)).toEqual({ x: 100, y: 25, w: 200, h: 80 });
+  });
+
+  it("clamps t into 0..1", () => {
+    expect(lerpRect(a, b, -1)).toEqual(a);
+    expect(lerpRect(a, b, 9)).toEqual(b);
+  });
+});
+
+describe("shapeRadius", () => {
+  it("makes a circle fully round off the short side", () => {
+    expect(shapeRadius("circle", 200, 100)).toBe(50);
+    expect(shapeRadius("circle", 100, 200)).toBe(50);
+  });
+
+  it("uses gentler radii for the rectangular shapes", () => {
+    expect(shapeRadius("rounded", 200, 100)).toBeCloseTo(8, 10);
+    expect(shapeRadius("portrait", 200, 100)).toBeCloseTo(8, 10);
+    expect(shapeRadius("square", 200, 100)).toBeCloseTo(4, 10);
+  });
+
+  it("leaves a full-frame bubble square", () => {
+    expect(shapeRadius("full", 1920, 1080)).toBe(0);
+  });
+
+  it("never returns a negative radius for a degenerate rect", () => {
+    expect(shapeRadius("circle", 0, 0)).toBe(0);
+    expect(shapeRadius("rounded", -10, 50)).toBe(0);
   });
 });

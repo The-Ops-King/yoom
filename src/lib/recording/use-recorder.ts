@@ -97,7 +97,11 @@ export interface UseRecorderResult {
     reset(): void;
     toggleMic(on?: boolean): void;
     toggleSystem(on?: boolean): void;
-    setBubble(patch: Partial<BubbleConfig>): void;
+    /**
+     * `immediate` skips the compositor's 300 ms tween — the drag overlay uses
+     * it so the bubble tracks the pointer instead of chasing it.
+     */
+    setBubble(patch: Partial<BubbleConfig>, opts?: { immediate?: boolean }): void;
     setFrame(patch: Partial<FrameConfig>): void;
   };
 }
@@ -848,7 +852,20 @@ export function useRecorder(): UseRecorderResult {
       reset,
       toggleMic: (on?: boolean) => dispatch({ type: "TOGGLE_MIC", on }),
       toggleSystem: (on?: boolean) => dispatch({ type: "TOGGLE_SYSTEM", on }),
-      setBubble: (patch: Partial<BubbleConfig>) => dispatch({ type: "SET_BUBBLE", patch }),
+      setBubble: (patch: Partial<BubbleConfig>, opts?: { immediate?: boolean }) => {
+        // `immediate` never reaches the reducer: it describes how to render the
+        // change, not what the change is. Push it straight at the compositor
+        // (which is React-free) and let the dispatch update state as usual.
+        if (opts?.immediate && compositorRef.current) {
+          const current = stateRef.current;
+          const next = { ...current.bubble, ...patch };
+          compositorRef.current.setBubble(
+            current.mode === "camera" ? { ...next, shape: "full", visible: true } : next,
+            { immediate: true },
+          );
+        }
+        dispatch({ type: "SET_BUBBLE", patch });
+      },
       setFrame: (patch: Partial<FrameConfig>) => dispatch({ type: "SET_FRAME", patch }),
     }),
     [acquire, discard, discardRecorder, reacquireWith, reset, upload],

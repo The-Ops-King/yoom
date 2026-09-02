@@ -127,7 +127,7 @@ export function Recorder() {
         canvasHeight={dimensions.canvasHeight}
         cameraWidth={dimensions.cameraWidth}
         cameraHeight={dimensions.cameraHeight}
-        onBubbleMove={(pos) => actions.setBubble({ pos })}
+        onBubbleMove={(pos, opts) => actions.setBubble({ pos }, opts)}
       />
 
       {state.status === "review" ? (
