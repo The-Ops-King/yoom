@@ -29,6 +29,10 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
   const { edits, duration, player, selected } = ctx;
   const trackRef = useRef<HTMLDivElement | null>(null);
   const headRef = useRef<HTMLDivElement | null>(null);
+  /** Track geometry, measured once per drag — a layout read per pointermove thrashes. */
+  const rectRef = useRef<{ left: number; width: number } | null>(null);
+  /** Where the zoom being dragged ended up, so its (re-sorted) index can be re-found. */
+  const zoomStartRef = useRef(0);
   const [drag, setDrag] = useState<Drag | null>(null);
 
   const trim = edits.trim ?? { start: 0, end: duration };
@@ -47,14 +51,21 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
     return () => cancelAnimationFrame(raf);
   }, [player.timeRef, duration]);
 
+  /** Measure the track and cache it for the drag that is about to start. */
+  const measure = useCallback(() => {
+    const el = trackRef.current;
+    const r = el?.getBoundingClientRect();
+    rectRef.current = r ? { left: r.left, width: r.width || 1 } : null;
+    return rectRef.current;
+  }, []);
+
   const timeAt = useCallback(
     (clientX: number) => {
-      const el = trackRef.current;
-      if (!el) return 0;
-      const r = el.getBoundingClientRect();
-      return duration * clamp((clientX - r.left) / (r.width || 1), 0, 1);
+      const r = rectRef.current ?? measure();
+      if (!r) return 0;
+      return duration * clamp((clientX - r.left) / r.width, 0, 1);
     },
-    [duration],
+    [duration, measure],
   );
 
   /** Every move re-derives from the pre-drag edits, so a drag never accumulates. */
@@ -91,6 +102,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
       } else {
         end = clamp(t, d.start + MIN_SPAN, duration);
       }
+      if (d.kind === "zoom") zoomStartRef.current = start;
       ctx.applyLive(() =>
         d.kind === "zoom"
           ? ops.updateZoom(d.from, d.index, { start, end })
@@ -105,6 +117,13 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
     const onMove = (e: PointerEvent) => move(drag, timeAt(e.clientX));
     const onUp = () => {
       if ("from" in drag) ctx.commit(drag.from);
+      // `updateZoom` re-inserts and re-sorts, so the dragged clip's index can
+      // have moved (or the clip can have been swallowed by a neighbour).
+      if (drag.kind === "zoom") {
+        const i = ctx.edits.zooms.findIndex((z) => z.start === zoomStartRef.current);
+        ctx.setSelected(i >= 0 ? { kind: "zoom", index: i } : null);
+      }
+      rectRef.current = null;
       setDrag(null);
     };
     window.addEventListener("pointermove", onMove);
@@ -120,6 +139,8 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
   const begin = (e: React.PointerEvent, d: Drag) => {
     e.preventDefault();
     e.stopPropagation();
+    measure();
+    if (d.kind === "zoom") zoomStartRef.current = d.start;
     setDrag(d);
   };
 
@@ -135,6 +156,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
         ref={trackRef}
         className="relative touch-none select-none"
         onPointerDown={(e) => {
+          measure();
           player.seek(timeAt(e.clientX));
           setDrag({ kind: "scrub" });
         }}
@@ -145,7 +167,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
           <div className="absolute inset-y-0 right-0 bg-black/50" style={{ left: pct(trim.end) }} />
           {edits.cuts.map((c, i) => (
             <button
-              key={`cut-${c.start}-${c.end}`}
+              key={`cut-${i}`}
               type="button"
               aria-label={`Cut ${i + 1}`}
               onPointerDown={(e) => {
@@ -158,9 +180,9 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
               style={{ left: pct(c.start), width: pct(c.end - c.start) }}
             />
           ))}
-          {edits.markers.map((m) => (
+          {edits.markers.map((m, i) => (
             <div
-              key={`marker-${m.t}`}
+              key={`marker-${i}`}
               className="pointer-events-none absolute top-0 h-2 w-px bg-amber-300"
               style={{ left: pct(m.t) }}
             />
@@ -195,7 +217,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
         <div className="relative mt-1 h-4 rounded-sm border border-border bg-surface">
           {edits.zooms.map((z, i) => (
             <div
-              key={`zoom-${z.start}-${z.end}`}
+              key={`zoom-${i}`}
               className={`${laneClip} cursor-grab ${
                 isSel("zoom", i) ? "border-sky-300 bg-sky-500/50" : "border-sky-500/50 bg-sky-500/25"
               }`}
@@ -233,7 +255,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
         <div className="relative mt-1 h-4 rounded-sm border border-border bg-surface">
           {(edits.camera?.keyframes ?? []).map((k, i) => (
             <div
-              key={`kf-${k.t}`}
+              key={`kf-${i}`}
               title={`Camera keyframe ${k.t.toFixed(2)}s`}
               className={`absolute top-1 h-2 w-2 -translate-x-1/2 rotate-45 border ${
                 i === 0 ? "cursor-default" : "cursor-ew-resize"
@@ -255,7 +277,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
         <div className="relative mt-1 h-4 rounded-sm border border-border bg-surface">
           {edits.overlays.map((o, i) => (
             <div
-              key={`ov-${i}-${o.start}`}
+              key={`ov-${i}`}
               title={o.type}
               className={`${laneClip} cursor-grab ${
                 isSel("overlay", i) ? "border-emerald-200 bg-emerald-500/50" : "border-emerald-500/50 bg-emerald-500/25"

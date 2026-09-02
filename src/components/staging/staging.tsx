@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseEdits, type Overlay, type VideoEdits } from "@/lib/edits";
 import { defaultCameraTrack } from "@/lib/editor/camera-track";
 import * as ops from "@/lib/editor/edit-ops";
@@ -20,6 +20,41 @@ export type { StagingProps } from "./types";
  * entry is keyed by duration and cleared on finish/discard.
  */
 const STORAGE_KEY = "yoom.staging.v1";
+/** How long editing must pause before the draft is written back. */
+const PERSIST_DEBOUNCE_MS = 300;
+/** Mirrors the (unexported) `CAP` in `@/lib/editor/undo`; keep the two in step. */
+const HISTORY_CAP = 50;
+
+type Draft = { edits?: unknown; details?: Details };
+
+/**
+ * The persisted draft for *this* take, or null. Parsed once at mount: the
+ * duration guard covers edits and details together, so a stale entry from an
+ * earlier take can never leak a title into a new one.
+ */
+function readDraft(durationMs: number): Draft | null {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const j = JSON.parse(raw);
+    if (!j || typeof j !== "object" || j.durationMs !== durationMs) return null;
+    return j as Draft;
+  } catch {
+    /* no storage, or a corrupt entry: start fresh */
+    return null;
+  }
+}
+
+/**
+ * A `blob:` frame background is dead the moment the page reloads, so it is
+ * never worth persisting — drop it back to "no background" and keep the rest
+ * of the frame (padding, radius, shadow) intact.
+ */
+function persistableEdits(edits: VideoEdits): VideoEdits {
+  const frame = edits.frame;
+  if (!frame?.background.src?.startsWith("blob:")) return edits;
+  return { ...edits, frame: { ...frame, background: { kind: "none" } } };
+}
 
 function initialEdits(p: StagingProps, screenAspect: number): VideoEdits {
   const base = parseEdits({ version: 1, cuts: [], crop: null, zooms: [], overlays: [], markers: p.markers });
@@ -37,29 +72,16 @@ function initialEdits(p: StagingProps, screenAspect: number): VideoEdits {
 }
 
 export function Staging(props: StagingProps) {
-  const [history, setHistory] = useState<History<VideoEdits>>(() => {
-    try {
-      const saved = sessionStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const j = JSON.parse(saved);
-        if (j?.durationMs === props.durationMs) return createHistory(parseEdits(j.edits));
-      }
-    } catch {
-      /* no storage, or a corrupt entry: start fresh */
-    }
-    return createHistory(initialEdits(props, 16 / 9));
-  });
+  const [draft] = useState<Draft | null>(() => readDraft(props.durationMs));
+
+  const [history, setHistory] = useState<History<VideoEdits>>(() =>
+    createHistory(draft ? parseEdits(draft.edits) : initialEdits(props, 16 / 9)),
+  );
   const edits = history.present;
 
-  const [details, setDetails] = useState<Details>(() => {
-    try {
-      const j = JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? "null");
-      if (j?.details) return j.details as Details;
-    } catch {
-      /* fresh */
-    }
-    return { title: defaultRecordingTitle(), description: "", slug: "", thumbnailAt: 1 };
-  });
+  const [details, setDetails] = useState<Details>(
+    () => draft?.details ?? { title: defaultRecordingTitle(), description: "", slug: "", thumbnailAt: 1 },
+  );
 
   const [section, setSection] = useState<RailSection>("trim");
   const [tool, setTool] = useState<Tool>("select");
@@ -91,12 +113,20 @@ export function Staging(props: StagingProps) {
     });
   }
 
+  // Debounced: a drag pushes a new `edits` on every pointer move, and
+  // serialising the whole edit list at 60 Hz is pure jank.
   useEffect(() => {
-    try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ durationMs: props.durationMs, edits, details }));
-    } catch {
-      /* storage full or unavailable: the draft just is not restorable */
-    }
+    const timer = setTimeout(() => {
+      try {
+        sessionStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({ durationMs: props.durationMs, edits: persistableEdits(edits), details }),
+        );
+      } catch {
+        /* storage full or unavailable: the draft just is not restorable */
+      }
+    }, PERSIST_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
   }, [edits, details, props.durationMs]);
 
   const apply = useCallback((fn: (e: VideoEdits) => VideoEdits) => setHistory((h) => push(h, fn(h.present))), []);
@@ -107,9 +137,21 @@ export function Staging(props: StagingProps) {
   );
   const commit = useCallback(
     (from: VideoEdits) =>
-      setHistory((h) => (h.present === from ? h : { past: [...h.past, from].slice(-50), present: h.present, future: [] })),
+      setHistory((h) =>
+        h.present === from
+          ? h
+          : { past: [...h.past, from].slice(-HISTORY_CAP), present: h.present, future: [] },
+      ),
     [],
   );
+
+  // The hook hands back a fresh object every render, so the shortcut handler
+  // reads it through a ref: otherwise the window listener would be torn down
+  // and re-added ten times a second during playback.
+  const playerRef = useRef(player);
+  useEffect(() => {
+    playerRef.current = player;
+  }, [player]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -122,15 +164,16 @@ export function Staging(props: StagingProps) {
         return;
       }
       if (meta) return;
+      const p = playerRef.current;
       // The throttled `time` lags by up to 100 ms; mark from the live playhead.
-      const now = player.timeRef.current;
+      const now = p.timeRef.current;
       if (e.key === " ") {
         e.preventDefault();
-        player.toggle();
+        p.toggle();
         return;
       }
-      if (e.key === ",") player.step(-1);
-      if (e.key === ".") player.step(1);
+      if (e.key === ",") p.step(-1);
+      if (e.key === ".") p.step(1);
       if (e.key.toLowerCase() === "i") setInPoint(now);
       if (e.key.toLowerCase() === "o") setOutPoint(now);
       if (e.key.toLowerCase() === "c" && inPoint !== null && outPoint !== null) {
@@ -156,16 +199,16 @@ export function Staging(props: StagingProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [apply, inPoint, outPoint, player, selected]);
+  }, [apply, inPoint, outPoint, selected]);
 
   /** In/out points scope a new span when both are set; otherwise 3 s from the playhead. */
   const spanForNew = useCallback(() => {
     if (inPoint !== null && outPoint !== null) {
       return { start: Math.min(inPoint, outPoint), end: Math.max(inPoint, outPoint) };
     }
-    const start = player.timeRef.current;
+    const start = playerRef.current.timeRef.current;
     return { start, end: Math.min(duration, start + 3) };
-  }, [duration, inPoint, outPoint, player.timeRef]);
+  }, [duration, inPoint, outPoint]);
 
   const addOverlayAt = useCallback(
     (type: Overlay["type"], rect: Overlay["rect"]) => {
@@ -211,6 +254,15 @@ export function Staging(props: StagingProps) {
     props.onDiscard();
   }, [props]);
 
+  /*
+    NOTE: `player` is a fresh object every render, so this memo recomputes on
+    every render — deliberately. `useStagingPlayer` lives here, so its 10 Hz
+    `time` push re-renders this component during playback no matter what the
+    memo does; dropping `player` from the deps would only make `ctx` stale
+    (the preview's play/pause state and the timeline's readout both read it).
+    The 60 Hz work is already kept out of React: the canvas draws from the
+    hook's own rAF and the playhead animates from `player.timeRef`.
+  */
   const ctx = useMemo<StagingContext>(
     () => ({
       edits,
