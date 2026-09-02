@@ -28,7 +28,10 @@ export function WatchView({ video, apiBase, shareUrl }: WatchViewProps) {
   const [nameDraft, setNameDraft] = useState("");
   const [copied, setCopied] = useState(false);
 
+  // localStorage is only readable on the client, so the stored name has to be
+  // adopted after mount — reading it during render would desync hydration.
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     try {
       const stored = window.localStorage.getItem(VIEWER_NAME_KEY);
       if (stored !== null) {
@@ -38,6 +41,7 @@ export function WatchView({ video, apiBase, shareUrl }: WatchViewProps) {
     } catch {
       setNameResolved(true);
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   const { videoRef } = useViewTracker({
