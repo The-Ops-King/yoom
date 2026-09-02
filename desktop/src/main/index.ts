@@ -1,4 +1,5 @@
 import { app } from "electron";
+import { installDesktopAuthHeader } from "./auth";
 import { installCaptureIpc, installDisplayMediaHandler } from "./capture";
 import { destroyBubble, installBubbleIpc } from "./bubble";
 import { destroyHud, installHudIpc, onHudStatusChange } from "./hud";
@@ -42,6 +43,9 @@ if (!app.requestSingleInstanceLock()) {
     installPickerIpc();
     installBubbleIpc();
     installDisplayMediaHandler(yoomSession());
+    // Before the first navigation: the shell signs itself in with a shared
+    // secret, so the Mac app never shows the password gate.
+    installDesktopAuthHeader(yoomSession());
     installHudIpc();
     // The tray menu mirrors the HUD's transport controls, so it has to
     // re-render whenever the take's status moves.

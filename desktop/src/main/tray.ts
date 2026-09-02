@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import { Menu, Tray, app, nativeImage } from "electron";
+import { Menu, Tray, app, nativeImage, shell } from "electron";
+import { desktopTokenFile } from "./auth";
 import { hudStatus, toggleHud } from "./hud";
 import { permissionStatuses, showPermissionsDialog } from "./permissions";
 import {
@@ -112,6 +113,13 @@ export function refreshTrayMenu(): void {
           {
             label: "Reload recorder",
             click: () => getRecorderWindow()?.webContents.reloadIgnoringCache(),
+          },
+          {
+            // The sign-in secret is a plain file in userData; this is the only
+            // discoverable way to find it. Reveals the enclosing folder even
+            // when the file does not exist yet.
+            label: "Reveal desktop token file",
+            click: () => shell.showItemInFolder(desktopTokenFile()),
           },
         ],
       },

@@ -35,6 +35,36 @@ npm run dev       # YOOM_DEV=1 → loads http://localhost:3000
 Point it somewhere else with `YOOM_APP_URL=https://staging.example.com npm run dev`.
 With neither variable set the app loads `https://yoom.jtylerray.com`.
 
+## Sign-in
+
+**The app never asks for the password.** The shell holds a shared secret and
+attaches it as `x-yoom-desktop-token` on every request to the app origin
+(`src/main/auth.ts`); the web app treats a matching token as the owner. Because
+the recorder page's own fetches — the RSC payloads, every `/api/*` call — run in
+the same Electron session, they carry the header too, so nothing is left for a
+password gate to catch. The header is only ever added to the app origin, checked
+exactly in the listener rather than trusted to the match pattern.
+
+The token comes from, in order:
+
+1. `YOOM_DESKTOP_TOKEN` in the environment — easiest under `npm run dev`:
+   ```sh
+   YOOM_DESKTOP_TOKEN="$(grep '^DESKTOP_TOKEN=' ../.env.local | cut -d= -f2-)" npm run dev
+   ```
+2. the file `~/Library/Application Support/yoom-desktop/desktop-token`
+   (contents trimmed) — the packaged app's path, since it has no environment to
+   inherit. Tray → Developer → **Reveal desktop token file** opens it in Finder.
+   ```sh
+   printf %s 'the-token' > ~/Library/Application\ Support/yoom-desktop/desktop-token
+   ```
+
+**It must be byte-identical to the server's `DESKTOP_TOKEN`** (`.env.local` in
+dev, the Vercel env var in production). Comparison is constant-time and exact —
+no trailing newline, no whitespace. If the token is missing the app logs one
+warning and carries on; you then get the ordinary password gate. If the server
+has no `DESKTOP_TOKEN` set at all the header path is disabled outright, which is
+what keeps the public website password-gated.
+
 ## Build
 
 ```sh
