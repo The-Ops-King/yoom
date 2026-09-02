@@ -71,3 +71,17 @@ The HUD, the disappearing recorder window and the launch-time permission prompts
 - **E. Camera hygiene** — the green indicator goes out within ~2 s of reaching review, and immediately on quit; the packaged build attributes the camera to "Yoom", not Terminal.
 - **F. Regressions** — system audio still lands, bubble drag still drives the burned-in bubble with the window hidden, the picker still opens on the right tab, the beforeunload guard still challenges a close mid-take, and plain Chrome is unchanged.
 - **G. Dev ergonomics** — tray → Developer → Developer tools (detached) and Reload recorder.
+
+## Staging editor — manual test
+
+- [ ] Screen+camera take, 20 s. Staging opens with the bubble bottom-right. Drag it top-left at 5 s, full screen at 10 s, back to bubble at 15 s. Scrub: eases between, cross-fades on mode changes.
+- [ ] Camera-only take: no Camera section; frame and overlays still apply.
+- [ ] Trim 1 s off each end, cut 3–5 s. Playback skips the cut; readout shows edited duration.
+- [ ] Blur over a text field; callout numbered 1; highlight. All render on the canvas and in the export.
+- [ ] Frame on, Sunset preset, padding 0.08. Preview and export are padded.
+- [ ] Zoom into a quarter of the screen 8–12 s with ramp 0.4; a second zoom "focus whole take" on a window region. Export eases in and out; overlays inside the zoom stay on their pixels; the bubble stays put.
+- [ ] Details: custom slug, "taken" shown for an existing slug. Thumbnail from 7 s.
+- [ ] Upload: Rendering bar advances; Cancel mid-render returns to staging with nothing uploaded (check the library). Upload again to completion; the link on the clipboard opens the video; duration = edited duration; thumbnail is the chosen frame.
+- [ ] Reload during staging: page returns to idle (media gone), no crash; next take starts clean.
+- [ ] Desktop: HUD has pause/stop/mark/discard only; no bubble window; recorder window returns on stop.
+- [ ] Library: select 3, delete; with one already deleted in another tab, the bar names it as failed and keeps it selected.

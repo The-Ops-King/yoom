@@ -10,11 +10,14 @@ things a browser on macOS cannot do:
 2. **Global hotkeys.** ⌘⇧L start/stop, ⌘⇧P pause, ⌘⇧M mark, ⌘⇧K restart,
    ⌘⇧X cancel — they fire while another app is focused, which is exactly when
    you need them during a screen recording.
-3. **A floating camera bubble** over the desktop, draggable, whose position
-   drives the bubble burned into the recording.
+3. **A camera bubble placed after the take.** Screen and camera record to two
+   separate raw files; no bubble window is shown over the desktop during a
+   take. Once you stop, staging is where you drag the camera preview into
+   position, resize it, and add keyframes — that position and size are what
+   get composited into the bubble burned into the export.
 4. **A recording HUD.** During a take the recorder window hides entirely and a
-   small always-on-top pill — timer, pause, stop, mark, camera toggle, discard —
-   is the whole UI. This is the "make the app disappear" behaviour.
+   small always-on-top pill — timer, pause, stop, mark, discard — is the whole
+   UI. This is the "make the app disappear" behaviour.
 
 There is no dock icon; the app lives in the menu bar.
 
@@ -106,19 +109,17 @@ renderer) and puts a 320×48 pill at the top centre of the screen:
 | Control | Action | Hotkey |
 |---|---|---|
 | ⏸ / ▶ | Pause / resume | ⌘⇧P |
-| ■ | Stop and go to review | ⌘⇧L |
+| ■ | Stop and go to staging | ⌘⇧L |
 | ⚑ | Drop a marker | ⌘⇧M |
-| ◉ | Show/hide the camera bubble | — |
 | 🗑 | Discard the take | ⌘⇧X |
 
 Drag the pill anywhere by its body. The recorder window comes back — shown and
-focused — as soon as the take reaches review, error or idle. The tray mirrors
+focused — as soon as the take reaches staging, error or idle. The tray mirrors
 the same controls, and ⌘⇧L works throughout.
 
 **The HUD will appear in a full-screen recording.** `setContentProtection(true)`
 is applied, but macOS ≥ 14's ScreenCaptureKit — which Chromium uses — ignores
-it, exactly as it does for the bubble. Unlike the bubble, the HUD has no
-composited twin drawn over it to hide it. Two answers:
+it. Two answers:
 
 - Drag the pill onto a second display, or onto the part of the screen you are
   not capturing. This is what Loom users do with Loom's control bar, which has
@@ -157,7 +158,7 @@ Developer Tools is not there.
   up as "Yoom". So the scary Terminal entry in Control Centre is a dev-only
   artefact of *who launched it*, not of *what is holding the device*. To check
   whether the camera is genuinely still open, watch the green LED / menu-bar
-  dot: it should go out within ~2 s of a take reaching review (see "Camera
+  dot: it should go out within ~2 s of a take reaching staging (see "Camera
   release" below).
 
 ## Camera release
@@ -170,7 +171,7 @@ clears `srcObject` — and destroys the window entirely if it stays unwanted for
 so the indicator goes out when you quit rather than when the process exits.
 
 The recorder page's *own* camera is separate and stays live through
-`review → setup` on purpose: you are about to shoot another take, and
+`staging → setup` on purpose: you are about to shoot another take, and
 re-acquiring would re-prompt and re-flash the camera. Loom behaves the same
 way. It is released by `teardown()` on upload, reset, idle and error.
 
