@@ -1,8 +1,7 @@
 "use client";
 
 import type { RefObject } from "react";
-import { BubbleDragOverlay } from "./bubble-drag-overlay";
-import type { BubbleConfig, RecordingMode } from "@/lib/recording/types";
+import type { RecordingMode } from "@/lib/recording/types";
 
 interface PreviewStageProps {
   mode: RecordingMode;
@@ -10,14 +9,8 @@ interface PreviewStageProps {
   elapsedMs: number;
   /** Flashes the REC chip for ~300 ms when a marker is dropped. */
   markFlash?: boolean;
-  canvasRef: RefObject<HTMLCanvasElement | null>;
   screenVideoRef: RefObject<HTMLVideoElement | null>;
-  bubble: BubbleConfig;
-  canvasWidth: number;
-  canvasHeight: number;
-  cameraWidth: number;
-  cameraHeight: number;
-  onBubbleMove: (pos: { x: number; y: number }, opts?: { immediate?: boolean }) => void;
+  cameraVideoRef: RefObject<HTMLVideoElement | null>;
 }
 
 export function formatElapsed(ms: number): string {
@@ -34,54 +27,70 @@ export function PreviewStage({
   status,
   elapsedMs,
   markFlash = false,
-  canvasRef,
   screenVideoRef,
-  bubble,
-  canvasWidth,
-  canvasHeight,
-  cameraWidth,
-  cameraHeight,
-  onBubbleMove,
+  cameraVideoRef,
 }: PreviewStageProps) {
   const live = status === "recording" || status === "paused";
-  const showStage = status !== "idle" && status !== "acquiring" && status !== "review";
+  // Hidden — never unmounted — outside capture: the two <video> elements are
+  // the raw preview sinks, and the hook's refs must survive staging.
+  const showStage =
+    status !== "idle" &&
+    status !== "acquiring" &&
+    status !== "staging" &&
+    status !== "rendering";
+  const cameraIsStage = mode === "camera";
 
   return (
     <div
-      // Native HTML5 drag-and-drop must never engage here: dragging the canvas
-      // or the bubble handle otherwise paints Chrome's ghost image.
+      // Native HTML5 drag-and-drop must never engage here: dragging a preview
+      // otherwise paints Chrome's ghost image.
       onDragStart={(e) => e.preventDefault()}
       className={`relative w-full max-w-3xl aspect-video select-none touch-none overflow-hidden rounded-xl border border-border bg-surface shadow-lg shadow-black/30 ${
         showStage ? "" : "hidden"
       }`}
     >
       {/*
-        The canvas is always mounted for camera modes so the compositor has a
-        target before acquisition finishes; it is simply empty until then.
+        Capture is raw now: this is the untouched screen track. The bubble and
+        the frame are placed in staging, so nothing is composited here.
       */}
-      <canvas
-        ref={canvasRef}
-        draggable={false}
-        className={`h-full w-full object-contain ${mode === "screen" ? "hidden" : ""}`}
-      />
       <video
         ref={screenVideoRef}
         muted
         playsInline
         autoPlay
         draggable={false}
-        className={`h-full w-full object-contain ${mode === "screen" ? "" : "hidden"}`}
+        className={`h-full w-full object-contain ${cameraIsStage ? "hidden" : ""}`}
       />
 
-      {mode !== "screen" && (
-        <BubbleDragOverlay
-          bubble={bubble}
-          canvasWidth={canvasWidth}
-          canvasHeight={canvasHeight}
-          cameraWidth={cameraWidth}
-          cameraHeight={cameraHeight}
-          onMove={onBubbleMove}
+      {cameraIsStage ? (
+        <video
+          ref={cameraVideoRef}
+          muted
+          playsInline
+          autoPlay
+          draggable={false}
+          style={{ transform: "scaleX(-1)" }}
+          className="h-full w-full object-contain"
         />
+      ) : (
+        <div
+          className={`absolute bottom-3 right-3 w-32 ${
+            mode === "screen+camera" ? "" : "hidden"
+          }`}
+        >
+          <video
+            ref={cameraVideoRef}
+            muted
+            playsInline
+            autoPlay
+            draggable={false}
+            style={{ transform: "scaleX(-1)" }}
+            className="aspect-video w-full rounded-lg border border-border object-cover"
+          />
+          <p className="mt-1 text-center text-[10px] leading-tight text-muted-dim">
+            camera · placed after recording
+          </p>
+        </div>
       )}
 
       {/*

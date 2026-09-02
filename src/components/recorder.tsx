@@ -1,27 +1,29 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { YoomLogo } from "./logo";
 import { DeviceSelector } from "./device-selector";
 import { AudioControls } from "./recorder/audio-controls";
 import { CameraBubbleControls } from "./recorder/camera-bubble-controls";
 import { Countdown } from "./recorder/countdown";
-import { FramePicker } from "./recorder/frame-picker";
 import { ModePicker } from "./recorder/mode-picker";
 import { PreviewStage } from "./recorder/preview-stage";
-import { Review } from "./recorder/review";
 import { useRecorder } from "@/lib/recording/use-recorder";
+
+// The editor tree is only worth its bundle once there is a take to stage.
+const Staging = dynamic(() => import("./staging/staging").then((m) => m.Staging), {
+  ssr: false,
+});
 
 export function Recorder() {
   const {
     state,
     capabilities,
     desktop,
-    canvasRef,
     screenVideoRef,
-    reviewUrl,
-    thumbnailUrl,
-    dimensions,
+    cameraVideoRef,
+    staging,
     getLevel,
     actions,
   } = useRecorder();
@@ -108,22 +110,31 @@ export function Recorder() {
     );
   }
 
-  if (state.status === "uploading") {
+  if (state.status === "rendering" || state.status === "uploading") {
+    const rendering = state.status === "rendering";
+    const progress = rendering ? state.renderProgress : state.uploadProgress;
     return (
       <main className="flex min-h-screen items-center justify-center p-8">
         <div className="w-full max-w-md space-y-5 text-center">
           <p className="text-xs font-medium uppercase tracking-wider text-muted-dim">
-            Uploading
+            {rendering ? "Rendering" : "Uploading"}
           </p>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface">
             <div
               className="progress-bar h-1.5 rounded-full bg-accent transition-all duration-500 ease-out"
-              style={{ width: `${state.uploadProgress}%` }}
+              style={{ width: `${progress}%` }}
             />
           </div>
-          <p className="font-mono text-sm tabular-nums text-muted">
-            {state.uploadProgress}%
-          </p>
+          <p className="font-mono text-sm tabular-nums text-muted">{progress}%</p>
+          {rendering && (
+            <button
+              type="button"
+              onClick={actions.cancelRender}
+              className="rounded-lg border border-border bg-surface-raised px-5 py-2 text-sm font-medium text-muted transition-colors hover:text-foreground"
+            >
+              Cancel
+            </button>
+          )}
         </div>
       </main>
     );
@@ -135,28 +146,30 @@ export function Recorder() {
         <Countdown value={state.countdown} onSkip={actions.skipCountdown} />
       )}
 
+      {/*
+        Stays mounted through staging (it hides itself) so the hook's raw
+        preview refs survive the transition.
+      */}
       <PreviewStage
         mode={state.mode}
         status={state.status}
         elapsedMs={state.elapsedMs}
         markFlash={markFlash}
-        canvasRef={canvasRef}
         screenVideoRef={screenVideoRef}
-        bubble={state.bubble}
-        canvasWidth={dimensions.canvasWidth}
-        canvasHeight={dimensions.canvasHeight}
-        cameraWidth={dimensions.cameraWidth}
-        cameraHeight={dimensions.cameraHeight}
-        onBubbleMove={(pos, opts) => actions.setBubble({ pos }, opts)}
+        cameraVideoRef={cameraVideoRef}
       />
 
-      {state.status === "review" ? (
-        <Review
-          videoUrl={reviewUrl}
-          thumbnailUrl={thumbnailUrl}
+      {state.status === "staging" && staging ? (
+        <Staging
+          mode={state.mode}
+          screenUrl={staging.screenUrl}
+          cameraUrl={staging.cameraUrl}
           durationMs={state.durationMs}
+          cameraOffsetMs={state.cameraOffsetMs}
+          markers={state.markers}
+          defaults={{ bubble: state.bubble, frame: state.frame }}
           error={state.error}
-          onUpload={actions.upload}
+          onFinish={actions.finish}
           onDiscard={actions.discard}
         />
       ) : (
@@ -214,14 +227,6 @@ export function Recorder() {
               bubble={state.bubble}
               shapeLocked={state.mode === "camera"}
               onChange={actions.setBubble}
-            />
-          )}
-
-          {(state.status === "setup" || live) && state.mode === "screen+camera" && (
-            <FramePicker
-              frame={state.frame}
-              locked={live || state.status === "countdown"}
-              onChange={actions.setFrame}
             />
           )}
 
@@ -354,7 +359,7 @@ export function Recorder() {
           {(state.status === "setup" || capturing) && (
             <p className="text-center text-[11px] text-muted-dim">
               ⌘⇧L start / stop · ⌘⇧P pause · ⌘⇧M mark · ⌘⇧K restart · ⌘⇧X cancel
-              {desktop && " · this window hides while recording — use the floating controls"}
+              {desktop && " · this window hides while recording — use the controls pill"}
             </p>
           )}
         </div>

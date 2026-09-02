@@ -6,12 +6,10 @@ import type { FrameConfig } from "@/lib/recording/types";
 
 interface FramePickerProps {
   frame: FrameConfig;
-  /** Padding changes the canvas size, so it is locked once recording starts. */
-  locked: boolean;
   onChange: (patch: Partial<FrameConfig>) => void;
 }
 
-export function FramePicker({ frame, locked, onChange }: FramePickerProps) {
+export function FramePicker({ frame, onChange }: FramePickerProps) {
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   return (
@@ -25,9 +23,8 @@ export function FramePicker({ frame, locked, onChange }: FramePickerProps) {
           role="switch"
           aria-checked={frame.enabled}
           aria-label="Enable framed capture"
-          disabled={locked}
           onClick={() => onChange({ enabled: !frame.enabled })}
-          className={`relative h-5 w-9 rounded-full transition-colors disabled:opacity-50 ${
+          className={`relative h-5 w-9 rounded-full transition-colors ${
             frame.enabled ? "bg-accent" : "border border-border bg-surface-raised"
           }`}
         >
@@ -47,14 +44,13 @@ export function FramePicker({ frame, locked, onChange }: FramePickerProps) {
                 key={preset.id}
                 type="button"
                 title={preset.label}
-                disabled={locked}
                 onClick={() =>
                   onChange({
                     background: { kind: "image", src: preset.src, presetId: preset.id },
                   })
                 }
                 style={{ background: preset.swatch }}
-                className={`h-10 rounded-md border transition-all disabled:opacity-50 ${
+                className={`h-10 rounded-md border transition-all ${
                   frame.background.presetId === preset.id
                     ? "border-accent ring-2 ring-accent/40"
                     : "border-border hover:border-accent/50"
@@ -69,10 +65,9 @@ export function FramePicker({ frame, locked, onChange }: FramePickerProps) {
                 key={color}
                 type="button"
                 aria-label={`Frame colour ${color}`}
-                disabled={locked}
                 onClick={() => onChange({ background: { kind: "color", color } })}
                 style={{ background: color }}
-                className={`h-6 w-6 rounded-md border transition-all disabled:opacity-50 ${
+                className={`h-6 w-6 rounded-md border transition-all ${
                   frame.background.kind === "color" && frame.background.color === color
                     ? "border-accent ring-2 ring-accent/40"
                     : "border-border"
@@ -81,9 +76,8 @@ export function FramePicker({ frame, locked, onChange }: FramePickerProps) {
             ))}
             <button
               type="button"
-              disabled={locked}
               onClick={() => fileRef.current?.click()}
-              className="rounded-md border border-border bg-surface-raised px-2.5 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground disabled:opacity-50"
+              className="rounded-md border border-border bg-surface-raised px-2.5 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground"
             >
               Upload
             </button>
@@ -115,9 +109,8 @@ export function FramePicker({ frame, locked, onChange }: FramePickerProps) {
               max={0.2}
               step={0.005}
               value={frame.padding}
-              disabled={locked}
               onChange={(e) => onChange({ padding: Number(e.target.value) })}
-              className="w-full accent-[var(--color-accent)] disabled:opacity-50"
+              className="w-full accent-[var(--color-accent)]"
             />
           </label>
 
@@ -131,9 +124,8 @@ export function FramePicker({ frame, locked, onChange }: FramePickerProps) {
               max={0.05}
               step={0.002}
               value={frame.radius}
-              disabled={locked}
               onChange={(e) => onChange({ radius: Number(e.target.value) })}
-              className="w-full accent-[var(--color-accent)] disabled:opacity-50"
+              className="w-full accent-[var(--color-accent)]"
             />
           </label>
 
@@ -141,19 +133,11 @@ export function FramePicker({ frame, locked, onChange }: FramePickerProps) {
             <input
               type="checkbox"
               checked={frame.shadow}
-              disabled={locked}
               onChange={(e) => onChange({ shadow: e.target.checked })}
               className="h-3.5 w-3.5 accent-[var(--color-accent)]"
             />
             Drop shadow
           </label>
-
-          {locked && (
-            <p className="text-[11px] leading-tight text-muted-dim">
-              Frame settings are locked while recording — the canvas size is
-              fixed once the encoder starts.
-            </p>
-          )}
         </>
       )}
     </div>
