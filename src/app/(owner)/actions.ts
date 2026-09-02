@@ -118,22 +118,11 @@ export async function updateSlug(
   return { ok: true, slug: updated.slug };
 }
 
-export async function deleteVideo(
-  _prevState: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
-  if (!(await isOwner())) return UNAUTHORIZED;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-  const id = field(formData, "id");
-  if (!id) return { error: "Missing video." };
-
-  let deleted;
-  try {
-    deleted = await softDeleteVideo(id);
-  } catch {
-    return { error: "Could not delete the recording." };
-  }
-
+/** Soft-delete one row and best-effort trash its Drive files. Returns the row, or null when already gone. */
+async function deleteOne(id: string) {
+  const deleted = await softDeleteVideo(id);
   if (deleted) {
     // Drive trash is best-effort: the row is already gone from the dashboard,
     // and a failed trash must not strand the owner on an error screen.
@@ -147,10 +136,51 @@ export async function deleteVideo(
     }
     revalidatePath(`/v/${deleted.slug}`);
   }
-
   revalidateVideo(id);
+  return deleted;
+}
+
+export async function deleteVideo(
+  _prevState: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  if (!(await isOwner())) return UNAUTHORIZED;
+
+  const id = field(formData, "id");
+  if (!id) return { error: "Missing video." };
+
+  try {
+    await deleteOne(id);
+  } catch {
+    return { error: "Could not delete the recording." };
+  }
+
   // redirect() throws NEXT_REDIRECT, so nothing after this line runs.
   redirect("/library");
+}
+
+export type BatchDeleteResult = { deleted: string[]; failed: { id: string; error: string }[] };
+
+export async function deleteVideos(ids: string[]): Promise<BatchDeleteResult> {
+  if (!(await isOwner())) {
+    return { deleted: [], failed: ids.map((id) => ({ id, error: "Not signed in." })) };
+  }
+  const result: BatchDeleteResult = { deleted: [], failed: [] };
+  for (const id of Array.from(new Set(ids)).slice(0, 200)) {
+    if (!UUID_RE.test(id)) {
+      result.failed.push({ id, error: "Invalid id." });
+      continue;
+    }
+    try {
+      const row = await deleteOne(id);
+      if (row) result.deleted.push(id);
+      else result.failed.push({ id, error: "Already deleted." });
+    } catch {
+      result.failed.push({ id, error: "Could not delete." });
+    }
+  }
+  revalidatePath("/library");
+  return result;
 }
 
 export async function saveSettings(
