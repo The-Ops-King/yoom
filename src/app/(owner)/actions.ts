@@ -135,8 +135,8 @@ async function deleteOne(id: string) {
       }
     }
     revalidatePath(`/v/${deleted.slug}`);
+    revalidateVideo(id);
   }
-  revalidateVideo(id);
   return deleted;
 }
 
@@ -161,12 +161,19 @@ export async function deleteVideo(
 
 export type BatchDeleteResult = { deleted: string[]; failed: { id: string; error: string }[] };
 
+const MAX_BATCH_DELETE = 200;
+
 export async function deleteVideos(ids: string[]): Promise<BatchDeleteResult> {
+  const deduped = Array.from(new Set(Array.isArray(ids) ? ids : []));
+  const wanted = deduped.slice(0, MAX_BATCH_DELETE);
+  const overflow = deduped.slice(MAX_BATCH_DELETE);
+
   if (!(await isOwner())) {
-    return { deleted: [], failed: ids.map((id) => ({ id, error: "Not signed in." })) };
+    return { deleted: [], failed: wanted.map((id) => ({ id, error: "Not signed in." })) };
   }
+
   const result: BatchDeleteResult = { deleted: [], failed: [] };
-  for (const id of Array.from(new Set(ids)).slice(0, 200)) {
+  for (const id of wanted) {
     if (!UUID_RE.test(id)) {
       result.failed.push({ id, error: "Invalid id." });
       continue;
@@ -178,6 +185,9 @@ export async function deleteVideos(ids: string[]): Promise<BatchDeleteResult> {
     } catch {
       result.failed.push({ id, error: "Could not delete." });
     }
+  }
+  for (const id of overflow) {
+    result.failed.push({ id, error: "Too many at once." });
   }
   revalidatePath("/library");
   return result;
