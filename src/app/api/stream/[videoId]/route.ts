@@ -1,6 +1,6 @@
 import { getVideoById } from "@/lib/db";
 import { fetchMedia } from "@/lib/google-drive";
-import { RANGE_WINDOW_BYTES, clampRange } from "@/lib/range";
+import { RANGE_WINDOW_BYTES, planUpstreamRange } from "@/lib/range";
 import { corsHeaders, preflight } from "@/lib/cors";
 
 export const maxDuration = 300;
@@ -28,17 +28,17 @@ async function handle(request: Request, context: Context, includeBody: boolean) 
   }
 
   const size = video.size_bytes ?? 0;
-  let requested = clampRange(
+  // `clampRange` (via `planUpstreamRange`) handles the known-size case: no
+  // Range, or one we don't parse (e.g. multi-range), never streams a whole
+  // multi-GB file from one invocation — it serves the first window as a 206
+  // and lets the player ask for the rest. When Drive omitted `size` we can't
+  // clamp against it, so we forward the client's Range verbatim or force a
+  // bounded first-window request; see `planUpstreamRange`.
+  const plan = planUpstreamRange(
     request.headers.get("range"),
     size,
     RANGE_WINDOW_BYTES,
   );
-  // No Range, or one we don't parse (e.g. multi-range): never stream a whole
-  // multi-GB file from one invocation. Serve the first window as a 206 and
-  // let the player ask for the rest.
-  if (requested === null && size > RANGE_WINDOW_BYTES) {
-    requested = { start: 0, end: RANGE_WINDOW_BYTES - 1 };
-  }
 
   const headers = new Headers(cors);
   headers.set("Accept-Ranges", "bytes");
@@ -48,16 +48,24 @@ async function handle(request: Request, context: Context, includeBody: boolean) 
   headers.set("Cache-Control", "private, max-age=31536000");
   headers.set("ETag", `"${video.drive_file_id}"`);
 
-  if (requested && "unsatisfiable" in requested) {
+  if (plan.kind === "unsatisfiable") {
     headers.set("Content-Range", `bytes */${size}`);
     return new Response(null, { status: 416, headers });
   }
 
-  const upstreamRange = requested
-    ? `bytes=${requested.start}-${requested.end}`
-    : undefined;
+  const upstreamRange =
+    plan.kind === "range"
+      ? `bytes=${plan.start}-${plan.end}`
+      : plan.kind === "passthrough"
+        ? plan.header
+        : undefined;
 
   if (!includeBody) {
+    if (plan.kind === "range") {
+      headers.set("Content-Range", `bytes ${plan.start}-${plan.end}/${size}`);
+      headers.set("Content-Length", String(plan.end - plan.start + 1));
+      return new Response(null, { status: 206, headers });
+    }
     if (size > 0) headers.set("Content-Length", String(size));
     return new Response(null, { status: 200, headers });
   }

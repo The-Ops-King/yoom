@@ -45,3 +45,39 @@ export function clampRange(
   end = Math.min(end, start + windowBytes - 1);
   return { start, end };
 }
+
+export type UpstreamRangePlan =
+  | { kind: "full" }
+  | { kind: "range"; start: number; end: number }
+  | { kind: "passthrough"; header: string }
+  | { kind: "unsatisfiable" };
+
+/**
+ * Decide what Range (if any) to send upstream to Drive.
+ *
+ * When the file size is known (`size > 0`) this clamps the client's Range to
+ * the file and to the window, falling back to a first-window request when
+ * the client didn't send a usable Range and the file is bigger than the
+ * window.
+ *
+ * When the size is unknown (`size <= 0`, i.e. Drive omitted it), we can
+ * never safely stream unbounded: forward the client's Range verbatim if it
+ * sent one (we can't clamp against an unknown size), otherwise force a
+ * bounded first-window request.
+ */
+export function planUpstreamRange(
+  rangeHeader: string | null,
+  size: number,
+  windowBytes: number,
+): UpstreamRangePlan {
+  if (size > 0) {
+    const clamped = clampRange(rangeHeader, size, windowBytes);
+    if (clamped && "unsatisfiable" in clamped) return { kind: "unsatisfiable" };
+    if (clamped) return { kind: "range", start: clamped.start, end: clamped.end };
+    if (size > windowBytes) return { kind: "range", start: 0, end: windowBytes - 1 };
+    return { kind: "full" };
+  }
+
+  if (rangeHeader) return { kind: "passthrough", header: rangeHeader };
+  return { kind: "range", start: 0, end: windowBytes - 1 };
+}

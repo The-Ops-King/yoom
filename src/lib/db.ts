@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { getSupabase } from "@/lib/supabase";
 
 export type Video = {
@@ -82,7 +83,7 @@ function unwrap<T>(result: QueryResult<T>): T {
   return result.data;
 }
 
-export async function getVideoBySlug(slug: string): Promise<Video | null> {
+export const getVideoBySlug = cache(async (slug: string): Promise<Video | null> => {
   const result = (await getSupabase()
     .from("videos")
     .select("*")
@@ -90,9 +91,9 @@ export async function getVideoBySlug(slug: string): Promise<Video | null> {
     .is("deleted_at", null)
     .maybeSingle()) as QueryResult<Video | null>;
   return unwrap(result);
-}
+});
 
-export async function getVideoById(id: string): Promise<Video | null> {
+export const getVideoById = cache(async (id: string): Promise<Video | null> => {
   const result = (await getSupabase()
     .from("videos")
     .select("*")
@@ -100,9 +101,9 @@ export async function getVideoById(id: string): Promise<Video | null> {
     .is("deleted_at", null)
     .maybeSingle()) as QueryResult<Video | null>;
   return unwrap(result);
-}
+});
 
-export async function getVideoIdByOldSlug(oldSlug: string): Promise<string | null> {
+export const getVideoIdByOldSlug = cache(async (oldSlug: string): Promise<string | null> => {
   const result = (await getSupabase()
     .from("slug_history")
     .select("video_id")
@@ -110,7 +111,7 @@ export async function getVideoIdByOldSlug(oldSlug: string): Promise<string | nul
     .maybeSingle()) as QueryResult<{ video_id: string } | null>;
   const row = unwrap(result);
   return row ? row.video_id : null;
-}
+});
 
 export async function insertVideo(input: NewVideo): Promise<Video> {
   const result = (await getSupabase()

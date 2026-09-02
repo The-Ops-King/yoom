@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { YoomLogo } from "./logo";
 import { useViewTracker } from "@/hooks/use-view-tracker";
 
@@ -27,6 +27,10 @@ export function WatchView({ video, apiBase, shareUrl }: WatchViewProps) {
   const [nameResolved, setNameResolved] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [copied, setCopied] = useState(false);
+  // Gates the overlay's first paint: avoids a flash for returning viewers
+  // whose name we're about to load from localStorage below.
+  const [mounted, setMounted] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   // localStorage is only readable on the client, so the stored name has to be
   // adopted after mount — reading it during render would desync hydration.
@@ -41,8 +45,17 @@ export function WatchView({ video, apiBase, shareUrl }: WatchViewProps) {
     } catch {
       setNameResolved(true);
     }
+    setMounted(true);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
+
+  // Focus the name input once we know the overlay is actually showing (i.e.
+  // no stored name was found), rather than stealing focus unconditionally.
+  useEffect(() => {
+    if (mounted && !nameResolved) {
+      nameInputRef.current?.focus();
+    }
+  }, [mounted, nameResolved]);
 
   const { videoRef } = useViewTracker({
     videoId: video.id,
@@ -89,8 +102,13 @@ export function WatchView({ video, apiBase, shareUrl }: WatchViewProps) {
           className="w-full rounded-xl border border-border bg-black shadow-lg shadow-black/30"
         />
 
-        {!nameResolved && (
-          <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-background/80 backdrop-blur">
+        {mounted && !nameResolved && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="watch-name-prompt"
+            className="absolute inset-0 flex items-center justify-center rounded-xl bg-background/80 backdrop-blur"
+          >
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -98,13 +116,19 @@ export function WatchView({ video, apiBase, shareUrl }: WatchViewProps) {
               }}
               className="w-full max-w-xs space-y-3 rounded-2xl border border-border bg-surface/90 p-6"
             >
-              <p className="text-sm text-foreground">Who&rsquo;s watching?</p>
+              <p id="watch-name-prompt" className="text-sm text-foreground">
+                Who&rsquo;s watching?
+              </p>
+              <label htmlFor="watch-name-input" className="sr-only">
+                Your name
+              </label>
               <input
+                id="watch-name-input"
+                ref={nameInputRef}
                 value={nameDraft}
                 onChange={(event) => setNameDraft(event.target.value)}
                 placeholder="Your name (optional)"
                 maxLength={80}
-                autoFocus
                 className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder-muted-dim outline-none transition-all focus:border-accent/50 focus:ring-1 focus:ring-accent/20"
               />
               <div className="flex gap-2">
@@ -142,7 +166,7 @@ export function WatchView({ video, apiBase, shareUrl }: WatchViewProps) {
           onClick={copyLink}
           className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-all hover:bg-accent-hover"
         >
-          {copied ? "Copied!" : "Copy link"}
+          <span aria-live="polite">{copied ? "Copied!" : "Copy link"}</span>
         </button>
       </div>
     </main>

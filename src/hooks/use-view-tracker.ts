@@ -35,6 +35,9 @@ export function useViewTracker(options: ViewTrackerOptions): ViewTracker {
   const sessionIdRef = useRef<string | null>(null);
   const startingRef = useRef(false);
   const lastPercentRef = useRef(0);
+  // Intentionally never reset: a bfcache restore after `pagehide` resumes the
+  // same page instance (no new session should start), while a fresh load
+  // re-runs this hook from scratch with a new ref.
   const finishedRef = useRef(false);
 
   const heartbeat = useCallback(

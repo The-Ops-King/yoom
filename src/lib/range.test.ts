@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RANGE_WINDOW_BYTES, clampRange } from "@/lib/range";
+import { RANGE_WINDOW_BYTES, clampRange, planUpstreamRange } from "@/lib/range";
 
 const MB = 1024 * 1024;
 
@@ -86,5 +86,56 @@ describe("clampRange", () => {
 
   it("returns null for a zero-size file", () => {
     expect(clampRange("bytes=0-", 0, RANGE_WINDOW_BYTES)).toBeNull();
+  });
+});
+
+describe("planUpstreamRange", () => {
+  it("size>0: returns unsatisfiable when the range is unsatisfiable", () => {
+    expect(planUpstreamRange("bytes=5000-", 1000, RANGE_WINDOW_BYTES)).toEqual({
+      kind: "unsatisfiable",
+    });
+  });
+
+  it("size>0: returns a clamped range when the client sent a usable Range", () => {
+    expect(planUpstreamRange("bytes=0-1023", 10_000, RANGE_WINDOW_BYTES)).toEqual({
+      kind: "range",
+      start: 0,
+      end: 1023,
+    });
+  });
+
+  it("size>0: falls back to the first window when no Range and file exceeds the window", () => {
+    expect(planUpstreamRange(null, 100 * MB, RANGE_WINDOW_BYTES)).toEqual({
+      kind: "range",
+      start: 0,
+      end: RANGE_WINDOW_BYTES - 1,
+    });
+  });
+
+  it("size>0: serves the whole file when no Range and file fits within the window", () => {
+    expect(planUpstreamRange(null, 1000, RANGE_WINDOW_BYTES)).toEqual({ kind: "full" });
+  });
+
+  it("size<=0: forwards the client's Range header verbatim", () => {
+    expect(planUpstreamRange("bytes=1000-2000", 0, RANGE_WINDOW_BYTES)).toEqual({
+      kind: "passthrough",
+      header: "bytes=1000-2000",
+    });
+  });
+
+  it("size<=0: forces a bounded first-window request when there is no Range", () => {
+    expect(planUpstreamRange(null, 0, RANGE_WINDOW_BYTES)).toEqual({
+      kind: "range",
+      start: 0,
+      end: RANGE_WINDOW_BYTES - 1,
+    });
+  });
+
+  it("size<=0 (negative): forces a bounded first-window request when there is no Range", () => {
+    expect(planUpstreamRange(null, -1, RANGE_WINDOW_BYTES)).toEqual({
+      kind: "range",
+      start: 0,
+      end: RANGE_WINDOW_BYTES - 1,
+    });
   });
 });
