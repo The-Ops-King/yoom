@@ -383,6 +383,8 @@ export function useRecorder(): UseRecorderResult {
       current.mode === "screen+camera" && cameraTrack ? new MediaStream([cameraTrack]) : null;
 
     chunksRef.current = [];
+    screenStartRef.current = 0;
+    cameraStartRef.current = 0;
 
     const mimeType = pickMimeType();
     const recorder = new MediaRecorder(recordStream, {
@@ -507,9 +509,14 @@ export function useRecorder(): UseRecorderResult {
     const cam = cameraRecorderRef.current;
     if (cam && cam.state !== "inactive") {
       await new Promise<void>((resolve) => {
-        const done = () => resolve();
-        cam.addEventListener("stop", done, { once: true });
-        window.setTimeout(done, 2000);
+        let timer = 0;
+        const done = () => {
+          window.clearTimeout(timer);
+          cam.removeEventListener("stop", done);
+          resolve();
+        };
+        cam.addEventListener("stop", done);
+        timer = window.setTimeout(done, 2000);
       });
     }
 
@@ -539,9 +546,13 @@ export function useRecorder(): UseRecorderResult {
       cameraChunksRef.current.length > 0 ? await patch(cameraChunksRef.current) : null;
     chunksRef.current = [];
     cameraChunksRef.current = [];
-    const cameraOffsetMs = cameraBlob
-      ? Math.round(cameraStartRef.current - screenStartRef.current)
-      : 0;
+    // Convention: consumers read the camera at `screenTime + cameraOffsetMs`,
+    // so a camera that started LATER than the screen gets a NEGATIVE offset.
+    // A missing `onstart` stamp (0) means we cannot know the skew — assume none.
+    const cameraOffsetMs =
+      cameraBlob && screenStartRef.current > 0 && cameraStartRef.current > 0
+        ? Math.round(screenStartRef.current - cameraStartRef.current)
+        : 0;
 
     const { width, height } = dimensionsRef.current;
     dispatch({
@@ -557,16 +568,12 @@ export function useRecorder(): UseRecorderResult {
 
   // ---------- staging object URLs ----------
 
-  // The URLs must outlive `staging`: the renderer decodes them all the way
-  // through `rendering`, and an UPLOAD_FAILED drops back to staging with the
-  // same blobs.
+  // Keyed on the blobs alone, never on the status: staging → rendering →
+  // uploading → staging (a failed upload) must not revoke and re-mint the URLs
+  // out from under the preview's <video> elements. The export does not read
+  // them — it mints its own from the same blobs.
   useEffect(() => {
-    if (
-      (state.status !== "staging" &&
-        state.status !== "rendering" &&
-        state.status !== "uploading") ||
-      !state.blob
-    ) {
+    if (!state.blob) {
       setStaging(null);
       return;
     }
@@ -577,7 +584,7 @@ export function useRecorder(): UseRecorderResult {
       URL.revokeObjectURL(screenUrl);
       if (cameraUrl) URL.revokeObjectURL(cameraUrl);
     };
-  }, [state.status, state.blob, state.cameraBlob]);
+  }, [state.blob, state.cameraBlob]);
 
   // ---------- render + upload ----------
 
@@ -629,6 +636,10 @@ export function useRecorder(): UseRecorderResult {
         return;
       }
       renderAbortRef.current = null;
+      if (rendered.blob.size === 0) {
+        dispatch({ type: "RENDER_FAILED", error: "Render produced no data." });
+        return;
+      }
       dispatch({ type: "RENDER_DONE" });
 
       // Free the camera and screen while the bytes go up. The streams are gone,
@@ -642,11 +653,7 @@ export function useRecorder(): UseRecorderResult {
       try {
         const result = await uploadRecording({
           blob: rendered.blob,
-          durationMs: Math.round(
-            rendered.blob.size > 0
-              ? editedDurationMs(input.edits, current.durationMs)
-              : current.durationMs,
-          ),
+          durationMs: Math.round(editedDurationMs(input.edits, current.durationMs)),
           width: rendered.width,
           height: rendered.height,
           thumbnail: rendered.thumbnail,
