@@ -137,15 +137,22 @@ npm test        # vitest (unit tests for the pure modules)
   hint: *Entire screen*, *Window*, or *Tab*.
 - **Camera bubble** — drag it anywhere on the preview (arrow keys nudge, ⇧ for a
   bigger step); circle / rounded / square / portrait shapes, three sizes, mirror
-  toggle, and on/off. In *Camera* mode the bubble fills the frame.
+  toggle, and on/off. Shape, size, position and hide/show ease over 300 ms in the
+  compositor; dragging snaps so it tracks the pointer. In *Camera* mode the bubble
+  fills the frame. Virtual backgrounds behind the bubble were removed in Phase 2.1.
 - **Framed capture** — inset the screen in a padded canvas with rounded corners, a
   drop shadow, and its own background.
 - **Audio** — mic and system audio are mixed into one track, each independently
   toggleable with a live level meter. On macOS, Chrome only offers system audio for
   *Tab* captures.
-- **Flow** — 3-second countdown (skippable), pause/resume, restart, then a review
-  screen to play back, discard, or upload. 30-minute cap; Safari records `video/mp4`.
-- **Hotkeys** — ⌘⇧L start/stop, ⌘⇧P pause/resume (⌃ on Windows/Linux).
+- **Mode switching** — the mode and capture-surface pickers stay live in *setup*:
+  changing either tears the capture down and re-acquires with the new choice.
+- **Flow** — 3-second countdown (skippable) before the first take, pause/resume,
+  **Restart** (immediate — no second countdown), **Cancel** (trash: discards the take
+  and returns to setup with the capture still live), then a review screen to play
+  back, discard, or upload. 30-minute cap; Safari records `video/mp4`.
+- **Hotkeys** — ⌘⇧L start/stop, ⌘⇧P pause/resume, ⌘⇧K restart now, ⌘⇧X cancel
+  (⌃ on Windows/Linux).
 
 ## Known limits
 

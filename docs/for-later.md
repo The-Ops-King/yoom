@@ -49,6 +49,10 @@ If #2/#3 land, persist the event stream as a JSON sidecar next to the video in D
 
 - Camera-bubble virtual backgrounds removed on 2026-09-02 at Tyler's request; framed-capture backgrounds remain.
 
+## Phase 4 requirements from Phase 2 testing
+
+- Floating always-on-top camera bubble window over the desktop while recording (Loom-style), draggable; the recording's bubble position follows it.
+
 ## Proposed Phase 5 — Post-recording editor (Tyler, 2026-09-02)
 
 **Wanted:** blur/redact regions over sensitive info; numbered callout circles that pop in and out; underlines and highlights; cut (remove segments) and crop; animated zoom-in.
