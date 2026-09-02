@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { updateSlug, type SlugState } from "@/app/(owner)/actions";
+import { normalizeSlug } from "@/lib/slug";
 
 type SlugEditorProps = {
   videoId: string;
@@ -15,6 +16,19 @@ const INITIAL: SlugState = {};
 export function SlugEditor({ videoId, slug, prefix }: SlugEditorProps) {
   const [state, formAction, pending] = useActionState(updateSlug, INITIAL);
   const [draft, setDraft] = useState(slug);
+  const [lastState, setLastState] = useState(state);
+
+  // Adopt the saved slug once the action confirms it (it may differ from the
+  // raw draft, e.g. trimmed/lowercased). Adjusting state during render is the
+  // supported pattern here — see editable-text.tsx — so it keeps lint's
+  // `react-hooks/set-state-in-effect` rule happy.
+  if (state !== lastState) {
+    setLastState(state);
+    if (state.ok && state.slug) setDraft(state.slug);
+  }
+
+  const normalized = normalizeSlug(draft);
+  const showPreview = normalized !== draft && normalized.length > 0;
 
   return (
     <form action={formAction} className="space-y-1">
@@ -40,12 +54,17 @@ export function SlugEditor({ videoId, slug, prefix }: SlugEditorProps) {
         </div>
         <button
           type="submit"
-          disabled={pending || draft === slug}
+          disabled={pending || normalized === slug}
           className="shrink-0 rounded-lg border border-border px-3 py-2 text-sm text-muted transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
         >
           {pending ? "Saving…" : "Save"}
         </button>
       </div>
+      {showPreview && (
+        <p className="px-0.5 text-xs text-muted-dim">
+          Will save as <span className="text-muted">{normalized}</span>
+        </p>
+      )}
       <p aria-live="polite" className="min-h-4 text-xs">
         {state.error ? (
           <span className="text-red-400/90">{state.error}</span>

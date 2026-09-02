@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { isOwner } from "@/lib/auth";
 import { getVideoById, getVideoStats, listRecentViewers } from "@/lib/db";
 import { parseEdits } from "@/lib/edits";
 import { appUrl, shareBaseUrl } from "@/lib/env";
@@ -25,6 +26,7 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  if (!(await isOwner())) return { title: "Yoom" };
   const { id } = await params;
   if (!UUID_RE.test(id)) return { title: "Recording · Yoom" };
   const video = await getVideoById(id);

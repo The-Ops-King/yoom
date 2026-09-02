@@ -1,17 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { isEmptyEdits, type Marker, type VideoEdits } from "@/lib/edits";
-
-/**
- * Local m:ss formatter. `@/lib/format` re-exports from the server-only alerts
- * module, so a client component cannot import it.
- */
-function clockTime(seconds: number): string {
-  const total = Math.max(0, Math.round(seconds));
-  const minutes = Math.floor(total / 60);
-  return `${minutes}:${String(total % 60).padStart(2, "0")}`;
-}
+import { hasDrawableEdits, type Marker, type VideoEdits } from "@/lib/edits";
+import { fmtDuration } from "@/lib/format";
 
 export type EditPlayerProps = {
   src: string;
@@ -50,15 +41,7 @@ export function EditPlayer({
   const internalRef = useRef<HTMLVideoElement | null>(null);
   const ref = videoRef ?? internalRef;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const editsRef = useRef(edits);
   const [duration, setDuration] = useState(0);
-
-  // Ref mirror of the latest edits for the rAF loop. Assigning during render
-  // trips `react-hooks/refs`, so it happens in an effect — declared before the
-  // draw loop's effect, which therefore always sees the current value.
-  useEffect(() => {
-    editsRef.current = edits;
-  }, [edits]);
 
   // Keep the canvas backing store matched to the element's rendered box and
   // the device pixel ratio, so future overlays land on the right pixels.
@@ -88,8 +71,9 @@ export function EditPlayer({
     };
   }, [ref]);
 
-  // Draw loop. It only runs while there is something to draw, so an unedited
-  // video costs nothing.
+  // Draw loop. It only runs while there is something to actually draw on the
+  // canvas — markers render as a separate tick bar below, not here — so a
+  // marker-only or unedited video costs nothing.
   useEffect(() => {
     const video = ref.current;
     const canvas = canvasRef.current;
@@ -98,7 +82,7 @@ export function EditPlayer({
     const context = canvas.getContext("2d");
     if (!context) return;
 
-    if (isEmptyEdits(edits)) {
+    if (!hasDrawableEdits(edits)) {
       context.clearRect(0, 0, canvas.width, canvas.height);
       return;
     }
@@ -106,7 +90,7 @@ export function EditPlayer({
     let frame = 0;
     const draw = () => {
       context.clearRect(0, 0, canvas.width, canvas.height);
-      // Phase 5: render editsRef.current at video.currentTime here.
+      // Phase 5: render edits at video.currentTime here.
       frame = window.requestAnimationFrame(draw);
     };
     frame = window.requestAnimationFrame(draw);
@@ -122,6 +106,10 @@ export function EditPlayer({
     video.currentTime = seconds;
   }
 
+  function onDuration(value: number) {
+    setDuration(Number.isFinite(value) ? value : 0);
+  }
+
   return (
     <div className={className}>
       <div className="relative">
@@ -133,10 +121,8 @@ export function EditPlayer({
           preload="metadata"
           playsInline
           autoPlay={autoPlay}
-          onLoadedMetadata={(event) => {
-            const value = event.currentTarget.duration;
-            setDuration(Number.isFinite(value) ? value : 0);
-          }}
+          onLoadedMetadata={(event) => onDuration(event.currentTarget.duration)}
+          onDurationChange={(event) => onDuration(event.currentTarget.duration)}
           className="w-full rounded-xl border border-border bg-black shadow-lg shadow-black/30"
         />
         <canvas
@@ -157,12 +143,12 @@ export function EditPlayer({
               key={`${marker.t}-${index}`}
               type="button"
               onClick={() => seekTo(marker.t)}
-              title={marker.label ?? clockTime(marker.t)}
-              aria-label={`Jump to ${clockTime(marker.t)}`}
+              title={marker.label ?? fmtDuration(marker.t * 1000)}
+              aria-label={`Jump to ${fmtDuration(marker.t * 1000)}`}
               style={{
                 left: `${Math.min(100, Math.max(0, (marker.t / duration) * 100))}%`,
               }}
-              className="absolute top-0 h-4 w-1 -translate-x-1/2 rounded-sm bg-accent transition-transform hover:scale-x-150"
+              className="absolute top-0 h-4 min-w-[10px] -translate-x-1/2 rounded-sm bg-accent transition-transform hover:scale-x-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             />
           ))}
         </div>

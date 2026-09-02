@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_EDITS, isEmptyEdits, parseEdits } from "@/lib/edits";
+import { EMPTY_EDITS, hasDrawableEdits, isEmptyEdits, parseEdits } from "@/lib/edits";
 
 describe("parseEdits", () => {
   it("returns the empty list for junk input", () => {
@@ -131,6 +131,46 @@ describe("isEmptyEdits", () => {
     expect(
       isEmptyEdits({ ...EMPTY_EDITS, markers: [{ t: 1 }] }),
     ).toBe(false);
+  });
+});
+
+describe("hasDrawableEdits", () => {
+  it("is false for the empty list and for markers-only edits", () => {
+    expect(hasDrawableEdits(EMPTY_EDITS)).toBe(false);
+    expect(
+      hasDrawableEdits({ ...EMPTY_EDITS, markers: [{ t: 1 }] }),
+    ).toBe(false);
+  });
+
+  it("is true once anything drawable is set", () => {
+    expect(
+      hasDrawableEdits({ ...EMPTY_EDITS, cuts: [{ start: 0, end: 1 }] }),
+    ).toBe(true);
+    expect(
+      hasDrawableEdits({
+        ...EMPTY_EDITS,
+        crop: { x: 0, y: 0, w: 1, h: 1 },
+      }),
+    ).toBe(true);
+    expect(
+      hasDrawableEdits({
+        ...EMPTY_EDITS,
+        zooms: [{ start: 0, end: 1, rect: { x: 0, y: 0, w: 1, h: 1 } }],
+      }),
+    ).toBe(true);
+    expect(
+      hasDrawableEdits({
+        ...EMPTY_EDITS,
+        overlays: [
+          {
+            type: "blur",
+            start: 0,
+            end: 1,
+            rect: { x: 0, y: 0, w: 1, h: 1 },
+          },
+        ],
+      }),
+    ).toBe(true);
   });
 });
 

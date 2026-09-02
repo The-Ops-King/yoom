@@ -176,3 +176,18 @@ export function isEmptyEdits(edits: VideoEdits): boolean {
     edits.markers.length === 0
   );
 }
+
+/**
+ * True when `edits` has anything that actually needs to be drawn on the
+ * canvas overlay. Markers render as a separate tick bar, not on the canvas,
+ * so a markers-only list is excluded — `edit-player.tsx` uses this (rather
+ * than `isEmptyEdits`) to decide whether to run its rAF draw loop.
+ */
+export function hasDrawableEdits(edits: VideoEdits): boolean {
+  return (
+    edits.cuts.length > 0 ||
+    edits.crop !== null ||
+    edits.zooms.length > 0 ||
+    edits.overlays.length > 0
+  );
+}

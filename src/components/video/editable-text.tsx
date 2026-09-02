@@ -89,7 +89,8 @@ export function EditableText({
           rows={3}
           value={draft}
           placeholder={placeholder}
-          disabled={pending}
+          readOnly={pending}
+          aria-busy={pending}
           onChange={(event) => setDraft(event.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => {
@@ -106,7 +107,8 @@ export function EditableText({
           name={name}
           value={draft}
           placeholder={placeholder}
-          disabled={pending}
+          readOnly={pending}
+          aria-busy={pending}
           onChange={(event) => setDraft(event.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => {
