@@ -36,7 +36,7 @@ its "edit after upload on `/library/[id]`" framing is replaced by this document.
   re-open it, but no editor is mounted on `/library/[id]` in this phase.
 - Faster-than-realtime export (WebCodecs). The render loop is built behind an
   interface that a WebCodecs encoder can replace later.
-- Audio editing, transitions, captions, zoom, crop.
+- Audio editing, transitions, captions, crop.
 
 ## Decisions
 
@@ -48,7 +48,7 @@ its "edit after upload on `/library/[id]`" framing is replaced by this document.
 | Where edits live | `videos.edits` (existing jsonb), the staging list verbatim. | Keeps the list for a later re-edit/re-render; the watch page ignores it because the upload is already rendered. |
 | Coordinates and time | Seconds of **source** time; rects normalized 0..1 against the **screen** frame (or the camera frame in camera-only mode). | Phase 5 conventions; survives any output size or frame padding. |
 | Trim vs cuts | `trim: {start, end}` is separate from `cuts[]`. | The timeline shows trim as greyed ends and cuts as struck-out ranges; export treats both as removed. |
-| Caps | 64 overlays, 64 cuts, 64 camera keyframes, 200 markers. `parseEdits` truncates, never rejects. | Same reasoning as Phase 5. |
+| Caps | 64 overlays, 64 cuts, 64 camera keyframes, 32 zooms, 200 markers. `parseEdits` truncates, never rejects. | Same reasoning as Phase 5. |
 
 ## 1. Recording
 
@@ -85,7 +85,7 @@ component mounted lazily (`next/dynamic`, `ssr: false`) because it depends on
 canvas, `MediaRecorder`, and the two object URLs.
 
 Layout: canvas preview on top, timeline under it, tool rail on the right (stacked
-below on narrow widths). The rail has six sections in this order; each is a
+below on narrow widths). The rail has seven sections in this order; each is a
 collapsible panel and only one is open at a time.
 
 1. **Trim and cut.** In/out handles at the timeline ends set `trim`. `I`/`O` set
@@ -103,15 +103,22 @@ collapsible panel and only one is open at a time.
    adjusts `cameraOffsetMs`.
 3. **Frame.** The existing `FramePicker` unchanged: enabled, padding, radius,
    shadow, background (none / colour / preset image / uploaded image / video).
-4. **Overlays.** Blur, callout, highlight, underline. Pick a tool, drag on the
+4. **Zoom.** Pick the tool, drag a rectangle on the preview: the view eases into that
+   region over 0.4 s at the playhead, holds for 3 s (or the in/out range), and eases
+   back out. Zooms render as clips on their own lane; drag body/edges to move/resize
+   in time, drag the rectangle on the preview to reposition. "Focus on one window" is
+   one zoom spanning the whole take. Zooms never overlap: a new one trims the one it
+   lands on. Overlays are drawn in zoomed space (they stay on the pixels they mark);
+   the camera bubble stays anchored to the output frame, as in Loom.
+5. **Overlays.** Blur, callout, highlight, underline. Pick a tool, drag on the
    preview to draw; the new item spans `[playhead, playhead + 3 s]` or the in/out
    range when both are set. Overlays render as clips on an overlay lane; drag body
    to move, edges to resize. The inspector shows start/end, colour, opacity,
    thickness, blur radius, callout number.
-5. **Details.** Title (default: date-time as today), description, slug (with the
+6. **Details.** Title (default: date-time as today), description, slug (with the
    existing availability check), thumbnail frame (a "Use this frame" button at the
    playhead; default is 1 s into the edited timeline).
-6. **Upload.** Summary line (edited duration, output size), the Upload button, the
+7. **Upload.** Summary line (edited duration, output size), the Upload button, the
    render progress bar with Cancel, and Discard.
 
 **Playback in preview.** Two hidden `<video>` elements. The screen video is the
@@ -185,11 +192,15 @@ Pure helpers, each with tests:
    camera dimensions as the "screen."
 2. Background (colour / image / video) via the existing compositor background code,
    then the screen drawn into `layout.dest` with `layout.radius` and shadow.
-3. Camera: `cameraAt(track, t)`. `full` draws the camera cover-cropped over the
+3. Zoom: `zoomAt(zooms, t)` gives the source rect to show (the whole frame when no
+   zoom is active, eased over `ramp` seconds at each end). The screen is drawn with
+   that rect as its source crop into `layout.dest`; a `toOutput(rect)` helper maps
+   source-normalized rects through the zoom for the overlays step.
+4. Camera: `cameraAt(track, t)`. `full` draws the camera cover-cropped over the
    whole content rect; `bubble` draws it clipped to `roundedBubblePath` at the
    interpolated rect (scaled from normalized to `layout.dest`). Cross-fade opacity
    applies during a mode switch.
-4. Overlays active at `t`, in array order, via `drawEdits` (blur uses a downscaled
+5. Overlays active at `t`, in array order, mapped through `toOutput`, (blur uses a downscaled
    scratch canvas and `ctx.filter`, falling back to solid fill where unsupported).
 
 The staging preview calls `drawFrame` each animation frame into a visible canvas.
