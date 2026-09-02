@@ -90,10 +90,11 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
                 const file = e.target.files?.[0];
                 e.target.value = "";
                 if (!file) return;
-                // The caller owns the object URL. `FrameSection` collects each
-                // one and revokes them together when it unmounts — never on
-                // replacement, because undo can put an earlier `src` back and
-                // the export still has to load it.
+                // The caller owns the object URL: `FrameSection` registers
+                // each one with the staging screen, which revokes them all
+                // when it unmounts — never on replacement, because undo can
+                // put an earlier `src` back and the export still has to load
+                // it.
                 onChange({
                   background: { kind: "image", src: URL.createObjectURL(file) },
                 });

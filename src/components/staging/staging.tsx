@@ -229,6 +229,22 @@ export function Staging(props: StagingProps) {
     [apply, spanForNew],
   );
 
+  // Object URLs minted for the edits (uploaded frame backgrounds). They
+  // outlive any single rail section — undo can restore an earlier `src`, and
+  // the export loads whichever one is current — so they are only released
+  // when the whole screen goes away, which covers both finish and discard.
+  const blobUrls = useRef<string[]>([]);
+  const registerBlobUrl = useCallback((url: string) => {
+    if (url.startsWith("blob:") && !blobUrls.current.includes(url)) blobUrls.current.push(url);
+  }, []);
+  useEffect(() => {
+    const urls = blobUrls.current;
+    return () => {
+      for (const url of urls) URL.revokeObjectURL(url);
+      urls.length = 0;
+    };
+  }, []);
+
   const finish = useCallback(() => {
     props.onFinish({
       edits,
@@ -284,6 +300,7 @@ export function Staging(props: StagingProps) {
       setDetails,
       addOverlayAt,
       addZoomAt,
+      registerBlobUrl,
       finish,
       discard,
       error: props.error,
@@ -308,6 +325,7 @@ export function Staging(props: StagingProps) {
       details,
       addOverlayAt,
       addZoomAt,
+      registerBlobUrl,
       finish,
       discard,
       history,

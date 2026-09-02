@@ -73,6 +73,13 @@ export interface StagingContext {
   setDetails(d: Details | ((d: Details) => Details)): void;
   addOverlayAt(type: Overlay["type"], rect: Overlay["rect"]): void;
   addZoomAt(rect: Overlay["rect"]): void;
+  /**
+   * Hand an object URL minted for the edits (an uploaded frame background) to
+   * the screen, which revokes it when staging unmounts. Never revoked on
+   * replacement: undo can put an earlier `src` back and the export still has
+   * to be able to load it.
+   */
+  registerBlobUrl(url: string): void;
   finish(): void;
   discard(): void;
   error: string;
