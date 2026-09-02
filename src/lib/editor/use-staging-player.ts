@@ -15,15 +15,23 @@ import { drawFrame, outputSize, type RenderInputs } from "./render";
 
 /** One frame at the export frame rate — the unit `step()` moves by. */
 const FRAME_S = 1 / 30;
-/** Below this the reported time has not moved enough to be worth a re-render. */
-const TIME_EPSILON = 1 / 120;
+/** How far the playhead must move before the `time` state is pushed — 10 Hz, not 60. */
+const TIME_PUSH_S = 0.1;
 /** Camera drift we tolerate before hard-seeking it back onto the primary. */
 const CAMERA_DRIFT_S = 0.08;
 
 export interface StagingPlayer {
   canvasRef: RefObject<HTMLCanvasElement | null>;
-  /** Source time, seconds. */
+  /**
+   * Source time in seconds, throttled to ~10 Hz (exact on seek and pause).
+   * Use it for text labels; a scrubber should draw from `timeRef` instead.
+   */
   time: number;
+  /**
+   * Live source time in seconds, updated every animation frame without a
+   * re-render — read it from a scrubber's own rAF loop.
+   */
+  timeRef: RefObject<number>;
   editedTime: number;
   editedDuration: number;
   playing: boolean;
@@ -50,7 +58,10 @@ function sameSize(a: Size, b: Size): boolean {
   return a.width === b.width && a.height === b.height;
 }
 
-/** Fully release a decoder so the blob URL it holds can be revoked. */
+/**
+ * Fully release a video decoder so the blob URL it holds can be revoked.
+ * Images need nothing — dropping the reference leaves them to the GC.
+ */
 function release(el: HTMLImageElement | HTMLVideoElement | null): void {
   if (!el || typeof HTMLVideoElement === "undefined" || !(el instanceof HTMLVideoElement)) return;
   el.pause();
@@ -84,6 +95,8 @@ export function useStagingPlayer(
   const drawnSizeRef = useRef({ w: 0, h: 0 });
   /** True when the primary drives redraws through `requestVideoFrameCallback`. */
   const vfcRef = useRef(false);
+  /** Live playhead, written every frame; `time` is its throttled mirror. */
+  const timeRef = useRef(0);
 
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -95,6 +108,13 @@ export function useStagingPlayer(
   const editsRef = useRef(edits);
   const rangesRef = useRef<Range[]>(ranges);
   const muted = options?.muted ?? false;
+  const mutedRef = useRef(muted);
+
+  /** Push the exact playhead — for seek, pause, and end of playback. */
+  const pushTime = useCallback((t: number) => {
+    timeRef.current = t;
+    setTime(t);
+  }, []);
 
   // Hand the current edits to the animation loop, and make it redraw for them.
   useEffect(() => {
@@ -110,6 +130,8 @@ export function useStagingPlayer(
     const primary = document.createElement("video");
     primary.playsInline = true;
     primary.preload = "auto";
+    // Read from the ref so a rebuild (source or mode change) keeps the option.
+    primary.muted = mutedRef.current;
     if (src) primary.src = src;
     primaryRef.current = primary;
 
@@ -129,12 +151,22 @@ export function useStagingPlayer(
       dirtyRef.current = true;
     };
     const onEnded = () => setPlaying(false);
-    const onPause = () => setPlaying(false);
+    const onPause = () => {
+      setPlaying(false);
+      pushTime(primary.currentTime);
+    };
     const onPlaying = () => setPlaying(true);
+    // A completed seek is new pixels even where `requestVideoFrameCallback` is
+    // missing, and a camera-only seek (offset nudged while paused) too.
+    const onSeeked = () => {
+      dirtyRef.current = true;
+    };
     primary.addEventListener("loadedmetadata", onMeta);
     primary.addEventListener("ended", onEnded);
     primary.addEventListener("pause", onPause);
     primary.addEventListener("playing", onPlaying);
+    primary.addEventListener("seeked", onSeeked);
+    camera?.addEventListener("seeked", onSeeked);
 
     // Prefer the compositor's own frame signal: it fires exactly when a new
     // frame is presented (including after a seek), so the loop only redraws
@@ -156,6 +188,8 @@ export function useStagingPlayer(
       primary.removeEventListener("ended", onEnded);
       primary.removeEventListener("pause", onPause);
       primary.removeEventListener("playing", onPlaying);
+      primary.removeEventListener("seeked", onSeeked);
+      camera?.removeEventListener("seeked", onSeeked);
       if (vfc && supportsVfc) primary.cancelVideoFrameCallback(vfc);
       release(primary);
       release(camera);
@@ -163,10 +197,11 @@ export function useStagingPlayer(
       cameraRef.current = null;
       setPlaying(false);
     };
-  }, [screenUrl, cameraUrl, mode]);
+  }, [screenUrl, cameraUrl, mode, pushTime]);
 
   // Audio follows the option without rebuilding the decoders.
   useEffect(() => {
+    mutedRef.current = muted;
     const p = primaryRef.current;
     if (p) p.muted = muted;
   }, [muted]);
@@ -237,13 +272,17 @@ export function useStagingPlayer(
           } else {
             p.pause();
             setPlaying(false);
+            pushTime(t);
           }
         }
       }
 
       const cam = cameraRef.current;
       if (cam) {
-        const target = Math.max(0, t + (e.cameraOffsetMs ?? 0) / 1000);
+        // Clamp into the camera's own range: past its end the seek would never
+        // land, and the loop would re-seek on every frame.
+        const camEnd = Number.isFinite(cam.duration) ? cam.duration : Infinity;
+        const target = Math.min(camEnd, Math.max(0, t + (e.cameraOffsetMs ?? 0) / 1000));
         if (Math.abs(cam.currentTime - target) > CAMERA_DRIFT_S) cam.currentTime = target;
         if (!p.paused && cam.paused) void cam.play().catch(() => {});
         else if (p.paused && !cam.paused) cam.pause();
@@ -274,11 +313,14 @@ export function useStagingPlayer(
         }
       }
 
-      setTime((prev) => (Math.abs(prev - t) > TIME_EPSILON ? t : prev));
+      // The ref is the live playhead; the state is a 10 Hz mirror of it, so a
+      // 60 Hz preview does not re-render the whole staging tree every frame.
+      timeRef.current = t;
+      setTime((prev) => (Math.abs(prev - t) >= TIME_PUSH_S ? t : prev));
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [mode]);
+  }, [mode, pushTime]);
 
   const seek = useCallback(
     (t: number) => {
@@ -288,9 +330,9 @@ export function useStagingPlayer(
       const next = Math.max(0, Math.min(max, t));
       p.currentTime = next;
       dirtyRef.current = true;
-      setTime(next);
+      pushTime(next);
     },
-    [duration],
+    [duration, pushTime],
   );
 
   const seekEdited = useCallback(
@@ -307,7 +349,7 @@ export function useStagingPlayer(
       // wrapping to the start when there is none.
       const next = kept.find((r) => r.start > p.currentTime) ?? kept[0];
       p.currentTime = next.start;
-      setTime(next.start);
+      pushTime(next.start);
     }
     dirtyRef.current = true;
     // Autoplay policy can reject; stay paused rather than lying about it.
@@ -315,13 +357,15 @@ export function useStagingPlayer(
       .play()
       .then(() => setPlaying(true))
       .catch(() => setPlaying(false));
-  }, []);
+  }, [pushTime]);
 
   const pause = useCallback(() => {
-    primaryRef.current?.pause();
+    const p = primaryRef.current;
+    p?.pause();
     cameraRef.current?.pause();
     setPlaying(false);
-  }, []);
+    if (p) pushTime(p.currentTime);
+  }, [pushTime]);
 
   const toggle = useCallback(() => {
     const p = primaryRef.current;
@@ -340,6 +384,7 @@ export function useStagingPlayer(
   return {
     canvasRef,
     time,
+    timeRef,
     playing,
     play,
     pause,
