@@ -2,6 +2,7 @@
 export const IPC = {
   bubbleApply: "yoom:bubble:apply",
   bubbleCamera: "yoom:bubble:camera",
+  bubbleRelease: "yoom:bubble:release",
   bubbleRequestHide: "yoom:bubble:request-hide",
   bubbleCycleShape: "yoom:bubble:cycle-shape",
 } as const;

@@ -49,6 +49,49 @@ function alive(): BrowserWindow | null {
   return bubbleWindow && !bubbleWindow.isDestroyed() ? bubbleWindow : null;
 }
 
+/**
+ * Debounce before destroying the bubble window outright. A take that goes
+ * `recording → stopping → review` passes through hidden states in a few
+ * hundred milliseconds; destroying and recreating across that flicker would be
+ * wasteful. Two seconds of genuinely-not-needed is the signal.
+ */
+const DESTROY_DELAY_MS = 2000;
+let destroyTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelDestroy(): void {
+  if (!destroyTimer) return;
+  clearTimeout(destroyTimer);
+  destroyTimer = null;
+}
+
+/**
+ * Tell the renderer to drop its camera track. Hiding the window does NOT do
+ * this — a hidden renderer keeps `getUserMedia` alive and the macOS camera
+ * indicator stays lit after the recording ends. Reported by Tyler on
+ * 2026-09-02 as "Terminal has access to my camera and won't shut it off".
+ */
+function releaseCamera(): void {
+  alive()?.webContents.send(IPC.bubbleRelease);
+}
+
+/**
+ * Hidden and expected to stay hidden: release the camera immediately, then
+ * destroy the window if nothing has asked for it back within DESTROY_DELAY_MS.
+ * Creation is cheap (a transparent 240px window and one `getUserMedia`), so
+ * holding a hidden one hostage to a camera light is a bad trade.
+ */
+function scheduleRelease(): void {
+  releaseCamera();
+  cancelDestroy();
+  destroyTimer = setTimeout(() => {
+    destroyTimer = null;
+    if (shouldShow()) return;
+    alive()?.destroy();
+    bubbleWindow = null;
+    bubbleLoaded = false;
+  }, DESTROY_DELAY_MS);
+}
+
 function rendererEntry(): { url?: string; file?: string } {
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   if (devUrl) return { url: `${devUrl}/bubble/index.html` };
@@ -233,8 +276,13 @@ function shouldShow(): boolean {
 function sync(): void {
   if (!shouldShow()) {
     alive()?.hide();
+    // Every hide path lands here — `shouldShow()` false, the recording-active
+    // auto-hide, a `visible: false` from the app or the bubble's own control
+    // strip, and the status leaving setup/countdown/recording/paused.
+    scheduleRelease();
     return;
   }
+  cancelDestroy();
   const win = createBubbleWindow();
   win.webContents.send(IPC.bubbleApply, appearance);
   win.webContents.send(IPC.bubbleCamera, cameraDeviceId);
@@ -251,6 +299,7 @@ export function setBubbleAppearance(next: BubbleAppearance): void {
   appearance = next;
   if (!shouldShow()) {
     alive()?.hide();
+    scheduleRelease();
     return;
   }
   // `sync()` already calls `applySize()`, so shape/size changes need no
@@ -292,9 +341,11 @@ export function setCameraDevice(deviceId: string | null): void {
 }
 
 export function destroyBubble(): void {
+  cancelDestroy();
   const win = alive();
   win?.destroy();
   bubbleWindow = null;
+  bubbleLoaded = false;
 }
 
 const SHAPES: readonly BubbleShape[] = ["circle", "rounded", "square", "portrait", "full"];

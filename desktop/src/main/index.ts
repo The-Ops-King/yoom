@@ -59,6 +59,13 @@ if (!app.requestSingleInstanceLock()) {
     refreshTrayMenu();
   });
 
+  // `before-quit` runs while the windows still exist; `will-quit` can run after
+  // they are already gone. Destroying the camera-holding windows here is what
+  // makes the macOS camera indicator go out at quit rather than at process exit.
+  app.on("before-quit", () => {
+    destroyBubble();
+  });
+
   app.on("will-quit", () => {
     unregisterShortcuts();
     destroyBubble();

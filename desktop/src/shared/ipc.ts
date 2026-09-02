@@ -70,6 +70,16 @@ export const IPC = {
   bubbleApply: "yoom:bubble:apply",
   /** main → bubble renderer. Payload: string | null (deviceId). */
   bubbleCamera: "yoom:bubble:camera",
+
+  /**
+   * main → bubble renderer. No payload. "Stop the camera NOW."
+   *
+   * Hiding the window is not enough: a hidden renderer keeps its
+   * `getUserMedia` tracks live, which keeps the macOS camera indicator lit
+   * after the recording is over. The renderer stops every track and clears
+   * `srcObject`; the next `bubbleCamera` re-acquires.
+   */
+  bubbleRelease: "yoom:bubble:release",
   /** bubble renderer → main. The user clicked "hide" in the control strip. */
   bubbleRequestHide: "yoom:bubble:request-hide",
   /** bubble renderer → main. The user clicked the shape button. */
@@ -94,6 +104,7 @@ export interface PickerPayload {
 export interface BubbleApi {
   onApply(cb: (appearance: BubbleAppearance) => void): void;
   onCamera(cb: (deviceId: string | null) => void): void;
+  onRelease(cb: () => void): void;
   requestHide(): void;
   cycleShape(): void;
 }

@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld("__yoomBubble", {
   onCamera(cb: (deviceId: string | null) => void): void {
     ipcRenderer.on(IPC.bubbleCamera, (_e, deviceId: string | null) => cb(deviceId));
   },
+  onRelease(cb: () => void): void {
+    ipcRenderer.on(IPC.bubbleRelease, () => cb());
+  },
   requestHide(): void {
     ipcRenderer.send(IPC.bubbleRequestHide);
   },
