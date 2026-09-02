@@ -15,7 +15,7 @@ interface BubbleDragOverlayProps {
   canvasHeight: number;
   cameraWidth: number;
   cameraHeight: number;
-  onMove: (pos: { x: number; y: number }) => void;
+  onMove: (pos: { x: number; y: number }, opts?: { immediate?: boolean }) => void;
 }
 
 /**
@@ -88,7 +88,8 @@ export function BubbleDragOverlay({
       if (!host) return;
       const bounds = host.getBoundingClientRect();
       const content = contentBox(bounds, canvasWidth, canvasHeight);
-      onMove(pointerToNormalized(e.clientX, e.clientY, content));
+      // Dragging must track the pointer 1:1 — never behind a 300 ms tween.
+      onMove(pointerToNormalized(e.clientX, e.clientY, content), { immediate: true });
     },
     [onMove, canvasWidth, canvasHeight],
   );
@@ -101,10 +102,18 @@ export function BubbleDragOverlay({
   const pctH = (n: number) => `${(n / canvasHeight) * box.height}px`;
 
   return (
-    <div ref={hostRef} className="absolute inset-0">
+    <div
+      ref={hostRef}
+      className="absolute inset-0 select-none touch-none"
+      onDragStart={(e) => e.preventDefault()}
+    >
       <div
         role="slider"
         tabIndex={0}
+        // Chrome otherwise starts an HTML5 drag on the handle and paints its
+        // "globe" ghost image over the preview mid-drag.
+        draggable={false}
+        onDragStart={(e) => e.preventDefault()}
         aria-label="Camera bubble position"
         aria-valuetext={`x ${Math.round(bubble.pos.x * 100)}%, y ${Math.round(
           bubble.pos.y * 100,
@@ -113,6 +122,7 @@ export function BubbleDragOverlay({
         aria-valuemin={0}
         aria-valuemax={100}
         onPointerDown={(e) => {
+          e.preventDefault();
           e.currentTarget.setPointerCapture(e.pointerId);
           setDragging(true);
           handlePointer(e);
@@ -144,7 +154,7 @@ export function BubbleDragOverlay({
           height: pctH(rect.h),
           borderRadius: bubble.shape === "circle" ? "50%" : "12px",
         }}
-        className={`cursor-grab touch-none outline-none transition-shadow ${
+        className={`cursor-grab select-none touch-none outline-none transition-shadow ${
           dragging
             ? "cursor-grabbing ring-2 ring-accent"
             : "ring-1 ring-white/20 hover:ring-accent/60 focus-visible:ring-2 focus-visible:ring-accent"

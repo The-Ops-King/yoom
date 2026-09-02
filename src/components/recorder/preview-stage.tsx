@@ -15,7 +15,7 @@ interface PreviewStageProps {
   canvasHeight: number;
   cameraWidth: number;
   cameraHeight: number;
-  onBubbleMove: (pos: { x: number; y: number }) => void;
+  onBubbleMove: (pos: { x: number; y: number }, opts?: { immediate?: boolean }) => void;
 }
 
 export function formatElapsed(ms: number): string {
@@ -45,7 +45,10 @@ export function PreviewStage({
 
   return (
     <div
-      className={`relative w-full max-w-3xl aspect-video overflow-hidden rounded-xl border border-border bg-surface shadow-lg shadow-black/30 ${
+      // Native HTML5 drag-and-drop must never engage here: dragging the canvas
+      // or the bubble handle otherwise paints Chrome's ghost image.
+      onDragStart={(e) => e.preventDefault()}
+      className={`relative w-full max-w-3xl aspect-video select-none touch-none overflow-hidden rounded-xl border border-border bg-surface shadow-lg shadow-black/30 ${
         showStage ? "" : "hidden"
       }`}
     >
@@ -55,6 +58,7 @@ export function PreviewStage({
       */}
       <canvas
         ref={canvasRef}
+        draggable={false}
         className={`h-full w-full object-contain ${mode === "screen" ? "hidden" : ""}`}
       />
       <video
@@ -62,6 +66,7 @@ export function PreviewStage({
         muted
         playsInline
         autoPlay
+        draggable={false}
         className={`h-full w-full object-contain ${mode === "screen" ? "" : "hidden"}`}
       />
 
