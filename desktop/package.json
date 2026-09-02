@@ -1,0 +1,25 @@
+{
+  "name": "yoom-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Yoom desktop shell (macOS)",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "YOOM_DEV=1 electron-vite dev",
+    "start": "electron-vite preview",
+    "build": "npm run typecheck && electron-vite build && electron-builder --mac dmg zip --publish never",
+    "build:renderer": "electron-vite build",
+    "icons": "node build/make-tray-icons.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.renderer.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "26.4.1",
+    "electron": "44.1.1",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "typescript": "5.9.3",
+    "vite": "7.1.12",
+    "vitest": "4.1.11"
+  }
+}
