@@ -1,4 +1,4 @@
-import type { BubbleShape, BubbleSize } from "../shared/ipc";
+import type { BubbleShape, BubbleSize, HudStatus } from "../shared/ipc";
 
 export interface Bounds {
   x: number;
@@ -134,4 +134,69 @@ export function cycleShape(shape: BubbleShape): BubbleShape {
       // `portrait` and the unreachable `full` both wrap to the start.
       return "circle";
   }
+}
+
+/**
+ * The HUD window's size in device-independent pixels. The pill itself is
+ * 320×48; the window is larger so the drop shadow and the transparent rounded
+ * corners have room, since a transparent window cannot paint outside itself.
+ */
+export const HUD_SIZE = { width: 336, height: 64 } as const;
+
+/** Gap between the top of the work area and the top of the HUD window. */
+export const HUD_TOP_INSET = 12;
+
+/**
+ * Default HUD placement: horizontally centred at the top of the WORK AREA.
+ *
+ * `workArea`, not `bounds` — `bounds` starts behind the menu bar, and a pill
+ * tucked under the menu bar cannot be dragged. Top-centre is deliberate: it is
+ * the least destructive place for a bar that macOS ≥ 14 will capture anyway
+ * (see `hud.ts`), and it is where Loom parks its control bar's neighbours.
+ */
+export function hudDefaultBounds(workArea: Bounds): Bounds {
+  const width = HUD_SIZE.width;
+  const height = HUD_SIZE.height;
+  // A display that has gone away mid-session reports non-finite bounds; treat
+  // it as a zero-sized area at the origin rather than producing NaN bounds.
+  const areaX = Number.isFinite(workArea.x) ? workArea.x : 0;
+  const areaY = Number.isFinite(workArea.y) ? workArea.y : 0;
+  const areaW = Number.isFinite(workArea.width) ? workArea.width : 0;
+  return {
+    x: Math.round(areaX + Math.max(0, (areaW - width) / 2)),
+    y: Math.round(areaY + HUD_TOP_INSET),
+    width,
+    height,
+  };
+}
+
+/** Statuses during which the recorder window is deliberately off screen. */
+const HIDDEN_DURING: ReadonlySet<HudStatus> = new Set([
+  "countdown",
+  "recording",
+  "paused",
+  "stopping",
+]);
+
+/** Statuses that end a take and must bring the recorder window back. */
+const RESTORES: ReadonlySet<HudStatus> = new Set(["review", "error", "idle"]);
+
+export type RecorderVisibility = "hide" | "show" | "none";
+
+/**
+ * What to do with the recorder window on a status transition.
+ *
+ * Loom-style "the app disappears": entering `countdown` hides it, and only a
+ * transition OUT of a hidden status INTO a resolving one brings it back. The
+ * `prev` guard is what stops an `idle → review` transition (which never hid
+ * anything) from yanking a window the user had deliberately hidden themselves.
+ */
+export function recorderWindowVisibility(
+  prev: HudStatus,
+  next: HudStatus,
+): RecorderVisibility {
+  if (prev === next) return "none";
+  if (next === "countdown") return "hide";
+  if (HIDDEN_DURING.has(prev) && RESTORES.has(next)) return "show";
+  return "none";
 }

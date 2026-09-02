@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   BUBBLE_ASPECT,
+  HUD_SIZE,
+  HUD_TOP_INSET,
   SIZE_FRACTION,
   bubbleCentreToNormalized,
   bubbleWindowSize,
   clamp01,
   cycleShape,
+  hudDefaultBounds,
+  recorderWindowVisibility,
   shapeToCss,
 } from "./mapping";
 
@@ -185,5 +189,59 @@ describe("cycleShape", () => {
 
   it("treats `full` as circle (the floating bubble has no full-screen shape)", () => {
     expect(cycleShape("full")).toBe("circle");
+  });
+});
+
+describe("hudDefaultBounds", () => {
+  it("centres the pill horizontally at the top of the work area", () => {
+    // 1920-wide work area starting below a 25px menu bar.
+    const bounds = hudDefaultBounds({ x: 0, y: 25, width: 1920, height: 1055 });
+    expect(bounds.width).toBe(HUD_SIZE.width);
+    expect(bounds.height).toBe(HUD_SIZE.height);
+    expect(bounds.x).toBe(Math.round((1920 - HUD_SIZE.width) / 2));
+    expect(bounds.y).toBe(25 + HUD_TOP_INSET);
+  });
+
+  it("respects a non-zero display origin (second monitor)", () => {
+    const bounds = hudDefaultBounds({ x: 1920, y: 25, width: 1280, height: 775 });
+    expect(bounds.x).toBe(1920 + Math.round((1280 - HUD_SIZE.width) / 2));
+    expect(bounds.y).toBe(25 + HUD_TOP_INSET);
+  });
+
+  it("never places the pill off the left edge of a narrow work area", () => {
+    const bounds = hudDefaultBounds({ x: 0, y: 0, width: 200, height: 400 });
+    expect(bounds.x).toBe(0);
+  });
+
+  it("falls back to the origin for a degenerate work area", () => {
+    const bounds = hudDefaultBounds({ x: 0, y: 0, width: NaN, height: NaN });
+    expect(bounds.x).toBe(0);
+    expect(bounds.y).toBe(HUD_TOP_INSET);
+  });
+});
+
+describe("recorderWindowVisibility", () => {
+  it("hides the recorder when the countdown starts", () => {
+    expect(recorderWindowVisibility("setup" as never, "countdown")).toBe("hide");
+    expect(recorderWindowVisibility("other", "countdown")).toBe("hide");
+  });
+
+  it("does nothing while the take runs", () => {
+    expect(recorderWindowVisibility("countdown", "recording")).toBe("none");
+    expect(recorderWindowVisibility("recording", "paused")).toBe("none");
+    expect(recorderWindowVisibility("paused", "recording")).toBe("none");
+    expect(recorderWindowVisibility("recording", "stopping")).toBe("none");
+  });
+
+  it("shows the recorder again when the take resolves", () => {
+    expect(recorderWindowVisibility("stopping", "review")).toBe("show");
+    expect(recorderWindowVisibility("recording", "error")).toBe("show");
+    expect(recorderWindowVisibility("countdown", "idle")).toBe("show");
+  });
+
+  it("does not re-show a window it never hid", () => {
+    expect(recorderWindowVisibility("other", "review")).toBe("none");
+    expect(recorderWindowVisibility("idle", "idle")).toBe("none");
+    expect(recorderWindowVisibility("review", "idle")).toBe("none");
   });
 });
