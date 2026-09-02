@@ -1,18 +1,16 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import fixWebmDuration from "fix-webm-duration";
 import { DeviceSelector } from "./device-selector";
 import { RecordingPreview } from "./recording-preview";
 import { YoomLogo } from "./logo";
+import { uploadToDrive } from "@/lib/upload-client";
 
 type RecordingMode = "screen" | "camera" | "screen+camera";
 type RecorderState = "idle" | "recording" | "uploading" | "done";
 
-interface RecorderProps {
-  password: string;
-}
-
-export function Recorder({ password }: RecorderProps) {
+export function Recorder() {
   const [mode, setMode] = useState<RecordingMode>("screen");
   const [micId, setMicId] = useState("");
   const [cameraId, setCameraId] = useState("");
@@ -31,6 +29,9 @@ export function Recorder({ password }: RecorderProps) {
   const animationRef = useRef<number>(0);
   const screenVideoElRef = useRef<HTMLVideoElement | null>(null);
   const cameraVideoElRef = useRef<HTMLVideoElement | null>(null);
+  const recordStartedAtRef = useRef<number>(0);
+  const recordEndedAtRef = useRef<number>(0);
+  const thumbnailRef = useRef<Blob | null>(null);
 
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
@@ -264,6 +265,13 @@ export function Recorder({ password }: RecorderProps) {
       };
 
       console.log(`[Yoom] starting MediaRecorder with mimeType: "${mediaRecorder.mimeType}", stream tracks:`, recordStream.getTracks().map(t => `${t.kind}:${t.readyState}`));
+      recordStartedAtRef.current = performance.now();
+      thumbnailRef.current = null;
+      window.setTimeout(() => {
+        void captureThumbnail().then((blob) => {
+          thumbnailRef.current = blob;
+        });
+      }, 1000);
       mediaRecorder.start(250);
       mediaRecorderRef.current = mediaRecorder;
       setState("recording");
@@ -283,58 +291,158 @@ export function Recorder({ password }: RecorderProps) {
   }
 
   function stopRecording() {
+    recordEndedAtRef.current = performance.now();
     if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.stop();
     }
     if (timerRef.current) clearInterval(timerRef.current);
   }
 
+  function frameToJpeg(source: CanvasImageSource, width: number, height: number): Promise<Blob | null> {
+    const scratch = document.createElement("canvas");
+    scratch.width = width;
+    scratch.height = height;
+    const ctx = scratch.getContext("2d");
+    if (!ctx) return Promise.resolve(null);
+    ctx.drawImage(source, 0, 0, width, height);
+    return new Promise((resolve) =>
+      scratch.toBlob((blob) => resolve(blob), "image/jpeg", 0.8),
+    );
+  }
+
+  async function captureThumbnail(): Promise<Blob | null> {
+    // Screen+camera: the composited canvas is the exact recorded frame.
+    const canvas = canvasRef.current;
+    if (canvas && canvas.width > 0) {
+      return new Promise((resolve) =>
+        canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.8),
+      );
+    }
+
+    // Screen-only / camera-only: read one frame from the live stream.
+    const stream = screenStreamRef.current ?? cameraStreamRef.current;
+    const track = stream?.getVideoTracks()[0];
+    if (!track || track.readyState !== "live") return null;
+
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = new MediaStream([track]);
+
+    const ready = new Promise<boolean>((resolve) => {
+      const timer = window.setTimeout(() => resolve(false), 2000);
+      video.onloadeddata = () => {
+        window.clearTimeout(timer);
+        resolve(true);
+      };
+    });
+
+    try {
+      await video.play();
+      if (!(await ready) || !video.videoWidth) return null;
+      return await frameToJpeg(video, video.videoWidth, video.videoHeight);
+    } catch {
+      return null;
+    } finally {
+      video.pause();
+      video.srcObject = null;
+    }
+  }
+
+  function readTrackDimensions(): { width: number | null; height: number | null } {
+    const canvas = canvasRef.current;
+    if (canvas) return { width: canvas.width, height: canvas.height };
+
+    const stream = screenStreamRef.current ?? cameraStreamRef.current;
+    const settings = stream?.getVideoTracks()[0]?.getSettings();
+    return {
+      width: settings?.width ?? null,
+      height: settings?.height ?? null,
+    };
+  }
+
   async function handleRecordingComplete() {
     setState("uploading");
+    setUploadProgress(0);
+
+    const { width, height } = readTrackDimensions();
+    const durationMs = Math.max(
+      0,
+      Math.round(recordEndedAtRef.current - recordStartedAtRef.current),
+    );
+
     stopAllStreams();
 
-    const blob = new Blob(chunksRef.current, { type: "video/webm" });
+    const rawBlob = new Blob(chunksRef.current, { type: "video/webm" });
 
-    if (blob.size === 0) {
+    if (rawBlob.size === 0) {
       setError("Recording captured no data. Please try again.");
       setState("idle");
       return;
     }
 
+    // Patch the EBML duration header so players get a real seek bar and
+    // `video.duration` is finite. If patching fails, upload the raw blob.
+    let blob = rawBlob;
     try {
-      const res = await fetch("/api/upload", {
+      blob = await fixWebmDuration(rawBlob, durationMs, { logger: false });
+    } catch (patchError) {
+      console.warn("[Yoom] could not patch WebM duration", patchError);
+    }
+
+    try {
+      const sessionRes = await fetch("/api/upload", {
         method: "POST",
-        headers: { "x-upload-password": password },
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mimeType: blob.type || "video/webm",
+          sizeBytes: blob.size,
+          filename: `yoom-${new Date().toISOString().replace(/[:.]/g, "-")}.webm`,
+        }),
       });
+      if (!sessionRes.ok) throw new Error("Failed to start the upload");
 
-      if (!res.ok) throw new Error("Failed to get upload URL");
+      const { sessionUri } = (await sessionRes.json()) as { sessionUri: string };
 
-      const { presignedUrl, key } = await res.json();
+      const { id: driveFileId } = await uploadToDrive(
+        blob,
+        sessionUri,
+        setUploadProgress,
+      );
 
-      const xhr = new XMLHttpRequest();
-      xhr.open("PUT", presignedUrl);
-      xhr.setRequestHeader("Content-Type", "video/webm");
+      const completeRes = await fetch("/api/upload/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ driveFileId, durationMs, width, height }),
+      });
+      if (!completeRes.ok) throw new Error("Failed to save the recording");
 
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          setUploadProgress(Math.round((e.loaded / e.total) * 100));
-        }
+      const { id, url } = (await completeRes.json()) as {
+        id: string;
+        slug: string;
+        url: string;
       };
 
-      await new Promise<void>((resolve, reject) => {
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) resolve();
-          else reject(new Error(`Upload failed: ${xhr.status}`));
-        };
-        xhr.onerror = () => reject(new Error("Upload failed"));
-        xhr.send(blob);
-      });
+      const thumbnail = thumbnailRef.current;
+      if (thumbnail) {
+        const form = new FormData();
+        form.set("videoId", id);
+        form.set("file", thumbnail, "thumbnail.jpg");
+        // A missing thumbnail is not fatal.
+        await fetch("/api/upload/thumbnail", { method: "POST", body: form }).catch(
+          () => undefined,
+        );
+      }
 
-      const appUrl = window.location.origin;
-      setShareUrl(`${appUrl}/watch/${key}`);
+      setShareUrl(url);
       setState("done");
-    } catch {
-      setError("Upload failed. Please try again.");
+    } catch (uploadError) {
+      console.error(uploadError);
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Upload failed. Please try again.",
+      );
       setState("idle");
     }
   }
@@ -346,6 +454,7 @@ export function Recorder({ password }: RecorderProps) {
     setUploadProgress(0);
     setError("");
     chunksRef.current = [];
+    thumbnailRef.current = null;
   }
 
   function formatTime(seconds: number): string {
