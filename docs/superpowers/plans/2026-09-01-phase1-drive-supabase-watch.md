@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** SHIPPED 2026-09-01 — merged to `main`, live at https://yoom.jtylerray.com, proxied at https://jtylerray.com/v/<slug>. All 28 tasks done (Task 28 verified against production; alerts confirmed after Resend verified jtylerray.com). Follow-ups in `docs/for-later.md`.
+
 **Goal:** Replace Cloudflare R2 with Google Drive as the video store, add a Supabase Postgres metadata layer, serve share links at `https://jtylerray.com/v/<slug>` through a Vercel rewrite, track view sessions, and email Tyler on first play and on completion. The recorder keeps working end-to-end; `npm run build` passes at every commit.
 
 **Architecture:**
