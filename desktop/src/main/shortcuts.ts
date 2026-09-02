@@ -1,5 +1,6 @@
 import { globalShortcut } from "electron";
 import { IPC, type DesktopShortcut } from "../shared/ipc";
+import { wakeHud } from "./hud";
 import { getRecorderWindow, sendToRecorder, toggleRecorderWindow } from "./windows";
 
 /**
@@ -26,7 +27,13 @@ export function registerShortcuts(): void {
         if (action === "toggle") toggleRecorderWindow();
         return;
       }
+      // The recorder window is deliberately HIDDEN during a take, so `sendToRecorder`
+      // must not depend on visibility — it does not: `webContents.send` reaches a
+      // hidden window exactly as it reaches a visible one.
       sendToRecorder(IPC.shortcut, action);
+      // Under YOOM_HUD_HIDE_WHILE_RECORDING the pill is off screen; a hotkey is
+      // the moment the user most wants to see the timer confirm what happened.
+      wakeHud();
     });
     if (!ok) {
       // Another app owns the chord. Not fatal — the in-page binding still works
