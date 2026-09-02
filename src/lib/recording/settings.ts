@@ -10,7 +10,13 @@ import type {
   SurfacePref,
 } from "./types";
 
-export const SETTINGS_KEY = "yoom.recorder.v1";
+/**
+ * Bumped to v2 in Phase 2.1: camera-bubble backgrounds were removed, so a v1
+ * object carries a `background` key that no longer means anything. `sanitize`
+ * ignores unknown keys anyway, but the fresh key also drops the stale blob.
+ */
+export const SETTINGS_KEY = "yoom.recorder.v2";
+const LEGACY_SETTINGS_KEYS = ["yoom.recorder.v1"];
 
 export const DEFAULT_BUBBLE: BubbleConfig = {
   shape: "circle",
@@ -19,8 +25,6 @@ export const DEFAULT_BUBBLE: BubbleConfig = {
   mirror: true,
   visible: true,
 };
-
-export const DEFAULT_BACKGROUND: BackgroundConfig = { kind: "none" };
 
 export const DEFAULT_FRAME: FrameConfig = {
   enabled: false,
@@ -40,7 +44,6 @@ export const DEFAULT_SETTINGS: RecorderSettings = {
   // platform cannot deliver it.
   systemOn: true,
   bubble: DEFAULT_BUBBLE,
-  background: DEFAULT_BACKGROUND,
   frame: DEFAULT_FRAME,
 };
 
@@ -118,7 +121,6 @@ function sanitize(raw: unknown): RecorderSettings {
       mirror: bool(bubbleRaw.mirror, DEFAULT_BUBBLE.mirror),
       visible: bool(bubbleRaw.visible, DEFAULT_BUBBLE.visible),
     },
-    background: sanitizeBackground(r.background, DEFAULT_BACKGROUND),
     frame: {
       enabled: bool(frameRaw.enabled, DEFAULT_FRAME.enabled),
       padding: num(frameRaw.padding, DEFAULT_FRAME.padding, 0, 0.2),
@@ -134,6 +136,7 @@ export function loadSettings(): RecorderSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return DEFAULT_SETTINGS;
+    // A v1 object still carries `background`; `sanitize` simply ignores it.
     return sanitize(JSON.parse(raw));
   } catch {
     return DEFAULT_SETTINGS;
@@ -144,6 +147,7 @@ export function saveSettings(settings: RecorderSettings): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(sanitize(settings)));
+    for (const legacy of LEGACY_SETTINGS_KEYS) localStorage.removeItem(legacy);
   } catch {
     // Private mode / storage disabled — preferences simply do not persist.
   }

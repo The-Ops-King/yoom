@@ -45,6 +45,10 @@ If #2/#3 land, persist the event stream as a JSON sidecar next to the video in D
 - ~~Phase 2 must add the overlay-layer seam in the compositor (see "For later" above) and Safari `video/mp4` codec fallback.~~ Both shipped in Phase 2.
 - Verification artefact: video `bc040bca-a0fd-44aa-a8f3-f5843685eeb5` (slug `uunrv7zm`, 700 KB of random bytes named `yoom-verify.webm`) exists in Drive + DB; delete it from the Phase 3 dashboard once that exists, or via SQL + Drive trash.
 
+## Phase 2 follow-ups
+
+- Camera-bubble virtual backgrounds removed on 2026-09-02 at Tyler's request; framed-capture backgrounds remain.
+
 ## Proposed Phase 5 — Post-recording editor (Tyler, 2026-09-02)
 
 **Wanted:** blur/redact regions over sensitive info; numbered callout circles that pop in and out; underlines and highlights; cut (remove segments) and crop; animated zoom-in.

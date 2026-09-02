@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_FRAME,
   DEFAULT_SETTINGS,
   SETTINGS_KEY,
   loadSettings,
@@ -91,21 +92,17 @@ describe("saveSettings", () => {
   it("drops blob: sources that cannot survive a reload", () => {
     saveSettings({
       ...DEFAULT_SETTINGS,
-      background: { kind: "video", src: "blob:http://x/abc" },
       frame: {
         ...DEFAULT_SETTINGS.frame,
         background: { kind: "image", src: "blob:http://x/def" },
       },
     });
-    const s = loadSettings();
-    expect(s.background).toEqual({ kind: "none" });
-    expect(s.frame.background).toEqual({ kind: "none" });
+    expect(loadSettings().frame.background).toEqual({ kind: "none" });
   });
 
   it("strips blob:/data: sources at save time, not just at load time", () => {
     saveSettings({
       ...DEFAULT_SETTINGS,
-      background: { kind: "image", src: "data:image/png;base64,AAAA" },
       frame: {
         ...DEFAULT_SETTINGS.frame,
         background: { kind: "video", src: "blob:http://x/abc" },
@@ -114,8 +111,7 @@ describe("saveSettings", () => {
     // What actually reached localStorage must already be clean: a reload in a
     // new tab must never see a URL that only existed in the previous document.
     const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY)!);
-    expect(stored.background).toEqual({ kind: "none" });
-    expect(stored.background.src).toBeUndefined();
+    expect(stored.background).toBeUndefined();
     expect(stored.frame.background).toEqual({ kind: "none" });
     expect(stored.frame.background.src).toBeUndefined();
     expect(JSON.stringify(stored)).not.toContain("blob:");
@@ -125,9 +121,12 @@ describe("saveSettings", () => {
   it("keeps preset sources served from /backgrounds", () => {
     saveSettings({
       ...DEFAULT_SETTINGS,
-      background: { kind: "image", src: "/backgrounds/ocean.svg", presetId: "ocean" },
+      frame: {
+        ...DEFAULT_SETTINGS.frame,
+        background: { kind: "image", src: "/backgrounds/ocean.svg", presetId: "ocean" },
+      },
     });
-    expect(loadSettings().background).toEqual({
+    expect(loadSettings().frame.background).toEqual({
       kind: "image",
       src: "/backgrounds/ocean.svg",
       presetId: "ocean",
@@ -137,9 +136,31 @@ describe("saveSettings", () => {
   it("falls back to the default colour when a stored color background has none", () => {
     saveSettings({
       ...DEFAULT_SETTINGS,
-      background: { kind: "color" } as unknown as (typeof DEFAULT_SETTINGS)["background"],
+      frame: {
+        ...DEFAULT_SETTINGS.frame,
+        background: { kind: "color" } as unknown as (typeof DEFAULT_FRAME)["background"],
+      },
     });
-    expect(loadSettings().background.color).toBe(DEFAULT_SETTINGS.background.color ?? "#1a1a1e");
+    expect(loadSettings().frame.background.color).toBe(
+      DEFAULT_SETTINGS.frame.background.color ?? "#1a1a1e",
+    );
+  });
+
+  it("ignores a stale camera-bubble background from a v1 settings object", () => {
+    // Phase 2.1 removed camera-bubble backgrounds. An object written by an
+    // older build still carries the key; loading it must not throw or leak it.
+    storage.map.set(
+      SETTINGS_KEY,
+      JSON.stringify({
+        mode: "camera",
+        background: { kind: "blur" },
+        bubble: { shape: "square" },
+      }),
+    );
+    const s = loadSettings();
+    expect(s.mode).toBe("camera");
+    expect(s.bubble.shape).toBe("square");
+    expect("background" in s).toBe(false);
   });
 
   it("never throws when storage is unavailable", () => {

@@ -138,12 +138,6 @@ npm test        # vitest (unit tests for the pure modules)
 - **Camera bubble** — drag it anywhere on the preview (arrow keys nudge, ⇧ for a
   bigger step); circle / rounded / square / portrait shapes, three sizes, mirror
   toggle, and on/off. In *Camera* mode the bubble fills the frame.
-- **Backgrounds** — blur, solid colour, a shipped preset, an uploaded image, or an
-  uploaded looping video. Segmentation runs on-device via MediaPipe: the WASM in
-  `public/mediapipe` is generated at build from `node_modules` by
-  `scripts/copy-mediapipe.mjs` (gitignored), and `public/models/selfie_segmenter.tflite`
-  is committed so a build never depends on the Google CDN. If the model is missing the
-  recorder silently falls back to a plain camera.
 - **Framed capture** — inset the screen in a padded canvas with rounded corners, a
   drop shadow, and its own background.
 - **Audio** — mic and system audio are mixed into one track, each independently

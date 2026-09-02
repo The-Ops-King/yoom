@@ -57,6 +57,7 @@ export interface BubbleConfig {
   visible: boolean;
 }
 
+/** Framed capture only — camera-bubble backgrounds were removed in Phase 2.1. */
 export type BackgroundKind = "none" | "blur" | "color" | "image" | "video";
 
 export interface BackgroundConfig {
@@ -137,6 +138,5 @@ export interface RecorderSettings {
   micOn: boolean;
   systemOn: boolean;
   bubble: BubbleConfig;
-  background: BackgroundConfig;
   frame: FrameConfig;
 }

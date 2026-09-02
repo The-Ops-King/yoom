@@ -4,7 +4,6 @@ import { useState } from "react";
 import { YoomLogo } from "./logo";
 import { DeviceSelector } from "./device-selector";
 import { AudioControls } from "./recorder/audio-controls";
-import { BackgroundPicker } from "./recorder/background-picker";
 import { CameraBubbleControls } from "./recorder/camera-bubble-controls";
 import { Countdown } from "./recorder/countdown";
 import { FramePicker } from "./recorder/frame-picker";
@@ -181,17 +180,11 @@ export function Recorder() {
           )}
 
           {(state.status === "setup" || live) && showsCamera && (
-            <>
-              <CameraBubbleControls
-                bubble={state.bubble}
-                shapeLocked={state.mode === "camera"}
-                onChange={actions.setBubble}
-              />
-              <BackgroundPicker
-                background={state.background}
-                onChange={actions.setBackground}
-              />
-            </>
+            <CameraBubbleControls
+              bubble={state.bubble}
+              shapeLocked={state.mode === "camera"}
+              onChange={actions.setBubble}
+            />
           )}
 
           {(state.status === "setup" || live) && state.mode === "screen+camera" && (

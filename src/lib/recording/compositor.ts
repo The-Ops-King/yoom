@@ -37,8 +37,6 @@ export type CompositorLayout = "camera" | "screen+camera";
 export interface CompositorSources {
   screen?: MediaStream | null;
   camera?: MediaStream | null;
-  /** Alpha mask produced by `PersonSegmenter`; ignored while null. */
-  maskCanvas?: HTMLCanvasElement | null;
 }
 
 function makeVideo(stream: MediaStream): HTMLVideoElement {
@@ -87,7 +85,7 @@ function resolveBackground(cfg: BackgroundConfig): ResolvedBackground {
 
 /**
  * Detaches the media elements only. Object URLs are NOT revoked here: the hook
- * creates them (via the background picker) and owns their lifetime.
+ * creates them (via the frame picker) and owns their lifetime.
  */
 function releaseBackground(bg: ResolvedBackground | null): void {
   if (!bg) return;
@@ -116,11 +114,9 @@ export class Compositor {
 
   private screenVideo: HTMLVideoElement | null = null;
   private cameraVideo: HTMLVideoElement | null = null;
-  private maskCanvas: HTMLCanvasElement | null = null;
 
   private bubble: BubbleConfig | null = null;
   private frame: FrameConfig | null = null;
-  private background: ResolvedBackground | null = null;
   private frameBackground: ResolvedBackground | null = null;
 
   private overlays: OverlayLayer[] = [];
@@ -166,26 +162,12 @@ export class Compositor {
       if (this.cameraVideo) this.cameraVideo.srcObject = null;
       this.cameraVideo = sources.camera ? makeVideo(sources.camera) : null;
     }
-    if (sources.maskCanvas !== undefined) this.maskCanvas = sources.maskCanvas;
     this.cacheKey = "";
   }
 
   setBubble(cfg: BubbleConfig): void {
     this.bubble = cfg;
     this.cacheKey = "";
-  }
-
-  setBackground(cfg: BackgroundConfig): void {
-    if (
-      this.background &&
-      this.background.cfg.kind === cfg.kind &&
-      this.background.cfg.src === cfg.src &&
-      this.background.cfg.color === cfg.color
-    ) {
-      return;
-    }
-    releaseBackground(this.background);
-    this.background = resolveBackground(cfg);
   }
 
   setFrame(cfg: FrameConfig): void {
@@ -214,10 +196,7 @@ export class Compositor {
     this.cacheKey = "";
   }
 
-  /**
-   * The <video> the compositor decodes the camera stream into. The segmenter
-   * reads frames from this same element so the camera is decoded once.
-   */
+  /** The <video> the compositor decodes the camera stream into. */
   cameraElement(): HTMLVideoElement | null {
     return this.cameraVideo;
   }
@@ -292,12 +271,7 @@ export class Compositor {
     if (this.cameraVideo) this.cameraVideo.srcObject = null;
     this.screenVideo = null;
     this.cameraVideo = null;
-    // The mask belongs to the segmenter, which is disposed separately; drop
-    // the reference so a disposed compositor cannot keep it alive or draw it.
-    this.maskCanvas = null;
-    releaseBackground(this.background);
     releaseBackground(this.frameBackground);
-    this.background = null;
     this.frameBackground = null;
     this.overlays = [];
   }
@@ -559,8 +533,8 @@ export class Compositor {
   }
 
   /**
-   * Builds the bubble's pixels on an offscreen canvas: mirror → background →
-   * segmented person, or just the mirrored camera when there is no mask.
+   * Builds the bubble's pixels on an offscreen canvas: mirror, then the
+   * cropped camera. Virtual backgrounds were removed in Phase 2.1.
    */
   private drawCameraLayer(
     cam: HTMLVideoElement,
@@ -584,80 +558,7 @@ export class Compositor {
       lctx.scale(-1, 1);
     }
 
-    const bgCfg = this.background?.cfg ?? { kind: "none" as const };
-    const maskReady = !!this.maskCanvas && this.maskCanvas.width > 0;
-    const wantsBackground = bgCfg.kind !== "none" && maskReady;
-
-    const drawCamera = () =>
-      lctx.drawImage(cam, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, w, h);
-
-    if (!wantsBackground) {
-      // No mask yet (or nothing requested) → plain camera. Never block.
-      drawCamera();
-      lctx.setTransform(1, 0, 0, 1, 0, 0);
-      return;
-    }
-
-    // 1. background plate
-    if (bgCfg.kind === "blur") {
-      lctx.save();
-      lctx.filter = `blur(${Math.max(4, Math.round(w / 50))}px)`;
-      drawCamera();
-      lctx.restore();
-    } else if (bgCfg.kind === "color") {
-      lctx.fillStyle = bgCfg.color ?? "#1a1a1e";
-      lctx.fillRect(0, 0, w, h);
-    } else {
-      const media = bgCfg.kind === "video" ? this.background!.video : this.background!.image;
-      if (isDrawable(media)) {
-        const mw = media instanceof HTMLVideoElement ? media.videoWidth : media!.naturalWidth;
-        const mh = media instanceof HTMLVideoElement ? media.videoHeight : media!.naturalHeight;
-        const c = coverCrop(mw, mh, w, h);
-        lctx.drawImage(media!, c.sx, c.sy, c.sw, c.sh, 0, 0, w, h);
-      } else {
-        lctx.fillStyle = "#1a1a1e";
-        lctx.fillRect(0, 0, w, h);
-      }
-    }
-
-    // 2. person on top: camera masked by the segmentation alpha
-    const person = this.personCanvas(cam, rect);
-    lctx.drawImage(person, 0, 0, w, h);
+    lctx.drawImage(cam, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, w, h);
     lctx.setTransform(1, 0, 0, 1, 0, 0);
-  }
-
-  private personScratch: HTMLCanvasElement | null = null;
-
-  private personCanvas(cam: HTMLVideoElement, rect: Rect): HTMLCanvasElement {
-    if (!this.personScratch) this.personScratch = document.createElement("canvas");
-    const c = this.personScratch;
-    const { w, h, crop } = rect;
-    if (c.width !== w || c.height !== h) {
-      c.width = w;
-      c.height = h;
-    }
-    const pctx = c.getContext("2d")!;
-    pctx.setTransform(1, 0, 0, 1, 0, 0);
-    pctx.globalCompositeOperation = "source-over";
-    pctx.clearRect(0, 0, w, h);
-    pctx.drawImage(cam, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, w, h);
-    // The mask is authored in camera space, so it is cropped identically.
-    pctx.globalCompositeOperation = "destination-in";
-    const mask = this.maskCanvas!;
-    const mScaleX = mask.width / (cam.videoWidth || 1);
-    const mScaleY = mask.height / (cam.videoHeight || 1);
-    pctx.drawImage(
-      mask,
-      crop.sx * mScaleX,
-      crop.sy * mScaleY,
-      crop.sw * mScaleX,
-      crop.sh * mScaleY,
-      0,
-      0,
-      w,
-      h,
-    );
-    pctx.globalCompositeOperation = "source-over";
-    return c;
   }
 }

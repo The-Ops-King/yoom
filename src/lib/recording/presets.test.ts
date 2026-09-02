@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BACKGROUND_PRESETS, FRAME_PRESETS, findPreset } from "./presets";
+import { COLOR_SWATCHES, FRAME_PRESETS } from "./presets";
 
 describe("presets", () => {
   it("ships four gradient frame presets served from /backgrounds", () => {
@@ -11,18 +11,13 @@ describe("presets", () => {
     }
   });
 
-  it("reuses the same gradients for camera bubble backgrounds", () => {
-    expect(BACKGROUND_PRESETS.map((p) => p.id)).toEqual(FRAME_PRESETS.map((p) => p.id));
-  });
-
   it("has unique ids", () => {
-    const ids = BACKGROUND_PRESETS.map((p) => p.id);
+    const ids = FRAME_PRESETS.map((p) => p.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("findPreset looks presets up by id", () => {
-    expect(findPreset("ocean")?.src).toBe("/backgrounds/ocean.svg");
-    expect(findPreset("nope")).toBeUndefined();
-    expect(findPreset(undefined)).toBeUndefined();
+  it("offers solid colour swatches alongside the gradients", () => {
+    expect(COLOR_SWATCHES.length).toBeGreaterThan(0);
+    for (const c of COLOR_SWATCHES) expect(c).toMatch(/^#[0-9a-f]{6}$/i);
   });
 });

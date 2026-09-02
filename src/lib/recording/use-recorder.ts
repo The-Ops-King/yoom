@@ -13,11 +13,9 @@ import {
   recorderReducer,
   type RecorderState,
 } from "./recorder-machine";
-import { PersonSegmenter } from "./segmentation";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "./settings";
 import { uploadRecording } from "./upload";
 import type {
-  BackgroundConfig,
   BubbleConfig,
   Capabilities,
   FrameConfig,
@@ -49,7 +47,7 @@ function stopStream(stream: MediaStream | null): void {
   stream?.getTracks().forEach((t) => t.stop());
 }
 
-/** Object URLs come from the background picker; only it creates `blob:` srcs. */
+/** Object URLs come from the frame picker; only it creates `blob:` srcs. */
 function revokeBlob(src: string | undefined): void {
   if (src?.startsWith("blob:")) URL.revokeObjectURL(src);
 }
@@ -90,7 +88,6 @@ export interface UseRecorderResult {
     toggleMic(on?: boolean): void;
     toggleSystem(on?: boolean): void;
     setBubble(patch: Partial<BubbleConfig>): void;
-    setBackground(background: BackgroundConfig): void;
     setFrame(patch: Partial<FrameConfig>): void;
   };
 }
@@ -127,13 +124,6 @@ export function useRecorder(): UseRecorderResult {
   const micStreamRef = useRef<MediaStream | null>(null);
   const mixerRef = useRef<AudioMixer | null>(null);
   const compositorRef = useRef<Compositor | null>(null);
-  const segmenterRef = useRef<PersonSegmenter | null>(null);
-  // Generation counter for in-flight `PersonSegmenter.load()` calls. Every
-  // teardown (and every new load) bumps it, so a load that resolves after the
-  // pipeline it belonged to is gone disposes itself instead of attaching to a
-  // compositor that no longer exists.
-  const segmenterLoadRef = useRef(0);
-  const segmenterLoadingRef = useRef(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startedAtRef = useRef(0);
@@ -150,8 +140,7 @@ export function useRecorder(): UseRecorderResult {
   // Settings are only persisted once the stored settings have been read back,
   // so the first render never writes DEFAULT_SETTINGS over the saved ones.
   const hydratedRef = useRef(false);
-  // Object URLs the background picker created; revoked when replaced.
-  const prevBackgroundSrcRef = useRef<string | undefined>(undefined);
+  // Object URLs the frame picker created; revoked when replaced.
   const prevFrameSrcRef = useRef<string | undefined>(undefined);
 
   // ---------- boot: settings + capabilities ----------
@@ -165,10 +154,8 @@ export function useRecorder(): UseRecorderResult {
     dispatch({ type: "TOGGLE_MIC", on: settings.micOn });
     dispatch({ type: "TOGGLE_SYSTEM", on: settings.systemOn });
     dispatch({ type: "SET_BUBBLE", patch: settings.bubble });
-    dispatch({ type: "SET_BACKGROUND", background: settings.background });
     dispatch({ type: "SET_FRAME", patch: settings.frame });
     setCapabilities(getProvider().capabilities());
-    prevBackgroundSrcRef.current = settings.background.src;
     prevFrameSrcRef.current = settings.frame.background.src;
     hydratedRef.current = true;
   }, []);
@@ -190,7 +177,6 @@ export function useRecorder(): UseRecorderResult {
       micOn: state.micOn,
       systemOn: state.systemOn,
       bubble: state.bubble,
-      background: state.background,
       frame: state.frame,
     });
   }, [
@@ -201,7 +187,6 @@ export function useRecorder(): UseRecorderResult {
     state.micOn,
     state.systemOn,
     state.bubble,
-    state.background,
     state.frame,
   ]);
 
@@ -212,11 +197,6 @@ export function useRecorder(): UseRecorderResult {
       window.clearTimeout(thumbnailTimerRef.current);
       thumbnailTimerRef.current = null;
     }
-    // Discard any load still in flight before disposing the current one.
-    segmenterLoadRef.current += 1;
-    segmenterLoadingRef.current = false;
-    segmenterRef.current?.dispose();
-    segmenterRef.current = null;
     compositorRef.current?.dispose();
     compositorRef.current = null;
     void mixerRef.current?.close();
@@ -237,9 +217,7 @@ export function useRecorder(): UseRecorderResult {
   useEffect(
     () => () => {
       teardown();
-      revokeBlob(prevBackgroundSrcRef.current);
       revokeBlob(prevFrameSrcRef.current);
-      prevBackgroundSrcRef.current = undefined;
       prevFrameSrcRef.current = undefined;
     },
     [teardown],
@@ -318,34 +296,12 @@ export function useRecorder(): UseRecorderResult {
             ? { ...current.bubble, shape: "full", visible: true }
             : current.bubble,
         );
-        compositor.setBackground(current.background);
         compositor.setFrame(current.frame);
         compositor.addOverlay(
           debugOverlaysEnabled() ? createFpsOverlay() : createNoopOverlay(),
         );
         compositorRef.current = compositor;
         await compositor.start();
-
-        // Segmentation is optional: a null segmenter means "plain camera".
-        if (current.background.kind !== "none" && cameraStreamRef.current) {
-          const gen = ++segmenterLoadRef.current;
-          segmenterLoadingRef.current = true;
-          void PersonSegmenter.load().then((segmenter) => {
-            if (gen === segmenterLoadRef.current) segmenterLoadingRef.current = false;
-            if (!segmenter) return;
-            if (gen !== segmenterLoadRef.current || !compositorRef.current) {
-              segmenter.dispose();
-              return;
-            }
-            segmenterRef.current = segmenter;
-            // Reuse the compositor's decoded camera element: one decoder,
-            // not two, for the same camera stream.
-            const el = compositorRef.current?.cameraElement() ?? null;
-            if (!el) return;
-            segmenter.start(el, { width: 256 });
-            compositorRef.current?.setSources({ maskCanvas: segmenter.mask });
-          });
-        }
       } else if (screenVideoRef.current && screenStreamRef.current) {
         screenVideoRef.current.srcObject = screenStreamRef.current;
         void screenVideoRef.current.play().catch(() => {});
@@ -381,41 +337,6 @@ export function useRecorder(): UseRecorderResult {
         : state.bubble,
     );
   }, [state.bubble, state.mode]);
-
-  useEffect(() => {
-    const prev = prevBackgroundSrcRef.current;
-    if (prev !== state.background.src) {
-      revokeBlob(prev);
-      prevBackgroundSrcRef.current = state.background.src;
-    }
-    compositorRef.current?.setBackground(state.background);
-    // Turning a background on for the first time lazily loads the segmenter.
-    // An in-flight load counts as "already loading", so flipping backgrounds
-    // quickly cannot start a second WASM load.
-    if (
-      state.background.kind !== "none" &&
-      !segmenterRef.current &&
-      !segmenterLoadingRef.current &&
-      cameraStreamRef.current
-    ) {
-      const gen = ++segmenterLoadRef.current;
-      segmenterLoadingRef.current = true;
-      void PersonSegmenter.load().then((segmenter) => {
-        if (gen === segmenterLoadRef.current) segmenterLoadingRef.current = false;
-        if (!segmenter) return;
-        if (gen !== segmenterLoadRef.current || !compositorRef.current) {
-          segmenter.dispose();
-          return;
-        }
-        segmenterRef.current = segmenter;
-        // Reuse the compositor's decoded camera element (one decoder).
-        const el = compositorRef.current?.cameraElement() ?? null;
-        if (!el) return;
-        segmenter.start(el, { width: 256 });
-        compositorRef.current?.setSources({ maskCanvas: segmenter.mask });
-      });
-    }
-  }, [state.background]);
 
   useEffect(() => {
     const prev = prevFrameSrcRef.current;
@@ -846,8 +767,6 @@ export function useRecorder(): UseRecorderResult {
       toggleMic: (on?: boolean) => dispatch({ type: "TOGGLE_MIC", on }),
       toggleSystem: (on?: boolean) => dispatch({ type: "TOGGLE_SYSTEM", on }),
       setBubble: (patch: Partial<BubbleConfig>) => dispatch({ type: "SET_BUBBLE", patch }),
-      setBackground: (background: BackgroundConfig) =>
-        dispatch({ type: "SET_BACKGROUND", background }),
       setFrame: (patch: Partial<FrameConfig>) => dispatch({ type: "SET_FRAME", patch }),
     }),
     [acquire, discard, reset, upload],

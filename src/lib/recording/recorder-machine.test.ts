@@ -329,13 +329,8 @@ describe("live toggles", () => {
     expect(s.bubble.shape).toBe(DEFAULT_SETTINGS.bubble.shape);
   });
 
-  it("SET_BACKGROUND and SET_FRAME replace/merge their configs", () => {
-    const s0 = run(init(), [{ type: "ACQUIRE" }, ACQUIRED]);
-    const s1 = recorderReducer(s0, {
-      type: "SET_BACKGROUND",
-      background: { kind: "color", color: "#123456" },
-    });
-    expect(s1.background).toEqual({ kind: "color", color: "#123456" });
+  it("SET_FRAME merges its config", () => {
+    const s1 = run(init(), [{ type: "ACQUIRE" }, ACQUIRED]);
     const s2 = recorderReducer(s1, { type: "SET_FRAME", patch: { enabled: true } });
     expect(s2.frame.enabled).toBe(true);
     expect(s2.frame.padding).toBe(DEFAULT_SETTINGS.frame.padding);

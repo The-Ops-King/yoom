@@ -7,7 +7,8 @@ export interface BackgroundPreset {
   swatch: string;
 }
 
-export const BACKGROUND_PRESETS: BackgroundPreset[] = [
+/** Framed-capture background catalogue. */
+export const FRAME_PRESETS: BackgroundPreset[] = [
   {
     id: "sunset",
     label: "Sunset",
@@ -34,9 +35,6 @@ export const BACKGROUND_PRESETS: BackgroundPreset[] = [
   },
 ];
 
-/** Framed capture reuses the same gradients. */
-export const FRAME_PRESETS: BackgroundPreset[] = BACKGROUND_PRESETS;
-
 /** Solid colours offered next to the gradients. */
 export const COLOR_SWATCHES = [
   "#1a1a1e",
@@ -47,8 +45,3 @@ export const COLOR_SWATCHES = [
   "#e85a4f",
   "#f0f0f2",
 ];
-
-export function findPreset(id: string | undefined): BackgroundPreset | undefined {
-  if (!id) return undefined;
-  return BACKGROUND_PRESETS.find((p) => p.id === id);
-}

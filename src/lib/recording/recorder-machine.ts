@@ -1,6 +1,5 @@
 import { DEFAULT_SETTINGS } from "./settings";
 import type {
-  BackgroundConfig,
   BubbleConfig,
   FrameConfig,
   RecorderSettings,
@@ -35,7 +34,6 @@ export interface RecorderState {
   micOn: boolean;
   systemOn: boolean;
   bubble: BubbleConfig;
-  background: BackgroundConfig;
   frame: FrameConfig;
 
   // live capture facts
@@ -103,7 +101,6 @@ export type RecorderEvent =
   | { type: "TOGGLE_MIC"; on?: boolean }
   | { type: "TOGGLE_SYSTEM"; on?: boolean }
   | { type: "SET_BUBBLE"; patch: Partial<BubbleConfig> }
-  | { type: "SET_BACKGROUND"; background: BackgroundConfig }
   | { type: "SET_FRAME"; patch: Partial<FrameConfig> };
 
 export function initialRecorderState(
@@ -118,7 +115,6 @@ export function initialRecorderState(
     micOn: settings.micOn,
     systemOn: settings.systemOn,
     bubble: settings.bubble,
-    background: settings.background,
     frame: settings.frame,
     streamsAlive: false,
     surface: null,
@@ -342,7 +338,6 @@ export function recorderReducer(
           micOn: state.micOn,
           systemOn: state.systemOn,
           bubble: state.bubble,
-          background: state.background,
           frame: state.frame,
         }),
       };
@@ -355,9 +350,6 @@ export function recorderReducer(
 
     case "SET_BUBBLE":
       return { ...state, bubble: { ...state.bubble, ...event.patch } };
-
-    case "SET_BACKGROUND":
-      return { ...state, background: event.background };
 
     case "SET_FRAME":
       return { ...state, frame: { ...state.frame, ...event.patch } };
