@@ -1,0 +1,59 @@
+appId: com.jtylerray.yoom
+productName: Yoom
+copyright: © J. Tyler Ray
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - out/**/*
+  - package.json
+
+extraResources:
+  # The tray template icons are loaded from process.resourcesPath at runtime.
+  - from: build
+    to: build
+    filter:
+      - trayTemplate.png
+      - trayTemplate@2x.png
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+  # v1 is unsigned and ad-hoc signed by electron-builder. Consequence: macOS
+  # keys TCC grants on the binary's cdhash, which changes on every rebuild, so
+  # every rebuild re-prompts for Screen Recording, Camera, Microphone and
+  # System Audio Recording. Documented in desktop/README.md.
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSCameraUsageDescription: Yoom records your camera into your screen recordings.
+    NSMicrophoneUsageDescription: Yoom records your microphone into your screen recordings.
+    # REQUIRED on macOS 14.2+ for Chromium's CoreAudio Tap API. Without it the
+    # loopback audio track is created but silent, with no warning or error.
+    # (Electron desktopCapturer docs, §Caveats → macOS versions 14.2 or higher.)
+    NSAudioCaptureUsageDescription: Yoom records the audio playing on your Mac.
+    NSScreenCaptureUsageDescription: Yoom records your screen.
+    # Menu-bar app: no dock icon, no app-switcher entry. Pairs with app.dock.hide().
+    LSUIElement: true
+
+dmg:
+  title: Yoom
+  contents:
+    - x: 140
+      y: 190
+      type: file
+    - x: 400
+      y: 190
+      type: link
+      path: /Applications
+
+publish: null
