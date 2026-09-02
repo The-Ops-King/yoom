@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
+import { isOwner } from "@/lib/auth";
 import { getSettings } from "@/lib/db";
+import { PasswordGate } from "@/components/password-gate";
 import { AlertToggles } from "@/components/settings/alert-toggles";
 
 export const metadata: Metadata = { title: "Settings · Yoom" };
 
 export default async function SettingsPage() {
+  // Page-level gate: the (owner) layout alone does not stop this segment from
+  // being rendered into the RSC payload. Refuse before any database read.
+  if (!(await isOwner())) return <PasswordGate />;
+
   const settings = await getSettings();
 
   return (

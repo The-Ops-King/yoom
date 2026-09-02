@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isOwner } from "@/lib/auth";
+import { PasswordGate } from "@/components/password-gate";
 import { getVideoById, getVideoStats, listRecentViewers } from "@/lib/db";
 import { parseEdits } from "@/lib/edits";
 import { appUrl, shareBaseUrl } from "@/lib/env";
@@ -34,6 +35,10 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 export default async function VideoDetailPage({ params, searchParams }: PageProps) {
+  // Page-level gate (the layout alone does not stop this segment from being
+  // rendered into the RSC payload). Refuse before any database read.
+  if (!(await isOwner())) return <PasswordGate />;
+
   const { id } = await params;
   if (!UUID_RE.test(id)) notFound();
 

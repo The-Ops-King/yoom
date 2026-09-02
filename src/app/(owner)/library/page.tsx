@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { isOwner } from "@/lib/auth";
 import { listVideos, type VideoSort } from "@/lib/db";
 import { appUrl } from "@/lib/env";
+import { PasswordGate } from "@/components/password-gate";
 import { LibraryToolbar } from "@/components/library/library-toolbar";
 import { VideoCard } from "@/components/library/video-card";
 
@@ -23,6 +25,11 @@ function parseSort(value: string): VideoSort {
 }
 
 export default async function LibraryPage({ searchParams }: PageProps) {
+  // The (owner) layout also gates, but a layout is not an auth boundary: the
+  // page segment is still rendered into the RSC payload. Refuse before any
+  // database read.
+  if (!(await isOwner())) return <PasswordGate />;
+
   const params = await searchParams;
   const q = first(params.q).slice(0, 100);
   const sort = parseSort(first(params.sort));
