@@ -77,11 +77,14 @@ describe("drawFrame", () => {
       zooms: [{ start: 0, end: 10, rect: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, ramp: 0 }],
       overlays: [{ type: "highlight" as const, start: 0, end: 10, rect: { x: 0.35, y: 0.35, w: 0.1, h: 0.1 } }] };
     drawFrame(ctx, inputs(e), 5, 1920, 1080);
-    const fills = ctx.calls.filter((c) => c[0] === "fillRect");
+    const names = ctx.calls.map((c) => c[0]);
+    const overlayFill = names.lastIndexOf("fillRect");
     // (0.35 - 0.25) / 0.5 = 0.2 of the content box, twice the unzoomed size.
     for (const [i, want] of [384, 216, 384, 216].entries()) {
-      expect(fills.at(-1)![1][i] as number).toBeCloseTo(want, 6);
+      expect(ctx.calls[overlayFill][1][i] as number).toBeCloseTo(want, 6);
     }
+    // A zoom can push a mapped overlay past the frame, so it is clipped first.
+    expect(names.lastIndexOf("clip", overlayFill)).toBeGreaterThan(-1);
   });
   it("cross-fades both camera modes while a mode change is settling", () => {
     const ctx = fakeCtx();
@@ -99,8 +102,18 @@ describe("drawFrame", () => {
     drawFrame(ctx, inputs(e, "camera"), 1, 1920, 1080);
     const draws = ctx.calls.filter((c) => c[0] === "drawImage");
     expect(draws).toHaveLength(1);
-    // The 1280×720 camera is the source rect, not the 1920×1080 screen.
+    // The 1280×720 camera is the source rect (cover-cropped), not the screen.
     expect(draws[0][1].slice(1, 5)).toEqual([0, 0, 1280, 720]);
+    // Mirrored by default, and no bubble ring.
+    expect(ctx.calls.some((c) => c[0] === "scale" && (c[1] as number[])[0] === -1)).toBe(true);
     expect(ctx.calls.some((c) => c[0] === "stroke")).toBe(false);
+  });
+  it("covers rather than letterboxes a zoomed camera-only frame", () => {
+    const ctx = fakeCtx();
+    const e = { ...base, camera: null, zooms: [{ start: 0, end: 10, rect: { x: 0, y: 0, w: 0.5, h: 1 }, ramp: 0 }] };
+    drawFrame(ctx, inputs(e, "camera"), 5, 1920, 1080);
+    const draw = ctx.calls.find((c) => c[0] === "drawImage")!;
+    // The 640×720 zoom region is cover-cropped to 16:9, not squeezed into it.
+    expect(draw[1].slice(1, 5)).toEqual([0, 180, 640, 360]);
   });
 });

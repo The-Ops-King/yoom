@@ -4,8 +4,6 @@ import type { BackgroundConfig, RecordingMode } from "@/lib/recording/types";
 import { cameraAt } from "./camera-track";
 import { FULL_RECT, toOutput, zoomAt } from "./zoom";
 
-export type DrawableSource = HTMLVideoElement | HTMLImageElement | HTMLCanvasElement;
-
 export interface RenderInputs {
   screen: HTMLVideoElement | null;
   camera: HTMLVideoElement | null;
@@ -30,12 +28,40 @@ type RoundRectPath = Path2D & {
   roundRect: (x: number, y: number, w: number, h: number, r: number) => void;
 };
 
-function roundedPath(x: number, y: number, w: number, h: number, r: number): Path2D {
+function buildPath(x: number, y: number, w: number, h: number, r: number): Path2D {
   const p = new Path2D();
-  const rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
   // Safari < 16.4 has Path2D but not roundRect.
-  if (rr > 0 && "roundRect" in p) (p as RoundRectPath).roundRect(x, y, w, h, rr);
+  if (r > 0 && "roundRect" in p) (p as RoundRectPath).roundRect(x, y, w, h, r);
   else p.rect(x, y, w, h);
+  return p;
+}
+
+function clampRadius(w: number, h: number, r: number): number {
+  return Math.max(0, Math.min(r, Math.min(w, h) / 2));
+}
+
+/** Uncached — for the camera bubble, whose box moves every frame. */
+function roundedPath(x: number, y: number, w: number, h: number, r: number): Path2D {
+  return buildPath(x, y, w, h, clampRadius(w, h, r));
+}
+
+let frameKey = "";
+let frameCached: Path2D | null = null;
+
+/**
+ * The content box needs the same rounded path up to three times per frame
+ * (shadow fill, screen clip, overlay clip) and it only changes when the
+ * destination rect or radius does, so it is cached rather than reallocated 60
+ * times a second. Single-entry, exactly like the live compositor's cache —
+ * the bubble deliberately uses `roundedPath` so it cannot thrash this one.
+ */
+function framePath(x: number, y: number, w: number, h: number, r: number): Path2D {
+  const rr = clampRadius(w, h, r);
+  const key = `${x}|${y}|${w}|${h}|${rr}`;
+  if (frameCached && key === frameKey) return frameCached;
+  const p = buildPath(x, y, w, h, rr);
+  frameKey = key;
+  frameCached = p;
   return p;
 }
 
@@ -51,7 +77,9 @@ function drawBackground(
   cfg: BackgroundConfig | undefined,
   media: RenderInputs["background"],
 ) {
-  ctx.fillStyle = cfg?.color ?? "#1a1a1e";
+  // `none` always paints the neutral base: `color` can linger from an earlier
+  // pick, and honouring it would make "no background" show the old colour.
+  ctx.fillStyle = !cfg || cfg.kind === "none" ? "#1a1a1e" : cfg.color ?? "#1a1a1e";
   ctx.fillRect(0, 0, W, H);
   if (!media || !cfg || (cfg.kind !== "image" && cfg.kind !== "video")) return;
   const mw = isVideo(media) ? media.videoWidth : media.naturalWidth;
@@ -67,7 +95,11 @@ function scratchCanvas(): HTMLCanvasElement {
   return scratch;
 }
 
-function drawOverlay(ctx: CanvasRenderingContext2D, o: Overlay, t: number, content: Rect, W: number) {
+/**
+ * `zoom` is the current magnification (1 / view.w), so effects sized in output
+ * pixels rather than source fractions still grow with the zoom.
+ */
+function drawOverlay(ctx: CanvasRenderingContext2D, o: Overlay, t: number, content: Rect, W: number, zoom: number) {
   const x = content.x + o.rect.x * content.w;
   const y = content.y + o.rect.y * content.h;
   const w = o.rect.w * content.w;
@@ -112,7 +144,7 @@ function drawOverlay(ctx: CanvasRenderingContext2D, o: Overlay, t: number, conte
       const p = Math.min(1, (t - o.start) / Math.max(0.05, o.end - o.start));
       const cx = x + w / 2, cy = y + h / 2;
       ctx.globalAlpha = 1 - p; ctx.strokeStyle = color; ctx.lineWidth = Math.max(2, W * 0.003);
-      ctx.beginPath(); ctx.arc(cx, cy, W * 0.01 + p * W * 0.03, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy, (W * 0.01 + p * W * 0.03) * zoom, 0, Math.PI * 2); ctx.stroke();
       break;
     }
   }
@@ -127,7 +159,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
   const src = primary(inputs);
   const sw = src?.videoWidth ?? 0, sh = src?.videoHeight ?? 0;
   ctx.save();
-  ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ctx.filter = "none";
   if (!src || sw <= 0 || sh <= 0) { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H); ctx.restore(); return; }
 
   const frame = inputs.edits.frame;
@@ -135,24 +167,46 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
   // Zoom: the part of the source that fills the content box this frame.
   const view = zoomAt(inputs.edits.zooms, t);
   const sx = view.x * sw, sy = view.y * sh, svw = view.w * sw, svh = view.h * sh;
+
+  // Camera-only draws the camera as the primary source: cover the box (a
+  // letterboxed selfie looks broken) and mirror it, matching the live preview.
+  const camOnly = inputs.mode === "camera";
+  const camOnlyMirror = camOnly && (inputs.edits.camera?.mirror ?? true);
+  const drawPrimary = (box: Rect) => {
+    if (!camOnly) { ctx.drawImage(src, sx, sy, svw, svh, box.x, box.y, box.w, box.h); return; }
+    const crop = coverCrop(svw, svh, box.w, box.h);
+    const csx = sx + crop.sx, csy = sy + crop.sy;
+    if (camOnlyMirror) {
+      ctx.save(); ctx.translate(box.x + box.w, box.y); ctx.scale(-1, 1);
+      ctx.drawImage(src, csx, csy, crop.sw, crop.sh, 0, 0, box.w, box.h); ctx.restore();
+    } else {
+      ctx.drawImage(src, csx, csy, crop.sw, crop.sh, box.x, box.y, box.w, box.h);
+    }
+  };
+
   let content: Rect;
+  let radius = 0;
   if (framed && frame) {
     const layout = computeFrameLayout(sw, sh, frame);
     const scale = Math.min(W / layout.canvasW, H / layout.canvasH);
-    content = { x: layout.dest.x * scale, y: layout.dest.y * scale, w: layout.dest.w * scale, h: layout.dest.h * scale };
-    const radius = layout.radius * scale;
+    // Letterbox when the context isn't exactly `outputSize` — the staging
+    // preview canvas is sized to the viewport, not to the export dimensions.
+    const offX = (W - layout.canvasW * scale) / 2;
+    const offY = (H - layout.canvasH * scale) / 2;
+    content = { x: offX + layout.dest.x * scale, y: offY + layout.dest.y * scale, w: layout.dest.w * scale, h: layout.dest.h * scale };
+    radius = layout.radius * scale;
     drawBackground(ctx, W, H, frame.background, inputs.background);
     if (frame.shadow) {
       ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = W * 0.02; ctx.shadowOffsetY = W * 0.008;
-      ctx.fillStyle = "#000"; ctx.fill(roundedPath(content.x, content.y, content.w, content.h, radius)); ctx.restore();
+      ctx.fillStyle = "#000"; ctx.fill(framePath(content.x, content.y, content.w, content.h, radius)); ctx.restore();
     }
-    ctx.save(); ctx.clip(roundedPath(content.x, content.y, content.w, content.h, radius));
-    ctx.drawImage(src, sx, sy, svw, svh, content.x, content.y, content.w, content.h); ctx.restore();
+    ctx.save(); ctx.clip(framePath(content.x, content.y, content.w, content.h, radius));
+    drawPrimary(content); ctx.restore();
   } else {
     ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
     const scale = Math.min(W / sw, H / sh);
     content = { x: (W - sw * scale) / 2, y: (H - sh * scale) / 2, w: sw * scale, h: sh * scale };
-    ctx.drawImage(src, sx, sy, svw, svh, content.x, content.y, content.w, content.h);
+    drawPrimary(content);
   }
 
   // Camera (screen+camera only; camera-only mode already drew the camera as `src`).
@@ -177,11 +231,17 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
     else drawCam(s.mode, s.rect, 1);
   }
 
-  // Overlays live on source pixels, so they move with the zoom; the bubble did not.
+  // Overlays live on source pixels, so they move with the zoom; the bubble did
+  // not. Clipped to the content box: a zoom can push an overlay's mapped rect
+  // outside the frame, and it must not bleed onto the padding or letterbox.
+  ctx.save();
+  ctx.clip(framePath(content.x, content.y, content.w, content.h, radius));
+  const zoom = view.w > 0 ? 1 / view.w : 1;
   for (const o of inputs.edits.overlays) {
     if (t < o.start || t > o.end) continue;
     const mapped = view === FULL_RECT ? o : { ...o, rect: toOutput(o.rect, view) };
-    drawOverlay(ctx, mapped, t, content, W);
+    drawOverlay(ctx, mapped, t, content, W, zoom);
   }
+  ctx.restore();
   ctx.restore();
 }
