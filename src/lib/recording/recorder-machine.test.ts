@@ -61,6 +61,30 @@ describe("acquisition", () => {
     expect(s.error).toBe("");
   });
 
+  it("ACQUIRE_CANCELLED goes back to idle with no error", () => {
+    const s = run(init(), [{ type: "ACQUIRE" }, { type: "ACQUIRE_CANCELLED" }]);
+    expect(s.status).toBe("idle");
+    expect(s.error).toBe("");
+    expect(s.notice).toBe("");
+    expect(s.streamsAlive).toBe(false);
+    expect(s.surface).toBe(null);
+  });
+
+  it("ACQUIRE_CANCELLED keeps the preferences the picker was opened with", () => {
+    const s = run(init(), [
+      { type: "SELECT_MODE", mode: "camera" },
+      { type: "ACQUIRE" },
+      { type: "ACQUIRE_CANCELLED" },
+    ]);
+    expect(s.mode).toBe("camera");
+    expect(s.status).toBe("idle");
+  });
+
+  it("ignores ACQUIRE_CANCELLED outside of acquiring", () => {
+    const s = run(init(), [{ type: "ACQUIRE" }, ACQUIRED]);
+    expect(recorderReducer(s, { type: "ACQUIRE_CANCELLED" })).toBe(s);
+  });
+
   it("ignores ACQUIRED when not acquiring", () => {
     const s = init();
     expect(recorderReducer(s, ACQUIRED)).toBe(s);

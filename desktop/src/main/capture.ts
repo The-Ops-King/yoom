@@ -18,6 +18,32 @@ export function installCaptureIpc(): void {
   });
 }
 
+/** The shape of the callback Electron hands `setDisplayMediaRequestHandler`. */
+type StreamsCallback = (streams: Electron.Streams) => void;
+
+/**
+ * Deny a display-media request without throwing.
+ *
+ * Electron's native `DisplayMediaDeviceChosen`
+ * (shell/browser/electron_browser_context.cc) branches on the first argument:
+ * a null/undefined/absent one fails the request quietly with
+ * `INVALID_DISPLAY_CAPTURE_CONSTRAINTS`, which is the documented "deny". An
+ * empty object gets past that check and falls through to
+ * `video_requested && !has_video`, which calls
+ * `ThrowTypeError("Video was requested, but no video stream was provided")` —
+ * the `UnhandledPromiseRejectionWarning` this handler used to log on every
+ * cancelled picker.
+ *
+ * The published callback type is `(streams: Streams) => void` with no way to
+ * express "no streams", hence the cast; the runtime contract is the one above.
+ * Either way the page sees an `AbortError`, which `isCaptureCancellation` in
+ * the web app treats as "the user backed out" — including for the permission
+ * branch below, where the macOS notification is the real message.
+ */
+function deny(callback: StreamsCallback): void {
+  (callback as unknown as (streams: Electron.Streams | null) => void)(null);
+}
+
 /**
  * `ses.setDisplayMediaRequestHandler` replaces Chrome's picker sheet with ours
  * and — the point of the whole shell — lets us hand back `audio: 'loopback'`.
@@ -38,7 +64,7 @@ export function installDisplayMediaHandler(ses: Session): void {
           body: "Grant it in System Settings → Privacy & Security, then relaunch Yoom.",
         }).show();
         openPrivacyPane("screen");
-        callback({});
+        deny(callback);
         return;
       }
 
@@ -48,13 +74,13 @@ export function installDisplayMediaHandler(ses: Session): void {
       } catch (err) {
         console.error("[yoom] desktopCapturer.getSources failed", err);
         setCaptureKind("screen");
-        callback({});
+        deny(callback);
         return;
       }
 
       if (sources.length === 0) {
         setCaptureKind("screen");
-        callback({});
+        deny(callback);
         return;
       }
 
@@ -66,12 +92,12 @@ export function installDisplayMediaHandler(ses: Session): void {
 
       const source = sources.find((s) => s.id === chosenId);
       if (!source) {
-        // Cancelled: an empty callback surfaces as NotAllowedError in the page,
-        // which the recorder already handles as "user dismissed the picker".
+        // Cancelled: `deny` surfaces as AbortError in the page, which the
+        // recorder handles as "user dismissed the picker" and returns to idle.
         // Reset so a stale `window` kind from a previous pick never survives
         // a cancelled reselect and mis-hides the bubble.
         setCaptureKind("screen");
-        callback({});
+        deny(callback);
         return;
       }
 

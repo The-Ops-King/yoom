@@ -89,6 +89,12 @@ export type RecorderEvent =
       hasCamera: boolean;
     }
   | { type: "ACQUIRE_FAILED"; error: string }
+  /**
+   * The user dismissed the screen picker. NOT a failure: it is the ordinary way
+   * to back out of starting a recording, so it lands back on `idle` with no
+   * error text — see `isCaptureCancellation` in `media-sources.ts`.
+   */
+  | { type: "ACQUIRE_CANCELLED" }
   | { type: "RECORD_FAILED"; error: string }
   | { type: "START" }
   | { type: "COUNTDOWN_TICK" }
@@ -222,6 +228,21 @@ export function recorderReducer(
         streamsAlive: false,
         surface: null,
         error: event.error,
+      };
+
+    case "ACQUIRE_CANCELLED":
+      if (state.status !== "acquiring") return state;
+      // Straight back to where ACQUIRE started, with nothing to show for it:
+      // the picker never handed us a stream, so there is nothing to report.
+      return {
+        ...state,
+        status: "idle",
+        streamsAlive: false,
+        surface: null,
+        hasSystemAudio: false,
+        hasCamera: false,
+        error: "",
+        notice: "",
       };
 
     case "RECORD_FAILED":

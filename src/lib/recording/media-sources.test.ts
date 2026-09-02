@@ -5,6 +5,7 @@ import {
   cameraConstraints,
   displayConstraints,
   getProvider,
+  isCaptureCancellation,
   micConstraints,
   readSurface,
 } from "./media-sources";
@@ -215,5 +216,32 @@ describe("getProvider surface pref", () => {
   it("leaves getDisplay untouched when the shell has no setSurfacePref", async () => {
     vi.stubGlobal("window", { __yoomDesktop: { version: 1, isDesktop: true } });
     expect(getProvider().getDisplay).toBe(browserProvider.getDisplay);
+  });
+});
+
+describe("isCaptureCancellation", () => {
+  const err = (name: string, message = "") => Object.assign(new Error(message), { name });
+
+  it("treats a dismissed Chrome picker as a cancellation", () => {
+    expect(isCaptureCancellation(err("NotAllowedError", "Permission denied"))).toBe(true);
+  });
+
+  it("treats Electron's denied display-media request as a cancellation", () => {
+    // Electron denies by calling the handler callback with no streams, which
+    // Chromium reports as INVALID_DISPLAY_CAPTURE_CONSTRAINTS → AbortError.
+    expect(isCaptureCancellation(err("AbortError", "Invalid capture constraints"))).toBe(true);
+  });
+
+  it("keeps an OS-level screen-recording denial as a real failure", () => {
+    expect(
+      isCaptureCancellation(err("NotAllowedError", "Permission denied by system")),
+    ).toBe(false);
+  });
+
+  it("is false for genuine capture failures and non-errors", () => {
+    expect(isCaptureCancellation(err("NotReadableError", "Device in use"))).toBe(false);
+    expect(isCaptureCancellation(err("NotFoundError"))).toBe(false);
+    expect(isCaptureCancellation("NotAllowedError")).toBe(false);
+    expect(isCaptureCancellation(null)).toBe(false);
   });
 });

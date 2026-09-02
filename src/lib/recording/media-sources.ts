@@ -65,6 +65,30 @@ export function readSurface(
 }
 
 /**
+ * True for the rejection a *dismissed* picker produces, as opposed to a real
+ * capture failure. Pure so it can be asserted in a node test.
+ *
+ * - Chrome/Edge reject a cancelled picker sheet with `NotAllowedError`
+ *   ("Permission denied"). There is no separate name for "the user clicked
+ *   Cancel", so the name alone is what we have to go on.
+ * - The desktop shell's `setDisplayMediaRequestHandler` denies by calling the
+ *   handler callback with no streams. Chromium turns that into
+ *   `INVALID_DISPLAY_CAPTURE_CONSTRAINTS`, which Blink maps to `AbortError`
+ *   (`UserMediaRequest::Fail`, third_party/blink/renderer/modules/mediastream/
+ *   user_media_request.cc) — NOT `NotAllowedError`, which is why a cancelled
+ *   native picker used to surface as "Could not start capture".
+ * - The one `NotAllowedError` that is a genuine failure is macOS refusing the
+ *   whole app: Chrome says "Permission denied by system" there, and that one
+ *   still deserves the red text telling the user to grant Screen Recording.
+ */
+export function isCaptureCancellation(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.name === "AbortError") return true;
+  if (err.name !== "NotAllowedError") return false;
+  return !/by system/i.test(err.message);
+}
+
+/**
  * What the *browser* can do. macOS Chrome only delivers system audio for tab
  * captures (an OS restriction); Windows Chrome delivers it for screens and
  * windows too; Safari and Firefox deliver none.

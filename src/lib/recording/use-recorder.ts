@@ -8,7 +8,7 @@ import { editedDuration } from "@/lib/editor/cuts";
 import { renderToBlob, type RenderSources } from "@/lib/editor/export";
 import { AudioMixer } from "./audio-mixer";
 import { isDesktop, onDesktopShortcut, setDesktopHudState } from "./desktop-bridge";
-import { getProvider } from "./media-sources";
+import { getProvider, isCaptureCancellation } from "./media-sources";
 import {
   MAX_DURATION_MS,
   initialRecorderState,
@@ -255,7 +255,18 @@ export function useRecorder(): UseRecorderResult {
       let surface: SurfacePref | "unknown" = "unknown";
 
       if (current.mode !== "camera") {
-        const display = await provider.getDisplay(current.surfacePref);
+        // Only the *display* step can be cancelled by dismissing a picker; a
+        // camera or mic rejection with the same name is a real denial, so the
+        // classification is scoped to this await rather than the whole try.
+        let display;
+        try {
+          display = await provider.getDisplay(current.surfacePref);
+        } catch (err) {
+          if (!isCaptureCancellation(err)) throw err;
+          teardown();
+          dispatch({ type: "ACQUIRE_CANCELLED" });
+          return;
+        }
         screenStreamRef.current = display.stream;
         surface = display.surface;
         hasSystemAudio = display.hasSystemAudio;
