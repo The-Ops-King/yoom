@@ -12,6 +12,9 @@ import type { StagingContext } from "./types";
 /** Smallest the bubble may be dragged to, as a fraction of the content width. */
 const MIN_W = 0.05;
 
+/** How far the playhead must move before a just-dragged rect stops being shown. */
+const HOLD_S = 1 / 30;
+
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 type Drag = {
@@ -33,7 +36,9 @@ type Drag = {
  * The camera bubble's direct-manipulation layer: a dashed box over the preview
  * canvas that writes a camera keyframe at the playhead when dragged or
  * resized. Transparent and `pointer-events: none` everywhere except the box
- * itself, so the overlay layer stacked above it still gets every other click.
+ * itself, so the overlay layer beneath it (this layer sits on top, at `z-20`)
+ * still gets every other click — and the box goes through too while a drawing
+ * tool is armed, so an overlay can be drawn over the bubble.
  *
  * The box is positioned from a rAF loop reading `player.timeRef` rather than
  * from React state: playback must not re-render the whole staging tree at
@@ -44,13 +49,24 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const badgeRef = useRef<HTMLDivElement | null>(null);
   /**
-   * The rect being dragged right now. The rAF prefers it over `cameraAt`
-   * because a keyframe's eased move starts AT its own `t`: sampling at the
-   * drag's own time would report the *previous* rect and the box would not
-   * follow the pointer.
+   * The rect of the gesture in progress — or of the one just released, until
+   * the playhead moves off it. The rAF prefers it over `cameraAt` because a
+   * keyframe's eased move starts AT its own `t`: sampling at the drag's own
+   * time reports the *previous* rect, so the box would neither follow the
+   * pointer nor stay where it was dropped.
    */
-  const liveRectRef = useRef<Rect | null>(null);
+  const liveRef = useRef<{ t: number; rect: Rect } | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
+
+  /**
+   * `ctx` is a fresh object on every `applyLive`, so the drag effect reads it
+   * through a ref instead of depending on it — otherwise the window listeners
+   * would be torn down and re-added on every single pointermove.
+   */
+  const ctxRef = useRef(ctx);
+  useEffect(() => {
+    ctxRef.current = ctx;
+  }, [ctx]);
 
   const track = ctx.mode === "screen+camera" ? ctx.edits.camera ?? null : null;
   const frame = ctx.edits.frame;
@@ -67,17 +83,23 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
       const r = layer.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0) return;
       const c = contentRect(r.width, r.height, frame);
-      const sample = cameraAt(track, timeRef.current);
-      const live = liveRectRef.current;
-      const full = sample.mode === "full" && !live;
-      badge.style.display = full ? "block" : "none";
-      box.style.display = full ? "none" : "block";
-      if (full) {
+      const t = timeRef.current;
+      const sample = cameraAt(track, t);
+      // Release the held rect once the playhead leaves the keyframe it was
+      // dragged at — from there on `cameraAt` is the truth again.
+      const held = liveRef.current;
+      if (held && Math.abs(t - held.t) > HOLD_S) liveRef.current = null;
+      if (sample.mode === "full") {
+        liveRef.current = null;
+        badge.style.display = "block";
+        box.style.display = "none";
         badge.style.left = `${c.x + 8}px`;
         badge.style.top = `${c.y + 8}px`;
         return;
       }
-      const rect = live ?? sample.rect;
+      badge.style.display = "none";
+      box.style.display = "block";
+      const rect = liveRef.current?.rect ?? sample.rect;
       const w = rect.w * c.w;
       const h = rect.h * c.h;
       box.style.left = `${c.x + rect.x * c.w}px`;
@@ -104,7 +126,9 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
         };
       } else {
         const aspect = c.h > 0 ? c.w / c.h : 16 / 9;
-        let w = clamp((e.clientX - c.x) / c.w - base.x, MIN_W, Math.max(MIN_W, 1 - base.x));
+        // Delta from where the corner was grabbed, so the edge does not jump
+        // to the pointer on the first move.
+        let w = clamp(base.w + (e.clientX - drag.startX) / c.w, MIN_W, Math.max(MIN_W, 1 - base.x));
         let h = bubbleHeightFor(drag.shape, w, aspect);
         const hMax = Math.max(0, 1 - base.y);
         // `bubbleHeightFor` is linear in `w` for every bubble shape, so the
@@ -115,12 +139,13 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
         }
         rect = { ...base, w, h: Math.min(h, hMax) };
       }
-      liveRectRef.current = rect;
-      ctx.applyLive(() => ops.upsertCameraKeyframe(drag.from, drag.t, { rect }));
+      liveRef.current = { t: drag.t, rect };
+      ctxRef.current.applyLive(() => ops.upsertCameraKeyframe(drag.from, drag.t, { rect }));
     };
     const onUp = () => {
-      liveRectRef.current = null;
-      ctx.commit(drag.from);
+      // `liveRef` deliberately survives: the rAF keeps showing the dropped
+      // rect until the playhead moves off `drag.t`.
+      ctxRef.current.commit(drag.from);
       setDrag(null);
     };
     window.addEventListener("pointermove", onMove);
@@ -131,7 +156,7 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [drag, ctx]);
+  }, [drag]);
 
   if (!track) return null;
 
@@ -145,7 +170,7 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
     const c = contentRect(r.width, r.height, frame);
     const t = timeRef.current;
     const rect = cameraAt(track, t).rect;
-    liveRectRef.current = rect;
+    liveRef.current = { t, rect };
     setDrag({
       kind,
       t,
@@ -157,6 +182,10 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
       shape: track.shape,
     });
   };
+
+  // A drawing tool owns the whole preview: let its pointer events fall
+  // straight through the bubble to the overlay layer underneath.
+  const grabbable = ctx.tool === "select" ? "pointer-events-auto" : "pointer-events-none";
 
   return (
     <div ref={layerRef} className="pointer-events-none absolute inset-0 z-20">
@@ -172,13 +201,12 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
         role="presentation"
         style={{ display: "none" }}
         onPointerDown={(e) => begin(e, "move")}
-        className="pointer-events-auto absolute cursor-move touch-none border-2 border-dashed border-white/70 shadow-[0_0_0_1px_rgba(0,0,0,0.45)]"
+        className={`${grabbable} absolute cursor-move touch-none border-2 border-dashed border-white/70 shadow-[0_0_0_1px_rgba(0,0,0,0.45)]`}
       >
         <div
-          role="presentation"
           aria-label="Resize the camera bubble"
           onPointerDown={(e) => begin(e, "resize")}
-          className="pointer-events-auto absolute -right-1.5 -bottom-1.5 h-3 w-3 cursor-nwse-resize rounded-sm border border-black/50 bg-white"
+          className={`${grabbable} absolute -right-1.5 -bottom-1.5 h-3 w-3 cursor-nwse-resize rounded-sm border border-black/50 bg-white`}
         />
       </div>
     </div>

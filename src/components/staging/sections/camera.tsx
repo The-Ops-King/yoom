@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatElapsed } from "@/components/recorder/preview-stage";
 import { MAX_CAMERA_OFFSET_MS, type CameraTrack, type Rect, type VideoEdits } from "@/lib/edits";
 import { bubbleHeightFor, cameraAt } from "@/lib/editor/camera-track";
 import * as ops from "@/lib/editor/edit-ops";
@@ -185,13 +186,18 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
               >
                 {fmt(k.t)} · {k.mode === "full" ? "full screen" : "bubble"}
               </button>
-              <button type="button" className={btn} onClick={() => player.seek(k.t)}>
+              <button
+                type="button"
+                className={btn}
+                aria-label={`Go to ${formatElapsed(k.t * 1000)}`}
+                onClick={() => player.seek(k.t)}
+              >
                 Go
               </button>
               <button
                 type="button"
                 disabled={i === 0}
-                aria-label={`Remove the keyframe at ${fmt(k.t)}`}
+                aria-label={`Remove the keyframe at ${formatElapsed(k.t * 1000)}`}
                 onClick={() => {
                   ctx.apply((e) => ops.removeCameraKeyframe(e, k.t));
                   ctx.setSelected(null);
