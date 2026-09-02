@@ -23,7 +23,7 @@ body {
   color: var(--fg);
 }
 
-/* 336×64 window, 320×48 pill: the margin is where the shadow lives, because a
+/* 300×64 window, 284×48 pill: the margin is where the shadow lives, because a
    transparent window cannot paint outside its own bounds. */
 #pill {
   -webkit-app-region: drag;
