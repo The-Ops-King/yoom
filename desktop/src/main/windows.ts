@@ -200,3 +200,23 @@ export function toggleRecorderWindow(): void {
     win.focus();
   }
 }
+
+/**
+ * Loom-style "the app disappears". The window is HIDDEN, never closed: the
+ * MediaRecorder, the compositor's RAF loop and the `beforeunload` guard all
+ * live in that renderer, and closing it would throw the take away. The window
+ * already sets `backgroundThrottling: false`, which is what keeps a hidden
+ * window compositing at full rate.
+ */
+export function hideRecorderWindow(): void {
+  const win = getRecorderWindow();
+  if (win?.isVisible()) win.hide();
+}
+
+/** Bring the recorder window back at the end of a take. */
+export function showRecorderWindow(): void {
+  const win = getRecorderWindow();
+  if (!win) return;
+  win.show();
+  win.focus();
+}
