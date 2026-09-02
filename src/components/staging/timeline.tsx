@@ -87,7 +87,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
         if (!k || d.index === 0) return;
         const nt = clamp(t, MIN_SPAN, duration);
         ctx.applyLive(() =>
-          ops.upsertCameraKeyframe(ops.removeCameraKeyframe(d.from, k.t), nt, { mode: k.mode, rect: k.rect }),
+          ops.upsertCameraKeyframe(ops.removeCameraKeyframe(d.from, k.t), nt, { mode: k.mode, rect: k.rect, ...(k.shape ? { shape: k.shape } : {}) }),
         );
         return;
       }
