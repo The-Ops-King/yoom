@@ -13,6 +13,7 @@ import {
   setDesktopBubbleAppearance,
   setDesktopBubbleVisible,
   setDesktopCameraDevice,
+  setDesktopHudState,
   setDesktopRecordingActive,
 } from "./desktop-bridge";
 import { computeFrameLayout, displayPosToCanvasPos } from "./geometry";
@@ -30,6 +31,7 @@ import type {
   BubbleConfig,
   Capabilities,
   FrameConfig,
+  HudStatus,
   RecordingMode,
   SurfacePref,
 } from "./types";
@@ -867,6 +869,11 @@ export function useRecorder(): UseRecorderResult {
         }
         discardRecorder();
         dispatch({ type: "CANCEL" });
+      } else if (action === "bubbleToggle") {
+        // The HUD's camera button. Mirrors the bubble's own hide control, but
+        // toggles rather than only hiding, so the HUD can bring it back.
+        const visible = !stateRef.current.bubble.visible;
+        dispatch({ type: "SET_BUBBLE", patch: { visible } });
       }
     });
   }, [acquire, discardRecorder]);
@@ -954,6 +961,54 @@ export function useRecorder(): UseRecorderResult {
       dispatch({ type: "SET_BUBBLE", patch: { pos: mapped } });
     });
   }, []);
+
+  // ---------- recording HUD ----------
+
+  /**
+   * The shell's HUD is a dumb view of the state below. It is pushed on every
+   * status change and, while a take is live, on a ~4 Hz timer — fast enough
+   * that the pill's seconds field never looks stuck, slow enough that we are
+   * not crossing the contextBridge on every 100 ms TICK.
+   */
+  const hudStatus: HudStatus =
+    state.status === "countdown" ||
+    state.status === "recording" ||
+    state.status === "paused" ||
+    state.status === "stopping" ||
+    state.status === "review" ||
+    state.status === "error" ||
+    state.status === "idle"
+      ? state.status
+      : "other";
+
+  useEffect(() => {
+    const push = () => {
+      const current = stateRef.current;
+      setDesktopHudState({
+        status:
+          current.status === "countdown" ||
+          current.status === "recording" ||
+          current.status === "paused" ||
+          current.status === "stopping" ||
+          current.status === "review" ||
+          current.status === "error" ||
+          current.status === "idle"
+            ? current.status
+            : "other",
+        elapsedMs: current.elapsedMs,
+        countdown: current.countdown,
+        markers: current.markers.length,
+        bubbleVisible: current.bubble.visible,
+      });
+    };
+
+    // Push immediately so a transition is never a frame late, then keep the
+    // timer alive only while there is a moving number to render.
+    push();
+    if (hudStatus !== "countdown" && hudStatus !== "recording") return;
+    const id = window.setInterval(push, 250);
+    return () => window.clearInterval(id);
+  }, [hudStatus, state.markers.length, state.bubble.visible]);
 
   // Polled rather than pushed so the draw loop stays free of React.
   useEffect(() => {
