@@ -24,6 +24,8 @@
 - `assetPrefix` rewrites only `/_next/` (i.e. `.next/static`) URLs — not `/public`, not `/_next/image`.
 - `next.config.ts` `async headers()` returns `[{ source, headers: [{ key, value }] }]`.
 
+**Review amendments (Fable, 2026-09-01, applied inline):** thumbnail capture works in every mode (Task 18); `visibilitychange` no longer ends a session, only `pagehide`/`ended` do (Task 22); `update_view_progress` returns NULL for a missing session and `updateViewSession` guards an all-null row (Tasks 9, 10); stream route uses `Cache-Control: private` so no shared cache replays a 206 for a different Range (Task 20); auth verdict read from the cookie via `src/lib/auth.ts#isOwner()` instead of a proxy-set header (Tasks 15, 18); `fix-webm-duration` patches the WebM duration header before upload (Task 18); Phase 3 foundations in the single migration — `videos.updated_at`, `change_video_slug()` and the `video_stats` view (Task 9); `getViewSession()` added to `db.ts` (Task 10).
+
 ---
 
 ## File Structure
@@ -3503,6 +3505,7 @@ MediaRecorder writes WebM with no duration in the EBML header, so `<video>` show
 - [ ] Run `npm test` — expect PASS (unchanged count).
 - [ ] Run `npm run build` — expect PASS.
 - [ ] Run `grep -rn "password" src/components/recorder.tsx` — expect no matches.
+- [ ] Manual check (`npm run dev`, any mode): after a short recording the browser Network tab shows a `POST /api/upload/thumbnail` in **screen-only, camera-only and screen+camera** modes; and playing the uploaded file locally (`URL.createObjectURL(blob)` in the console, or the watch page later) shows a finite duration and a working seek bar.
 - [ ] Commit:
   ```bash
   git add -A && git commit -m "$(cat <<'EOF'
@@ -4508,8 +4511,10 @@ Keeps the existing visual language from `video-player.tsx` (`border-border`, `bg
 
   - All video bytes flow through Vercel functions; 206 responses are not CDN-cached.
     Fine for personal volume, worth revisiting if traffic grows.
-  - MediaRecorder WebM has no duration header or cues, so seeking is coarse and watch
-    percentages fall back to the stored `duration_ms`.
+  - MediaRecorder WebM has no cues index. The duration header is patched client-side
+    (`fix-webm-duration`) so the seek bar works, but seeking still relies on the
+    browser scanning clusters, so it is coarser than a remuxed file. Watch
+    percentages fall back to the stored `duration_ms` when the header is missing.
   - Old `/watch/<uuid>.webm` links from the R2 era no longer resolve.
   ```
 - [ ] Run `npm test` — expect PASS (unchanged count).
@@ -4624,5 +4629,5 @@ Run against a deployed preview with all env vars set, plus `npm run dev` where n
 
 **Type consistency.** `Video` and `ViewSession` are declared once in `db.ts` and imported by `alerts.ts`, the stream/thumb routes, the view routes and the watch page; no shape is redeclared. `claimAlert(sessionId: string, column: AlertColumn): Promise<boolean>` has the same signature at both call sites. `updateViewSession(sessionId, percent, ended)` returns `ViewSession | null` and both callers null-check it. `uploadToDrive(blob, sessionUri, onProgress?, options?)` returns `{ id: string }`, matching `recorder.tsx`'s destructure and the `driveFileId` field `/api/upload/complete` expects. `/api/upload` returns `{ sessionUri }`; `/api/upload/complete` returns `{ id, slug, url }`, and `recorder.tsx` uses `id` (for the thumbnail POST) and `url` (for the share box). `[videoId]` route params are the `videos.id` UUID everywhere — `watch-view.tsx` passes `video.id` into both `/api/stream/` and `/api/thumb/`, and `generateMetadata` builds the same URLs. `clampRange` returns `{start, end} | {unsatisfiable: true} | null`, and the stream route handles all three branches.
 
-**Ambiguities resolved.** (a) The spec lists `env.ts` exports as constants; they are implemented as zero-argument functions (`appUrl()`, `shareBaseUrl()`, `allowedOrigins()`) because module-level constants that throw would fail at import time and break `next build`. (b) `updateViewSession`'s `greatest(...)` is implemented as the `update_view_progress` SQL function in the migration so the max is atomic server-side rather than a read-modify-write race. (c) `getVideoIdByOldSlug` returns the id (per the spec's name); the page then calls `getVideoById` to learn the current slug for the 308. (d) The proxy passes its auth verdict as the `x-yoom-auth` request header and `page.tsx` reads it with `headers()`, rather than rewriting the URL. (e) Task 2 stubs `r2.ts` and the upload route so the tree keeps compiling between the AWS-SDK removal and the Task 19 deletion. (f) `video-player.tsx` is left untouched and `watch-view.tsx` is a new sibling — the watch page needs a tracked `videoRef` and a poster, which the existing component does not expose; `video-player.tsx` is reused by the Phase 3 detail page.
+**Ambiguities resolved.** (a) The spec lists `env.ts` exports as constants; they are implemented as zero-argument functions (`appUrl()`, `shareBaseUrl()`, `allowedOrigins()`) because module-level constants that throw would fail at import time and break `next build`. (b) `updateViewSession`'s `greatest(...)` is implemented as the `update_view_progress` SQL function in the migration so the max is atomic server-side rather than a read-modify-write race. (c) `getVideoIdByOldSlug` returns the id (per the spec's name); the page then calls `getVideoById` to learn the current slug for the 308. (d) The proxy hard-rejects only `/api/upload/*`; pages read the cookie themselves via `isOwner()` in `src/lib/auth.ts` (no forgeable request header, and Phase 3's `/library` reuses the same helper). (e) Task 2 stubs `r2.ts` and the upload route so the tree keeps compiling between the AWS-SDK removal and the Task 19 deletion. (f) `video-player.tsx` is left untouched and `watch-view.tsx` is a new sibling — the watch page needs a tracked `videoRef` and a poster, which the existing component does not expose; `video-player.tsx` is reused by the Phase 3 detail page.
 
