@@ -42,11 +42,14 @@ export async function updateTitle(
   if (title.length === 0) return { error: "Title cannot be empty." };
   if (title.length > 200) return { error: "Title is too long (200 max)." };
 
+  // updateVideoMeta resolves to null when the row is missing or soft-deleted.
+  let saved;
   try {
-    await updateVideoMeta(id, { title });
+    saved = await updateVideoMeta(id, { title });
   } catch {
     return { error: "Could not save the title." };
   }
+  if (!saved) return { error: "Recording not found." };
 
   revalidateVideo(id);
   return { ok: true };
@@ -63,11 +66,13 @@ export async function updateDescription(
   if (!id) return { error: "Missing video." };
   if (description.length > 5000) return { error: "Description is too long." };
 
+  let saved;
   try {
-    await updateVideoMeta(id, { description });
+    saved = await updateVideoMeta(id, { description });
   } catch {
     return { error: "Could not save the description." };
   }
+  if (!saved) return { error: "Recording not found." };
 
   revalidateVideo(id);
   return { ok: true };
