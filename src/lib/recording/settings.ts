@@ -97,12 +97,23 @@ function sanitizeBackground(
   return out;
 }
 
+/** Clamp an untrusted frame config. Blob URLs are dropped (they do not survive a reload or an upload). */
+export function sanitizeFrame(raw: unknown, fallback: FrameConfig = DEFAULT_FRAME): FrameConfig {
+  const frameRaw = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return {
+    enabled: bool(frameRaw.enabled, fallback.enabled),
+    padding: num(frameRaw.padding, fallback.padding, 0, 0.2),
+    radius: num(frameRaw.radius, fallback.radius, 0, 0.1),
+    shadow: bool(frameRaw.shadow, fallback.shadow),
+    background: sanitizeBackground(frameRaw.background, fallback.background),
+  };
+}
+
 function sanitize(raw: unknown): RecorderSettings {
   if (!raw || typeof raw !== "object") return DEFAULT_SETTINGS;
   const r = raw as Record<string, unknown>;
   const bubbleRaw = (r.bubble ?? {}) as Record<string, unknown>;
   const posRaw = (bubbleRaw.pos ?? {}) as Record<string, unknown>;
-  const frameRaw = (r.frame ?? {}) as Record<string, unknown>;
 
   return {
     mode: pick(r.mode, MODES, DEFAULT_SETTINGS.mode),
@@ -121,13 +132,7 @@ function sanitize(raw: unknown): RecorderSettings {
       mirror: bool(bubbleRaw.mirror, DEFAULT_BUBBLE.mirror),
       visible: bool(bubbleRaw.visible, DEFAULT_BUBBLE.visible),
     },
-    frame: {
-      enabled: bool(frameRaw.enabled, DEFAULT_FRAME.enabled),
-      padding: num(frameRaw.padding, DEFAULT_FRAME.padding, 0, 0.2),
-      radius: num(frameRaw.radius, DEFAULT_FRAME.radius, 0, 0.1),
-      shadow: bool(frameRaw.shadow, DEFAULT_FRAME.shadow),
-      background: sanitizeBackground(frameRaw.background, DEFAULT_FRAME.background),
-    },
+    frame: sanitizeFrame(r.frame),
   };
 }
 

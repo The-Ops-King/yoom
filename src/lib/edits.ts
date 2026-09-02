@@ -8,13 +8,16 @@
  * normalised to the video frame (0..1) so they survive any display size.
  */
 
+import { sanitizeFrame } from "@/lib/recording/settings";
+import type { BubbleShape, FrameConfig } from "@/lib/recording/types";
+
 export type Rect = { x: number; y: number; w: number; h: number };
 
 export type Cut = { start: number; end: number };
 
-export type Zoom = { start: number; end: number; rect: Rect };
+export type Zoom = { start: number; end: number; rect: Rect; ramp?: number };
 
-export type OverlayType = "blur" | "callout" | "underline" | "highlight";
+export type OverlayType = "blur" | "callout" | "underline" | "highlight" | "click";
 
 export type Overlay = {
   type: OverlayType;
@@ -30,6 +33,15 @@ export type Overlay = {
 /** A recorder-placed timestamp marker (seconds from the start of the video). */
 export type Marker = { t: number; label?: string };
 
+export type CameraMode = "bubble" | "full";
+export type CameraKeyframe = { t: number; mode: CameraMode; rect: Rect };
+export type CameraTrack = {
+  shape: BubbleShape;
+  mirror: boolean;
+  /** Sorted by t; the first is always t = 0. */
+  keyframes: CameraKeyframe[];
+};
+
 export type VideoEdits = {
   version: 1;
   cuts: Cut[];
@@ -37,6 +49,10 @@ export type VideoEdits = {
   zooms: Zoom[];
   overlays: Overlay[];
   markers: Marker[];
+  trim?: { start: number; end: number };
+  frame?: FrameConfig;
+  camera?: CameraTrack | null;
+  cameraOffsetMs?: number;
 };
 
 function deepFreezeEmptyEdits(edits: VideoEdits): VideoEdits {
@@ -69,7 +85,13 @@ function emptyEdits(): VideoEdits {
   };
 }
 
-const OVERLAY_TYPES: OverlayType[] = ["blur", "callout", "underline", "highlight"];
+export const MAX_OVERLAYS = 64;
+export const MAX_CUTS = 64;
+export const MAX_KEYFRAMES = 64;
+export const MAX_ZOOMS = 32;
+export const MAX_MARKERS = 200;
+const OVERLAY_TYPES: OverlayType[] = ["blur", "callout", "underline", "highlight", "click"];
+const SHAPES: BubbleShape[] = ["circle", "rounded", "square", "portrait", "full"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -88,6 +110,33 @@ function parseRect(value: unknown): Rect | null {
   if (x === null || y === null || w === null || h === null) return null;
   if (w <= 0 || h <= 0) return null;
   return { x, y, w, h };
+}
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+function clampRect(r: Rect): Rect {
+  const x = clamp01(r.x);
+  const y = clamp01(r.y);
+  return { x, y, w: Math.max(0.001, Math.min(1 - x, r.w)), h: Math.max(0.001, Math.min(1 - y, r.h)) };
+}
+
+function parseCamera(value: unknown): CameraTrack | null | undefined {
+  if (value === null) return null;
+  if (!isRecord(value)) return undefined;
+  const shape = SHAPES.includes(value.shape as BubbleShape) ? (value.shape as BubbleShape) : "circle";
+  const keyframes: CameraKeyframe[] = [];
+  for (const raw of asArray(value.keyframes)) {
+    if (!isRecord(raw)) continue;
+    const t = num(raw.t);
+    const rect = parseRect(raw.rect);
+    if (t === null || t < 0 || !rect) continue;
+    const mode: CameraMode = raw.mode === "full" ? "full" : "bubble";
+    keyframes.push({ t, mode, rect: clampRect(rect) });
+  }
+  keyframes.sort((a, b) => a.t - b.t);
+  if (keyframes.length === 0) return undefined;
+  keyframes[0] = { ...keyframes[0], t: 0 };
+  return { shape, mirror: value.mirror === true, keyframes: keyframes.slice(0, MAX_KEYFRAMES) };
 }
 
 function parseSpan(value: unknown): { start: number; end: number } | null {
@@ -131,8 +180,13 @@ export function parseEdits(input: unknown): VideoEdits {
   for (const raw of asArray(input.zooms)) {
     const span = parseSpan(raw);
     const rect = isRecord(raw) ? parseRect(raw.rect) : null;
-    if (span && rect) zooms.push({ ...span, rect });
+    if (!span || !rect) continue;
+    const zoom: Zoom = { ...span, rect: clampRect(rect) };
+    const ramp = isRecord(raw) ? num(raw.ramp) : null;
+    if (ramp !== null) zoom.ramp = Math.max(0, Math.min(2, ramp));
+    zooms.push(zoom);
   }
+  zooms.splice(MAX_ZOOMS);
 
   const overlays: Overlay[] = [];
   for (const raw of asArray(input.overlays)) {
@@ -149,6 +203,8 @@ export function parseEdits(input: unknown): VideoEdits {
     if (typeof raw.color === "string") overlay.color = raw.color;
     overlays.push(overlay);
   }
+  overlays.splice(MAX_OVERLAYS);
+  cuts.splice(MAX_CUTS);
 
   const markers: Marker[] = [];
   for (const raw of asArray(input.markers)) {
@@ -156,15 +212,17 @@ export function parseEdits(input: unknown): VideoEdits {
     if (marker) markers.push(marker);
   }
   markers.sort((a, b) => a.t - b.t);
+  markers.splice(MAX_MARKERS);
 
-  return {
-    version: 1,
-    cuts,
-    crop: parseRect(input.crop),
-    zooms,
-    overlays,
-    markers,
-  };
+  const out: VideoEdits = { version: 1, cuts, crop: parseRect(input.crop), zooms, overlays, markers };
+  const trim = parseSpan(input.trim);
+  if (trim) out.trim = trim;
+  if (isRecord(input.frame)) out.frame = sanitizeFrame(input.frame);
+  const camera = parseCamera(input.camera);
+  if (camera !== undefined) out.camera = camera;
+  const offset = num(input.cameraOffsetMs);
+  if (offset !== null) out.cameraOffsetMs = Math.max(-5000, Math.min(5000, offset));
+  return out;
 }
 
 export function isEmptyEdits(edits: VideoEdits): boolean {

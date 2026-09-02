@@ -183,3 +183,67 @@ describe("EMPTY_EDITS", () => {
     expect(Object.isFrozen(EMPTY_EDITS.markers)).toBe(true);
   });
 });
+
+describe("parseEdits staging fields", () => {
+  const base = { version: 1, cuts: [], crop: null, zooms: [], overlays: [], markers: [] };
+
+  it("keeps trim, frame, camera and cameraOffsetMs", () => {
+    const parsed = parseEdits({
+      ...base,
+      trim: { start: 1, end: 9 },
+      frame: { enabled: true, padding: 0.1, radius: 0.02, shadow: false, background: { kind: "color", color: "#fff" } },
+      camera: {
+        shape: "circle",
+        mirror: true,
+        keyframes: [
+          { t: 0, mode: "bubble", rect: { x: 0.7, y: 0.7, w: 0.2, h: 0.3 } },
+          { t: 4, mode: "full", rect: { x: 0, y: 0, w: 1, h: 1 } },
+        ],
+      },
+      cameraOffsetMs: 120,
+    });
+    expect(parsed.trim).toEqual({ start: 1, end: 9 });
+    expect(parsed.frame?.padding).toBe(0.1);
+    expect(parsed.camera?.keyframes).toHaveLength(2);
+    expect(parsed.camera?.keyframes[1].mode).toBe("full");
+    expect(parsed.cameraOffsetMs).toBe(120);
+  });
+
+  it("forces the first keyframe to t=0, sorts, and clamps rects", () => {
+    const parsed = parseEdits({
+      ...base,
+      camera: {
+        shape: "square",
+        mirror: false,
+        keyframes: [
+          { t: 5, mode: "bubble", rect: { x: 0.9, y: 0.9, w: 0.5, h: 0.5 } },
+          { t: 2, mode: "bubble", rect: { x: -1, y: 0, w: 2, h: 0.2 } },
+        ],
+      },
+    });
+    expect(parsed.camera?.keyframes.map((k) => k.t)).toEqual([0, 5]);
+    expect(parsed.camera?.keyframes[0].rect).toEqual({ x: 0, y: 0, w: 1, h: 0.2 });
+  });
+
+  it("drops an invalid trim and clamps cameraOffsetMs", () => {
+    const parsed = parseEdits({ ...base, trim: { start: 5, end: 2 }, cameraOffsetMs: 99999 });
+    expect(parsed.trim).toBeUndefined();
+    expect(parsed.cameraOffsetMs).toBe(5000);
+  });
+
+  it("accepts the click overlay type and truncates to 64 overlays", () => {
+    const overlays = Array.from({ length: 70 }, (_, i) => ({
+      type: "click", start: i, end: i + 0.5, rect: { x: 0.5, y: 0.5, w: 0.05, h: 0.05 },
+    }));
+    const parsed = parseEdits({ ...base, overlays });
+    expect(parsed.overlays).toHaveLength(64);
+    expect(parsed.overlays[0].type).toBe("click");
+  });
+
+  it("leaves rows without the new fields unchanged", () => {
+    const parsed = parseEdits(base);
+    expect(parsed.trim).toBeUndefined();
+    expect(parsed.frame).toBeUndefined();
+    expect(parsed.camera).toBeUndefined();
+  });
+});
