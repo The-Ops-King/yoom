@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { VideoEdits } from "@/lib/edits";
 
 // `vi.mock` is hoisted above the module scope, so the spy has to be hoisted too.
 const { uploadToDrive } = vi.hoisted(() => ({ uploadToDrive: vi.fn() }));
@@ -7,6 +8,9 @@ vi.mock("@/lib/upload-client", () => ({ uploadToDrive }));
 import { defaultRecordingTitle, uploadRecording } from "./upload";
 
 const blob = new Blob([new Uint8Array(16)], { type: "video/webm" });
+
+/** A minimal, valid edit list for tests that don't care about its contents. */
+const emptyEdits: VideoEdits = { version: 1, cuts: [], crop: null, zooms: [], overlays: [], markers: [] };
 
 function jsonResponse(body: unknown, ok = true): Response {
   return {
@@ -55,6 +59,10 @@ describe("uploadRecording", () => {
       height: 1080,
       thumbnail: null,
       onProgress,
+      title: "",
+      description: "",
+      slug: "",
+      edits: emptyEdits,
     });
 
     expect(result).toEqual({
@@ -112,7 +120,10 @@ describe("uploadRecording", () => {
       thumbnail: null,
       onProgress: () => {},
       onSlug,
-      markers: [{ t: 1.5 }],
+      title: "",
+      description: "",
+      slug: "",
+      edits: { ...emptyEdits, markers: [{ t: 1.5 }] },
     });
 
     expect(onSlug).toHaveBeenCalledTimes(1);
@@ -121,7 +132,7 @@ describe("uploadRecording", () => {
 
     const completeBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(completeBody.slug).toBe("abc12345");
-    expect(completeBody.markers).toEqual([{ t: 1.5 }]);
+    expect(completeBody.edits.markers).toEqual([{ t: 1.5 }]);
   });
 
   it("uploads fine when /api/upload reserves no slug", async () => {
@@ -138,6 +149,10 @@ describe("uploadRecording", () => {
       thumbnail: null,
       onProgress: () => {},
       onSlug,
+      title: "",
+      description: "",
+      slug: "",
+      edits: emptyEdits,
     });
 
     expect(onSlug).not.toHaveBeenCalled();
@@ -159,6 +174,10 @@ describe("uploadRecording", () => {
       onSlug: () => {
         throw new Error("clipboard denied");
       },
+      title: "",
+      description: "",
+      slug: "",
+      edits: emptyEdits,
     });
     expect(result.id).toBe("v");
   });
@@ -177,6 +196,10 @@ describe("uploadRecording", () => {
       height: 3,
       thumbnail,
       onProgress: () => {},
+      title: "",
+      description: "",
+      slug: "",
+      edits: emptyEdits,
     });
 
     expect(result.id).toBe("vid-1");
@@ -196,6 +219,10 @@ describe("uploadRecording", () => {
       height: null,
       thumbnail: null,
       onProgress: () => {},
+      title: "",
+      description: "",
+      slug: "",
+      edits: emptyEdits,
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -210,6 +237,10 @@ describe("uploadRecording", () => {
         height: null,
         thumbnail: null,
         onProgress: () => {},
+        title: "",
+        description: "",
+        slug: "",
+        edits: emptyEdits,
       }),
     ).rejects.toThrow("Failed to start the upload");
   });
@@ -226,6 +257,10 @@ describe("uploadRecording", () => {
         height: null,
         thumbnail: null,
         onProgress: () => {},
+        title: "",
+        description: "",
+        slug: "",
+        edits: emptyEdits,
       }),
     ).rejects.toThrow("Failed to save the recording");
   });
@@ -239,8 +274,40 @@ describe("uploadRecording", () => {
         height: null,
         thumbnail: null,
         onProgress: () => {},
+        title: "",
+        description: "",
+        slug: "",
+        edits: emptyEdits,
       }),
     ).rejects.toThrow("Recording captured no data");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sends title, description, slug and edits to /api/upload/complete", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ sessionUri: "s", slug: "my-slug" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "v1", slug: "my-slug", url: "u" }));
+
+    await uploadRecording({
+      blob: new Blob(["abc"], { type: "video/webm" }),
+      durationMs: 10,
+      width: 1,
+      height: 1,
+      thumbnail: null,
+      onProgress: () => {},
+      title: "T",
+      description: "D",
+      slug: "my-slug",
+      edits: { version: 1, cuts: [], crop: null, zooms: [], overlays: [], markers: [{ t: 1 }] },
+    });
+
+    const start = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(start.slug).toBe("my-slug");
+
+    const complete = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(complete.title).toBe("T");
+    expect(complete.description).toBe("D");
+    expect(complete.slug).toBe("my-slug");
+    expect(complete.edits.markers).toHaveLength(1);
   });
 });

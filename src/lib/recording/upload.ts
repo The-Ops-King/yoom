@@ -1,4 +1,4 @@
-import type { Marker } from "@/lib/edits";
+import type { VideoEdits } from "@/lib/edits";
 import { shareUrl } from "@/lib/share";
 import { uploadToDrive } from "@/lib/upload-client";
 
@@ -10,8 +10,12 @@ export interface UploadRecordingInput {
   /** JPEG grabbed ~1s into the recording; a missing thumbnail is not fatal. */
   thumbnail: Blob | null;
   onProgress: (percent: number) => void;
-  /** Recorder-placed timestamps (seconds) persisted into `videos.edits`. */
-  markers?: Marker[];
+  title: string;
+  description: string;
+  /** The slug the user chose in staging; empty means "let the server pick". */
+  slug: string;
+  /** The whole staging edit list; the server re-validates it. */
+  edits: VideoEdits;
   /**
    * Called with the share URL for the slug `/api/upload` reserved, right after
    * that round-trip and before a single byte goes to Drive. The recorder copies
@@ -61,7 +65,10 @@ export async function uploadRecording(
     height,
     thumbnail,
     onProgress,
-    markers,
+    title,
+    description,
+    slug,
+    edits,
     onSlug,
     signal,
   } = input;
@@ -80,6 +87,7 @@ export async function uploadRecording(
       mimeType,
       sizeBytes: blob.size,
       filename: filenameFor(now, extensionFor(mimeType)),
+      slug: slug || undefined,
     }),
     signal,
   });
@@ -110,15 +118,16 @@ export async function uploadRecording(
       durationMs,
       width,
       height,
-      title: defaultRecordingTitle(now),
+      title: title.trim() || defaultRecordingTitle(now),
+      description,
       slug: reservedSlug,
-      markers,
+      edits,
     }),
     signal,
   });
   if (!completeRes.ok) throw new Error("Failed to save the recording");
 
-  const { id, slug, url } = (await completeRes.json()) as UploadRecordingResult;
+  const { id, slug: finalSlug, url } = (await completeRes.json()) as UploadRecordingResult;
 
   if (thumbnail) {
     const form = new FormData();
@@ -129,5 +138,5 @@ export async function uploadRecording(
     );
   }
 
-  return { id, slug, url };
+  return { id, slug: finalSlug, url };
 }

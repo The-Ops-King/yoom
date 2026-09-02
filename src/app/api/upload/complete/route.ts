@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
-import { DbError, UNIQUE_VIOLATION, insertVideo } from "@/lib/db";
+import { DbError, UNIQUE_VIOLATION, insertVideo, updateVideoMeta } from "@/lib/db";
 import { getFileMeta } from "@/lib/google-drive";
 import { newSlug, SLUG_RE } from "@/lib/slug";
-import { parseEdits, type Marker } from "@/lib/edits";
+import { parseEdits } from "@/lib/edits";
 import { shareUrl } from "@/lib/share";
-
-const MAX_MARKERS = 500;
 
 function defaultTitle(): string {
   return `Recording — ${new Intl.DateTimeFormat("en-US", {
@@ -18,11 +16,13 @@ export async function POST(request: Request) {
   let body: {
     driveFileId?: string;
     title?: string;
+    description?: string;
     durationMs?: number;
     width?: number;
     height?: number;
     slug?: string;
     markers?: unknown;
+    edits?: unknown;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -54,23 +54,23 @@ export async function POST(request: Request) {
   const reserved =
     typeof body.slug === "string" && SLUG_RE.test(body.slug) ? body.slug : null;
 
-  // Recorder marks. `parseEdits` is the single normaliser for the jsonb shape;
-  // cap the list so a hostile client cannot stuff the column.
-  const markers: Marker[] = Array.isArray(body.markers)
-    ? body.markers.slice(0, MAX_MARKERS).flatMap((raw) => {
-        if (typeof raw !== "object" || raw === null) return [];
-        const t = Number((raw as { t?: unknown }).t);
-        return Number.isFinite(t) && t >= 0 ? [{ t }] : [];
-      })
-    : [];
-  const edits = parseEdits({
-    version: 1,
-    cuts: [],
-    crop: null,
-    zooms: [],
-    overlays: [],
-    markers,
-  });
+  // The staging edit list. `parseEdits` is the single normaliser: caps, clamps
+  // and unknown keys are all handled there, so a hostile client cannot stuff
+  // the column. Legacy clients that still send `markers` alone are honoured.
+  const edits = parseEdits(
+    body.edits && typeof body.edits === "object"
+      ? body.edits
+      : {
+          version: 1,
+          cuts: [],
+          crop: null,
+          zooms: [],
+          overlays: [],
+          markers: Array.isArray(body.markers) ? body.markers : [],
+        },
+  );
+  const description =
+    typeof body.description === "string" ? body.description.trim().slice(0, 2000) : null;
   const toInt = (value: unknown): number | null => {
     const n = Number(value);
     return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
@@ -92,6 +92,17 @@ export async function POST(request: Request) {
         height: toInt(body.height),
         edits,
       });
+      // `NewVideo` has no `description` column yet, so it can't go through
+      // `insertVideo` above; fold it in with the existing metadata patch path
+      // instead of widening the insert type here. The video is already saved
+      // at this point, so a failure here must not surface as a save error.
+      if (description) {
+        try {
+          await updateVideoMeta(video.id, { description });
+        } catch (error) {
+          console.error("updateVideoMeta (description) failed", error);
+        }
+      }
       return NextResponse.json({
         id: video.id,
         slug: video.slug,
