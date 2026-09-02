@@ -68,6 +68,14 @@ describe("parseEdits", () => {
     expect(parsed.overlays[2].color).toBe("#ff0");
   });
 
+  it("clamps overlay rects into the 0..1 frame", () => {
+    const parsed = parseEdits({
+      version: 1,
+      overlays: [{ type: "blur", start: 0, end: 1, rect: { x: 1.5, y: 0, w: 1, h: 1 } }],
+    });
+    expect(parsed.overlays[0].rect.x).toBeLessThan(1);
+  });
+
   it("round-trips through JSON", () => {
     const source = {
       version: 1,

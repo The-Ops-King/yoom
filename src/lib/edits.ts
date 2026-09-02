@@ -122,7 +122,7 @@ function clamp(v: number, min: number, max: number): number {
 }
 
 /** Clamp a normalised rect fully inside the 0..1 frame: origin first, then size against what's left. */
-function clampRect(r: Rect): Rect {
+export function clampRect(r: Rect): Rect {
   const x = clamp(r.x, 0, 1 - MIN_RECT_SIZE);
   const y = clamp(r.y, 0, 1 - MIN_RECT_SIZE);
   return {
@@ -213,7 +213,7 @@ export function parseEdits(input: unknown): VideoEdits {
     const span = parseSpan(raw);
     const rect = parseRect(raw.rect);
     if (!span || !rect) continue;
-    const overlay: Overlay = { type: type as OverlayType, ...span, rect };
+    const overlay: Overlay = { type: type as OverlayType, ...span, rect: clampRect(rect) };
     const n = num(raw.n);
     if (n !== null) overlay.n = n;
     if (typeof raw.color === "string") overlay.color = raw.color;
