@@ -64,3 +64,7 @@ If #2/#3 land, persist the event stream as a JSON sidecar next to the video in D
 - **Foundations to lay in Phase 3:** give the detail page a canvas-capable player component (not the bare `<video>`), keep `video-player.tsx` or replace it with one that accepts an `edits` prop; add `edits jsonb` to `videos` in the Phase 3 migration so the column exists; make the watch page read the same `edits` and render them (initially empty).
 - **Animated zoom** should reuse the cursor sidecar idea (#4 above) later for auto-zoom; manual keyframed zoom comes first.
 - **Cost note:** blur at playback is cheap for small rects; full-frame `ctx.filter` blur on 4K in Safari is not — clamp blur regions and downscale the blurred source.
+
+### Markers and attention sections (Tyler, 2026-09-02)
+- **While recording:** ⌘⇧M drops a marker at the current elapsed time (paused time excluded). Reducer event `MARK` appends to `state.markers: {t: number}[]`; the upload sends `markers` to `/api/upload/complete`, which stores them in `videos.edits.markers` (Phase 3's `edits jsonb`). The REC chip flashes briefly on mark. Build in **Phase 3** alongside the `edits` column and the detail-page timeline (markers render as ticks; click to seek).
+- **In the editor (Phase 5):** an `attention` overlay type `{type:"attention", start, end, label?}` — a highlighted range on the timeline; the watch page shows it as a chapter pill ("Pay attention here") and a subtle border pulse on the player during that range. Markers can be promoted to attention ranges with one click.
