@@ -44,16 +44,22 @@ type Grab = {
  * equal width and height — so `h` is derived from `w` rather than tracked.
  */
 function bandRect(b: Band, square: boolean): Rect {
-  const x = Math.min(b.ax, b.bx);
   if (!square) {
-    return { x, y: Math.min(b.ay, b.by), w: Math.abs(b.bx - b.ax), h: Math.abs(b.by - b.ay) };
+    return {
+      x: Math.min(b.ax, b.bx),
+      y: Math.min(b.ay, b.by),
+      w: Math.abs(b.bx - b.ax),
+      h: Math.abs(b.by - b.ay),
+    };
   }
-  // Both points are already inside the frame, so the width is safe — but the
-  // derived height can run off the edge the drag is heading for. Shrink the
-  // square rather than let `clampRect` squash one axis and stretch the zoom.
+  // The derived height can run off the edge the drag is heading for. Shrink
+  // the square rather than let `clampRect` squash one axis and stretch the
+  // zoom — and anchor both axes at the grab point, since `w` may now be
+  // narrower than the pointer travelled.
+  const right = b.bx >= b.ax;
   const down = b.by >= b.ay;
   const w = Math.min(Math.abs(b.bx - b.ax), down ? 1 - b.ay : b.ay);
-  return { x, y: down ? b.ay : b.ay - w, w, h: w };
+  return { x: right ? b.ax : b.ax - w, y: down ? b.ay : b.ay - w, w, h: w };
 }
 
 /** Inverse of `toOutput`: a rect the user drew on the zoomed frame, in source space. */
@@ -180,17 +186,17 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
   // the output size is also its fraction of the element.
   const { width: ow, height: oh } = player.size;
   const c = contentRect(ow, oh, frame);
-  const cf =
+  const cf: Rect =
     ow > 0 && oh > 0 && c.w > 0 && c.h > 0
       ? { x: c.x / ow, y: c.y / oh, w: c.w / ow, h: c.h / oh }
       : { x: 0, y: 0, w: 1, h: 1 };
 
-  /** `r` is normalised to the content box in view space. */
-  const styleFor = (r: Rect): CSSProperties => ({
-    left: `${(cf.x + r.x * cf.w) * 100}%`,
-    top: `${(cf.y + r.y * cf.h) * 100}%`,
-    width: `${r.w * cf.w * 100}%`,
-    height: `${r.h * cf.h * 100}%`,
+  /** A rect normalised to its containing box, as CSS percentages. */
+  const pctBox = (r: Rect): CSSProperties => ({
+    left: `${r.x * 100}%`,
+    top: `${r.y * 100}%`,
+    width: `${r.w * 100}%`,
+    height: `${r.h * 100}%`,
   });
 
   const t = player.time;
@@ -202,37 +208,47 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
       onPointerDown={startBand}
       className={`absolute inset-0 z-10 touch-none ${drawing ? "cursor-crosshair" : "pointer-events-none"}`}
     >
-      {band && (
-        <div
-          className={`absolute border-2 border-dashed ${
-            tool === "zoom" ? "border-sky-300 bg-sky-400/15" : "border-emerald-300 bg-emerald-400/15"
-          }`}
-          style={styleFor(bandRect(band, tool === "zoom"))}
-        />
-      )}
+      {/*
+        Everything is positioned inside the content box and clipped to it: a
+        zoom can push an overlay's mapped rect off the frame, and it must not
+        appear over the frame padding or the letterbox — the same reason
+        `render.ts` clips its own overlay pass.
+      */}
+      <div className="absolute overflow-hidden" style={pctBox(cf)}>
+        {band && (
+          <div
+            className={`absolute border-2 border-dashed ${
+              tool === "zoom" ? "border-sky-300 bg-sky-400/15" : "border-emerald-300 bg-emerald-400/15"
+            }`}
+            style={pctBox(bandRect(band, tool === "zoom"))}
+          />
+        )}
 
-      {!drawing &&
-        edits.overlays.map((o, i) => {
-          if (t < o.start || t > o.end) return null;
-          const sel = selected?.kind === "overlay" && selected.index === i;
-          return (
-            <div
-              key={`ov-${i}-${o.start}`}
-              title={`${o.type} ${o.start.toFixed(1)}–${o.end.toFixed(1)}s`}
-              onPointerDown={(e) => startGrab(e, i, "move")}
-              style={styleFor(toOutput(o.rect, view))}
-              className={`pointer-events-auto absolute cursor-move border ${
-                sel ? "border-emerald-200 bg-emerald-300/10" : "border-emerald-400/70 border-dashed"
-              }`}
-            >
+        {!drawing &&
+          edits.overlays.map((o, i) => {
+            if (t < o.start || t > o.end) return null;
+            const sel = selected?.kind === "overlay" && selected.index === i;
+            return (
               <div
-                aria-hidden
-                onPointerDown={(e) => startGrab(e, i, "resize")}
-                className="absolute -bottom-1.5 -right-1.5 h-3 w-3 cursor-se-resize rounded-sm border border-emerald-200 bg-emerald-400"
-              />
-            </div>
-          );
-        })}
+                key={`ov-${i}-${o.start}`}
+                title={`${o.type} ${o.start.toFixed(1)}–${o.end.toFixed(1)}s`}
+                onPointerDown={(e) => startGrab(e, i, "move")}
+                style={pctBox(toOutput(o.rect, view))}
+                className={`pointer-events-auto absolute cursor-move border ${
+                  sel ? "border-emerald-200 bg-emerald-300/10" : "border-emerald-400/70 border-dashed"
+                }`}
+              >
+                <div
+                  role="button"
+                  tabIndex={-1}
+                  aria-label={`Resize the ${o.type} overlay`}
+                  onPointerDown={(e) => startGrab(e, i, "resize")}
+                  className="absolute -bottom-1.5 -right-1.5 h-3 w-3 cursor-se-resize rounded-sm border border-emerald-200 bg-emerald-400"
+                />
+              </div>
+            );
+          })}
+      </div>
     </div>
   );
 }

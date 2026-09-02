@@ -1,6 +1,6 @@
 "use client";
 
-import type { Rect } from "@/lib/edits";
+import type { Rect, Zoom } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
 import { DEFAULT_RAMP_S } from "@/lib/editor/zoom";
 import type { StagingContext } from "../types";
@@ -23,6 +23,21 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
   const { edits, duration, player, selected, tool } = ctx;
   const index = selected?.kind === "zoom" ? selected.index : -1;
   const zoom = index >= 0 ? edits.zooms[index] : undefined;
+
+  /**
+   * `updateZoom` re-inserts through `insertZoom`, which re-sorts the list and
+   * may trim or drop the neighbours the edit ran into — so the selected index
+   * can point at a different zoom afterwards. Re-find the edited one by its
+   * (disjoint, therefore unique) start.
+   */
+  const editZoom = (patch: Partial<Zoom>) => {
+    if (!zoom) return;
+    const start = patch.start ?? zoom.start;
+    const next = ops.updateZoom(edits, index, patch);
+    ctx.apply(() => next);
+    const at = next.zooms.findIndex((z) => z.start === start);
+    ctx.setSelected(at >= 0 ? { kind: "zoom", index: at } : null);
+  };
 
   return (
     <div className="space-y-3">
@@ -64,7 +79,7 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
                 min={0}
                 value={zoom.start}
                 className={field}
-                onChange={(e) => ctx.apply((ed) => ops.updateZoom(ed, index, { start: num(e.target.value, zoom.start) }))}
+                onChange={(e) => editZoom({ start: num(e.target.value, zoom.start) })}
               />
             </label>
             <label className="flex items-center gap-1 text-[11px] text-muted">
@@ -75,7 +90,7 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
                 min={0}
                 value={zoom.end}
                 className={field}
-                onChange={(e) => ctx.apply((ed) => ops.updateZoom(ed, index, { end: num(e.target.value, zoom.end) }))}
+                onChange={(e) => editZoom({ end: num(e.target.value, zoom.end) })}
               />
             </label>
             <label className="flex items-center gap-1 text-[11px] text-muted">
@@ -88,9 +103,7 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
                 value={zoom.ramp ?? DEFAULT_RAMP_S}
                 className={field}
                 onChange={(e) =>
-                  ctx.apply((ed) =>
-                    ops.updateZoom(ed, index, { ramp: Math.min(2, Math.max(0, num(e.target.value, zoom.ramp ?? DEFAULT_RAMP_S))) }),
-                  )
+                  editZoom({ ramp: Math.min(2, Math.max(0, num(e.target.value, zoom.ramp ?? DEFAULT_RAMP_S))) })
                 }
               />
             </label>

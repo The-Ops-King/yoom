@@ -213,20 +213,29 @@ export function Staging(props: StagingProps) {
   const addOverlayAt = useCallback(
     (type: Overlay["type"], rect: Overlay["rect"]) => {
       const { start, end } = spanForNew();
-      apply((ed) => ops.addOverlay(ed, { type, start, end, rect }));
-      setSelected({ kind: "overlay", index: edits.overlays.length });
+      const next = ops.addOverlay(edits, { type, start, end, rect });
+      apply(() => next);
+      // `addOverlay` refuses past `MAX_OVERLAYS`: only select what it added.
+      if (next.overlays.length > edits.overlays.length) {
+        setSelected({ kind: "overlay", index: next.overlays.length - 1 });
+      }
       setTool("select");
     },
-    [apply, edits.overlays.length, spanForNew],
+    [apply, edits, spanForNew],
   );
 
   const addZoomAt = useCallback(
     (rect: Overlay["rect"]) => {
       const { start, end } = spanForNew();
-      apply((ed) => ops.addZoom(ed, { start, end, rect }));
+      const next = ops.addZoom(edits, { start, end, rect });
+      apply(() => next);
+      // `insertZoom` re-sorts and can drop the new zoom as a sliver, so find
+      // it by its (disjoint, therefore unique) start rather than by position.
+      const at = next.zooms.findIndex((z) => z.start === start);
+      setSelected(at >= 0 ? { kind: "zoom", index: at } : null);
       setTool("select");
     },
-    [apply, spanForNew],
+    [apply, edits, spanForNew],
   );
 
   // Object URLs minted for the edits (uploaded frame backgrounds). They
