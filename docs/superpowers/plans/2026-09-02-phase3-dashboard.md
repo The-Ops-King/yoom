@@ -3160,9 +3160,15 @@ EOF
       — expected: no output.
 - [ ] **Manual, mirroring the spec's Phase 3 checklist.** Start `npm run dev`, sign in,
       then walk:
-  1. Record a short clip → after upload the browser lands on `/library/<id>?new=1`, the
-     title field is focused and selected, the toast reads "Uploaded. Share link copied to
-     your clipboard.", and pasting gives `https://jtylerray.com/v/<slug>`.
+  1. Record a short clip, pressing ⌘⇧M (and the **Mark** button) a couple of times
+     mid-take — the REC chip flashes each time. Click **Upload** and immediately paste
+     somewhere: the pasted link is `https://jtylerray.com/v/<slug>` and matches the link
+     the detail page shows (the slug is reserved by `/api/upload`, so the copy happens
+     inside the click's activation window). After upload the browser lands on
+     `/library/<id>?new=1`, the title field is focused and selected, and the toast reads
+     "Uploaded. Share link copied." The marker ticks appear under the player and in the
+     Markers list at the times you pressed them. Check the browser console for a
+     "Reserved slug … was taken" warning — there should be none.
   2. Edit the title and description inline, reload → both persist; `/library` shows the
      new title on the card.
   3. Change the slug to `my-demo` → the old `/v/<old>` 308-redirects to `/v/my-demo`.
