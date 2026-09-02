@@ -26,6 +26,7 @@ interface ModePickerProps {
   surfacePref: SurfacePref;
   /** The surface actually captured, once acquisition succeeded. */
   surface: SurfacePref | "unknown" | null;
+  /** True from `countdown` onward; `idle` and `setup` both stay switchable. */
   disabled: boolean;
   onModeChange: (mode: RecordingMode) => void;
   onSurfaceChange: (pref: SurfacePref) => void;

@@ -111,6 +111,31 @@ describe("mode and surface selection", () => {
       recorderReducer(recording, { type: "SET_SURFACE_PREF", pref: "window" }),
     ).toBe(recording);
   });
+
+  it("setup → STREAM_ENDED → SELECT_MODE lands back in idle with the new mode", () => {
+    // The hook's `switchMode`: tear the streams down, tell the machine, then
+    // pick the new mode. The user re-acquires straight away from `idle`.
+    const s = run(init(), [
+      { type: "ACQUIRE" },
+      ACQUIRED,
+      { type: "STREAM_ENDED" },
+      { type: "SELECT_MODE", mode: "camera" },
+    ]);
+    expect(s.status).toBe("idle");
+    expect(s.mode).toBe("camera");
+    expect(s.streamsAlive).toBe(false);
+    expect(s.surface).toBeNull();
+  });
+
+  it("SET_SURFACE_PREF applies in setup so the hook can re-acquire the display", () => {
+    const s = run(init(), [
+      { type: "ACQUIRE" },
+      ACQUIRED,
+      { type: "SET_SURFACE_PREF", pref: "browser" },
+    ]);
+    expect(s.status).toBe("setup");
+    expect(s.surfacePref).toBe("browser");
+  });
 });
 
 describe("countdown and recording", () => {

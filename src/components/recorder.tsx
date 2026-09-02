@@ -149,8 +149,8 @@ export function Recorder() {
               mode={state.mode}
               surfacePref={state.surfacePref}
               surface={state.surface}
-              disabled={state.status !== "idle"}
-              onModeChange={actions.selectMode}
+              disabled={state.status !== "idle" && state.status !== "setup"}
+              onModeChange={actions.switchMode}
               onSurfaceChange={actions.setSurfacePref}
             />
           )}

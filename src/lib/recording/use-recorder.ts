@@ -73,6 +73,11 @@ export interface UseRecorderResult {
   getLevel: (id: "mic" | "system") => number;
   actions: {
     selectMode(mode: RecordingMode): void;
+    /**
+     * Mode switch that works from `setup` too: tears the live capture down and
+     * re-acquires with the new mode, so the user lands straight back in setup.
+     */
+    switchMode(mode: RecordingMode): void;
     setSurfacePref(pref: SurfacePref): void;
     setDevice(kind: "mic" | "camera", deviceId: string): void;
     acquire(): void;
@@ -324,6 +329,30 @@ export function useRecorder(): UseRecorderResult {
       dispatch({ type: "ACQUIRE_FAILED", error: message });
     }
   }, [teardown]);
+
+  /**
+   * Change a capture preference while already in `setup`. The acquired streams
+   * belong to the old choice, so they are torn down first; the reducer sees
+   * `STREAM_ENDED` (→ idle), takes the new preference, and `acquire()` runs on
+   * the next tick with the updated state already committed.
+   */
+  const reacquireWith = useCallback(
+    (apply: () => void) => {
+      const current = stateRef.current;
+      if (current.status !== "setup") {
+        apply();
+        return;
+      }
+      teardown();
+      dispatch({ type: "STREAM_ENDED" });
+      apply();
+      // The dispatches above are still queued; `acquire` reads `stateRef`, so
+      // it must run after React has committed them — a macrotask, not a
+      // microtask, since React's own re-render is scheduled as a microtask.
+      window.setTimeout(() => void acquire(), 0);
+    },
+    [acquire, teardown],
+  );
 
   // ---------- push config into the compositor ----------
 
@@ -742,7 +771,10 @@ export function useRecorder(): UseRecorderResult {
   const actions = useMemo(
     () => ({
       selectMode: (mode: RecordingMode) => dispatch({ type: "SELECT_MODE", mode }),
-      setSurfacePref: (pref: SurfacePref) => dispatch({ type: "SET_SURFACE_PREF", pref }),
+      switchMode: (mode: RecordingMode) =>
+        reacquireWith(() => dispatch({ type: "SELECT_MODE", mode })),
+      setSurfacePref: (pref: SurfacePref) =>
+        reacquireWith(() => dispatch({ type: "SET_SURFACE_PREF", pref })),
       setDevice: (kind: "mic" | "camera", deviceId: string) =>
         dispatch({ type: "SET_DEVICE", kind, deviceId }),
       acquire: () => void acquire(),
@@ -769,7 +801,7 @@ export function useRecorder(): UseRecorderResult {
       setBubble: (patch: Partial<BubbleConfig>) => dispatch({ type: "SET_BUBBLE", patch }),
       setFrame: (patch: Partial<FrameConfig>) => dispatch({ type: "SET_FRAME", patch }),
     }),
-    [acquire, discard, reset, upload],
+    [acquire, discard, reacquireWith, reset, upload],
   );
 
   return {
