@@ -1850,14 +1850,17 @@ describe("AudioMixer", () => {
     expect(mixer.outputStream.getAudioTracks()).toHaveLength(1);
   });
 
-  it("wires source → gain → destination and source → gain → analyser", () => {
+  it("wires source → gain → destination and source → analyser (pre-gain)", () => {
     mixer.addSource("mic", fakeStream());
     const [source] = ctx.sources;
     const [gain] = ctx.gains;
     const [analyser] = ctx.analysers;
     expect(source.connected).toContain(gain);
     expect(gain.connected).toContain(ctx.destination);
-    expect(gain.connected).toContain(analyser);
+    // The analyser taps the raw source so the meter still moves while muted —
+    // that's how the UI can warn "you're talking but the mic is off".
+    expect(source.connected).toContain(analyser);
+    expect(gain.connected).not.toContain(analyser);
     expect(analyser.fftSize).toBe(256);
   });
 
@@ -1912,11 +1915,11 @@ describe("AudioMixer", () => {
     expect(mixer.getLevel("mic")).toBeLessThanOrEqual(1);
   });
 
-  it("reports 0 for a disabled source without reading the analyser", () => {
+  it("still reports the live level for a disabled source (meter shows input while muted)", () => {
     mixer.addSource("mic", fakeStream());
     ctx.analysers[0].setLevel(0.9);
     mixer.setEnabled("mic", false);
-    expect(mixer.getLevel("mic")).toBe(0);
+    expect(mixer.getLevel("mic")).toBeGreaterThan(0.5);
   });
 
   it("replaces a source when the same id is added twice", () => {
@@ -2017,8 +2020,9 @@ export class AudioMixer {
     analyser.smoothingTimeConstant = 0.6;
 
     node.connect(gain);
-    // The analyser hangs off the gain so the meter reflects the muted state.
-    gain.connect(analyser);
+    // The analyser taps the raw source (pre-gain) so the meter keeps moving
+    // while muted; the UI uses that to warn when you talk with the mic off.
+    node.connect(analyser);
     gain.gain.value = enabled ? 1 : 0;
     if (enabled) gain.connect(this.destination);
 
@@ -2081,10 +2085,10 @@ export class AudioMixer {
     }
   }
 
-  /** RMS level 0..1 for a meter. Returns 0 for muted or unknown sources. */
+  /** RMS level 0..1 for a meter. Returns 0 for unknown sources; muted sources still report input. */
   getLevel(id: AudioSourceId): number {
     const src = this.sources.get(id);
-    if (!src || !src.enabled) return 0;
+    if (!src) return 0;
     src.analyser.getByteTimeDomainData(src.buffer);
     let sum = 0;
     for (let i = 0; i < src.buffer.length; i += 1) {
@@ -2938,14 +2942,31 @@ export class Compositor {
       this.frameBackground.cfg.src !== cfg.background.src ||
       this.frameBackground.cfg.color !== cfg.background.color;
 
-    this.frame = cfg;
+    // Padding / enabled / radius change the canvas size or the inset, which
+    // the encoder cannot follow once recording. After `lockSize()` only the
+    // background and shadow may change; the geometry stays as it was locked.
+    this.frame =
+      this.sizeLocked && this.frame
+        ? {
+            ...cfg,
+            enabled: this.frame.enabled,
+            padding: this.frame.padding,
+            radius: this.frame.radius,
+          }
+        : cfg;
     if (bgChanged) {
       releaseBackground(this.frameBackground);
       this.frameBackground = resolveBackground(cfg.background);
     }
     this.cacheKey = "";
-    // Padding changes the canvas size, which the encoder cannot follow, so it
-    // is only applied before `start()` locks the size.
+  }
+
+  /**
+   * The <video> the compositor decodes the camera stream into. The segmenter
+   * reads frames from this same element so the camera is decoded once.
+   */
+  cameraElement(): HTMLVideoElement | null {
+    return this.cameraVideo;
   }
 
   addOverlay(layer: OverlayLayer): () => void {
@@ -3812,8 +3833,13 @@ export class PersonSegmenter {
       this.mask.width = w;
       this.mask.height = h;
       this.imageData = this.maskCtx.createImageData(w, h);
-      // Start fully opaque so the first frame is not a black hole.
-      this.maskCtx.clearRect(0, 0, w, h);
+      // Start fully opaque (person everywhere) so the first frames after a
+      // background is enabled show the plain camera, then the temporal blend
+      // converges on the real mask. A transparent start would make the
+      // person vanish for a few frames.
+      this.maskCtx.globalCompositeOperation = "source-over";
+      this.maskCtx.fillStyle = "#fff";
+      this.maskCtx.fillRect(0, 0, w, h);
     }
 
     this.inFlight = true;
@@ -4461,12 +4487,10 @@ export function useRecorder(): UseRecorderResult {
           void PersonSegmenter.load().then((segmenter) => {
             if (!segmenter) return;
             segmenterRef.current = segmenter;
-            const el = document.createElement("video");
-            el.srcObject = cameraStreamRef.current;
-            el.muted = true;
-            el.playsInline = true;
-            void el.play().catch(() => {});
-            cameraElRef.current = el;
+            // Reuse the compositor's decoded camera element: one decoder,
+            // not two, for the same camera stream.
+            const el = compositorRef.current?.cameraElement() ?? null;
+            if (!el) return;
             segmenter.start(el, { width: 256 });
             compositorRef.current?.setSources({ maskCanvas: segmenter.mask });
           });
@@ -4510,12 +4534,9 @@ export function useRecorder(): UseRecorderResult {
       void PersonSegmenter.load().then((segmenter) => {
         if (!segmenter) return;
         segmenterRef.current = segmenter;
-        const el = document.createElement("video");
-        el.srcObject = cameraStreamRef.current;
-        el.muted = true;
-        el.playsInline = true;
-        void el.play().catch(() => {});
-        cameraElRef.current = el;
+        // Reuse the compositor's decoded camera element (one decoder).
+        const el = compositorRef.current?.cameraElement() ?? null;
+        if (!el) return;
         segmenter.start(el, { width: 256 });
         compositorRef.current?.setSources({ maskCanvas: segmenter.mask });
       });
