@@ -128,14 +128,30 @@ function getResend(): Resend {
 }
 
 async function send(email: RenderedEmail): Promise<void> {
-  if (!optionalEnv("RESEND_API_KEY")) return;
-  await getResend().emails.send({
-    from: env("ALERT_FROM_EMAIL"),
-    to: env("ALERT_TO_EMAIL"),
+  const apiKey = optionalEnv("RESEND_API_KEY");
+  const from = optionalEnv("ALERT_FROM_EMAIL");
+  const to = optionalEnv("ALERT_TO_EMAIL");
+  if (!apiKey) {
+    console.warn("Skipping alert email: RESEND_API_KEY is not set");
+    return;
+  }
+  if (!from) {
+    console.warn("Skipping alert email: ALERT_FROM_EMAIL is not set");
+    return;
+  }
+  if (!to) {
+    console.warn("Skipping alert email: ALERT_TO_EMAIL is not set");
+    return;
+  }
+
+  const { error } = await getResend().emails.send({
+    from,
+    to,
     subject: email.subject,
     html: email.html,
     text: email.text,
   });
+  if (error) throw new Error(`Resend failed: ${error.message}`);
 }
 
 export async function sendFirstPlayEmail(

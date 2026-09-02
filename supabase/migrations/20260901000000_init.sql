@@ -27,6 +27,19 @@ create index if not exists videos_created_at_idx
 
 alter table public.videos enable row level security;
 
+create or replace function public.set_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists videos_set_updated_at on public.videos;
+create trigger videos_set_updated_at
+  before update on public.videos
+  for each row execute function public.set_updated_at();
+
 -- slug_history ---------------------------------------------------------------
 create table if not exists public.slug_history (
   old_slug text primary key,
@@ -86,7 +99,6 @@ create or replace function public.update_view_progress(
 )
 returns public.view_sessions
 language plpgsql
-security definer
 set search_path = public
 as $$
 declare
@@ -113,6 +125,9 @@ begin
 end;
 $$;
 
+revoke all on function public.update_view_progress(uuid, smallint, boolean)
+  from public, anon, authenticated;
+
 -- slug change (Phase 3 uses this; created now so there is one migration) -----
 -- Records the old slug in slug_history and swaps the slug in one transaction.
 create or replace function public.change_video_slug(
@@ -121,7 +136,6 @@ create or replace function public.change_video_slug(
 )
 returns public.videos
 language plpgsql
-security definer
 set search_path = public
 as $$
 declare
@@ -137,6 +151,8 @@ begin
     return result;
   end if;
 
+  -- A recycled slug re-points its old redirect entry to this video by design:
+  -- whoever owned that old_slug before now forwards here instead.
   insert into public.slug_history (old_slug, video_id)
   values (old_slug, p_video_id)
   on conflict (old_slug) do update set video_id = excluded.video_id;
@@ -145,13 +161,16 @@ begin
   delete from public.slug_history where old_slug = p_new_slug;
 
   update public.videos
-     set slug = p_new_slug, updated_at = now()
+     set slug = p_new_slug
    where id = p_video_id
    returning * into result;
 
   return result;
 end;
 $$;
+
+revoke all on function public.change_video_slug(uuid, text)
+  from public, anon, authenticated;
 
 -- per-video aggregates (Phase 3 library/detail pages) ------------------------
 create or replace view public.video_stats as
@@ -164,3 +183,6 @@ select
 from public.videos v
 left join public.view_sessions s on s.video_id = v.id
 group by v.id;
+
+alter view public.video_stats set (security_invoker = on);
+revoke all on public.video_stats from anon, authenticated;

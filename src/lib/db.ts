@@ -164,9 +164,10 @@ export async function updateViewSession(
   percent: number,
   ended: boolean,
 ): Promise<ViewSession | null> {
+  const clamped = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
   const result = (await getSupabase().rpc("update_view_progress", {
     p_session_id: sessionId,
-    p_percent: percent,
+    p_percent: clamped,
     p_ended: ended,
   })) as QueryResult<ViewSession | null>;
   const row = unwrap(result);
@@ -189,7 +190,10 @@ export async function claimAlert(
     .eq("id", sessionId)
     .is(column, null)
     .select("id")) as QueryResult<{ id: string }[] | null>;
-  if (result.error) return false;
+  if (result.error) {
+    console.error("claimAlert failed", result.error);
+    return false;
+  }
   return Array.isArray(result.data) && result.data.length > 0;
 }
 

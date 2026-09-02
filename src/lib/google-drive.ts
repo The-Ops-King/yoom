@@ -24,48 +24,78 @@ export class DriveError extends Error {
 }
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
+let inflight: Promise<string> | null = null;
 
 /** Refresh-token grant with a 60s expiry margin, cached per server instance. */
 export async function getAccessToken(): Promise<string> {
   if (cachedToken && Date.now() < cachedToken.expiresAt) return cachedToken.value;
+  if (inflight) return inflight;
 
-  const body = new URLSearchParams({
-    client_id: env("GOOGLE_CLIENT_ID"),
-    client_secret: env("GOOGLE_CLIENT_SECRET"),
-    refresh_token: env("GOOGLE_REFRESH_TOKEN"),
-    grant_type: "refresh_token",
-  });
+  inflight = (async () => {
+    const body = new URLSearchParams({
+      client_id: env("GOOGLE_CLIENT_ID"),
+      client_secret: env("GOOGLE_CLIENT_SECRET"),
+      refresh_token: env("GOOGLE_REFRESH_TOKEN"),
+      grant_type: "refresh_token",
+    });
 
-  const response = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-    cache: "no-store",
-  });
+    const response = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      cache: "no-store",
+    });
 
-  if (!response.ok) {
-    cachedToken = null;
-    throw new DriveError(
-      `Token refresh failed: ${await response.text()}`,
-      response.status,
-    );
+    if (!response.ok) {
+      cachedToken = null;
+      throw new DriveError(
+        `Token refresh failed: ${await response.text()}`,
+        response.status,
+      );
+    }
+
+    const json = (await response.json()) as {
+      access_token: string;
+      expires_in: number;
+    };
+
+    cachedToken = {
+      value: json.access_token,
+      expiresAt: Date.now() + (json.expires_in - 60) * 1000,
+    };
+    return cachedToken.value;
+  })();
+
+  try {
+    return await inflight;
+  } finally {
+    inflight = null;
   }
-
-  const json = (await response.json()) as {
-    access_token: string;
-    expires_in: number;
-  };
-
-  cachedToken = {
-    value: json.access_token,
-    expiresAt: Date.now() + (json.expires_in - 60) * 1000,
-  };
-  return cachedToken.value;
 }
 
 /** Test seam: drop the cached access token. */
 export function resetAccessTokenCache(): void {
   cachedToken = null;
+}
+
+/**
+ * Fetch with a bearer token, retrying once with a fresh token on a 401 —
+ * covers a token that expired or was revoked between calls.
+ */
+async function driveFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = await getAccessToken();
+  const withAuth = (bearer: string): RequestInit => ({
+    ...init,
+    headers: { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${bearer}` },
+  });
+
+  let response = await fetch(url, withAuth(token));
+  if (response.status === 401) {
+    resetAccessTokenCache();
+    const fresh = await getAccessToken();
+    response = await fetch(url, withAuth(fresh));
+  }
+  return response;
 }
 
 export type ResumableSessionInput = {
@@ -82,11 +112,9 @@ export type ResumableSessionInput = {
 export async function createResumableSession(
   input: ResumableSessionInput,
 ): Promise<string> {
-  const token = await getAccessToken();
-  const response = await fetch(`${UPLOAD_URL}?uploadType=resumable&fields=id`, {
+  const response = await driveFetch(`${UPLOAD_URL}?uploadType=resumable&fields=id`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json; charset=UTF-8",
       Origin: input.origin,
       "X-Upload-Content-Type": input.mimeType,
@@ -114,15 +142,11 @@ export async function createResumableSession(
 }
 
 export async function getFileMeta(fileId: string): Promise<DriveFileMeta> {
-  const token = await getAccessToken();
   const url = `${FILES_URL}/${encodeURIComponent(
     fileId,
   )}?fields=id,name,mimeType,size,parents,trashed`;
 
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
+  const response = await driveFetch(url, { cache: "no-store" });
 
   if (!response.ok) {
     throw new DriveError(
@@ -158,11 +182,10 @@ export async function fetchMedia(
   fileId: string,
   range?: string,
 ): Promise<Response> {
-  const token = await getAccessToken();
-  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  const headers: Record<string, string> = {};
   if (range) headers.Range = range;
 
-  return fetch(`${FILES_URL}/${encodeURIComponent(fileId)}?alt=media`, {
+  return driveFetch(`${FILES_URL}/${encodeURIComponent(fileId)}?alt=media`, {
     headers,
     cache: "no-store",
   });
@@ -174,7 +197,6 @@ export async function uploadSmall(
   mimeType: string,
   bytes: ArrayBuffer,
 ): Promise<string> {
-  const token = await getAccessToken();
   const boundary = `yoom-${crypto.randomUUID()}`;
   const metadata = JSON.stringify({
     name,
@@ -192,10 +214,9 @@ export async function uploadSmall(
   payload.set(new Uint8Array(bytes), head.length);
   payload.set(tail, head.length + bytes.byteLength);
 
-  const response = await fetch(`${UPLOAD_URL}?uploadType=multipart&fields=id`, {
+  const response = await driveFetch(`${UPLOAD_URL}?uploadType=multipart&fields=id`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": `multipart/related; boundary=${boundary}`,
     },
     body: payload,
@@ -214,13 +235,11 @@ export async function uploadSmall(
 }
 
 export async function renameFile(fileId: string, name: string): Promise<void> {
-  const token = await getAccessToken();
-  const response = await fetch(
+  const response = await driveFetch(
     `${FILES_URL}/${encodeURIComponent(fileId)}?fields=id`,
     {
       method: "PATCH",
       headers: {
-        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ name }),
@@ -233,13 +252,11 @@ export async function renameFile(fileId: string, name: string): Promise<void> {
 }
 
 export async function trashFile(fileId: string): Promise<void> {
-  const token = await getAccessToken();
-  const response = await fetch(
+  const response = await driveFetch(
     `${FILES_URL}/${encodeURIComponent(fileId)}?fields=id`,
     {
       method: "PATCH",
       headers: {
-        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ trashed: true }),

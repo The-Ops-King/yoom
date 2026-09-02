@@ -190,6 +190,32 @@ describe("updateViewSession", () => {
     expect(row?.max_percent).toBe(55);
   });
 
+  it("clamps a percent above 100 down to 100", async () => {
+    rpc.mockResolvedValue({
+      data: { ...VIDEO, id: "session-1", max_percent: 100 },
+      error: null,
+    });
+    await updateViewSession("session-1", 500, false);
+    expect(rpc).toHaveBeenCalledWith("update_view_progress", {
+      p_session_id: "session-1",
+      p_percent: 100,
+      p_ended: false,
+    });
+  });
+
+  it("clamps a negative percent up to 0", async () => {
+    rpc.mockResolvedValue({
+      data: { ...VIDEO, id: "session-1", max_percent: 0 },
+      error: null,
+    });
+    await updateViewSession("session-1", -5, false);
+    expect(rpc).toHaveBeenCalledWith("update_view_progress", {
+      p_session_id: "session-1",
+      p_percent: 0,
+      p_ended: false,
+    });
+  });
+
   it("returns null when the session is gone", async () => {
     rpc.mockResolvedValue({ data: null, error: null });
     await expect(updateViewSession("nope", 10, false)).resolves.toBeNull();
@@ -227,6 +253,7 @@ describe("claimAlert", () => {
       expect.objectContaining({ alert_sent_at: expect.any(String) }),
     );
     expect(builder.is).toHaveBeenCalledWith("alert_sent_at", null);
+    expect(builder.select).toHaveBeenCalledWith("id");
   });
 
   it("returns false when the alert was already claimed", async () => {
@@ -235,8 +262,11 @@ describe("claimAlert", () => {
   });
 
   it("returns false on error rather than throwing", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     from.mockReturnValue(chain({ data: null, error: { message: "boom" } }));
     await expect(claimAlert("session-1", "alert_sent_at")).resolves.toBe(false);
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });
 

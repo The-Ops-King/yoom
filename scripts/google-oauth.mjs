@@ -8,6 +8,9 @@
 // scope can only see files this app created, so the folder must be made here), and
 // prints the env lines to paste into .env.local and Vercel.
 //
+// `next dev` must NOT be running on port 3000 while this script runs — it binds
+// its own server on that port to catch the OAuth callback.
+//
 // The OAuth app must be published to "In production" — refresh tokens issued by a
 // "Testing" app expire after 7 days.
 
@@ -69,25 +72,29 @@ function waitForCode() {
       const error = url.searchParams.get("error");
       const code = url.searchParams.get("code");
       const returnedState = url.searchParams.get("state");
+      const stateMismatch = returnedState !== state;
+      const failed = Boolean(error) || stateMismatch;
 
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(
         `<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;background:#1a1a1e;color:#f0f0f2;padding:48px">` +
-          `<h1 style="font-size:18px">${error ? "Authorization failed" : "Authorized"}</h1>` +
+          `<h1 style="font-size:18px">${failed ? "Authorization failed" : "Authorized"}</h1>` +
           `<p style="color:#8b8b96">You can close this tab and return to the terminal.</p></body>`,
       );
 
       server.close();
 
       if (error) return reject(new Error(`Google returned: ${error}`));
-      if (returnedState !== state) return reject(new Error("State mismatch"));
+      if (stateMismatch) return reject(new Error("State mismatch"));
       if (!code) return reject(new Error("No authorization code in the callback"));
       resolve(code);
     });
 
     server.on("error", reject);
-    server.listen(3000, "127.0.0.1", () => {
-      console.log("Listening on http://localhost:3000/oauth/callback");
+    server.listen(3000, () => {
+      console.log(
+        "Listening on http://localhost:3000/oauth/callback (make sure `next dev` is not running on port 3000)",
+      );
       console.log("\nOpen this URL if a browser did not launch:\n");
       console.log(consentUrl + "\n");
       openBrowser(consentUrl);

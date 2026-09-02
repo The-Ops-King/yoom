@@ -1,11 +1,27 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Video, ViewSession } from "@/lib/db";
 import {
   deviceFromUserAgent,
   locationLabel,
   renderFirstPlayEmail,
   renderSummaryEmail,
+  sendFirstPlayEmail,
+  sendSummaryEmail,
 } from "@/lib/alerts";
+
+const sendMock = vi.hoisted(() => vi.fn());
+const getSettingsMock = vi.hoisted(() => vi.fn());
+
+vi.mock("resend", () => ({
+  Resend: class {
+    emails = { send: sendMock };
+  },
+}));
+
+vi.mock("@/lib/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db")>();
+  return { ...actual, getSettings: getSettingsMock };
+});
 
 const video: Video = {
   id: "11111111-1111-1111-1111-111111111111",
@@ -44,6 +60,24 @@ const session: ViewSession = {
 
 beforeEach(() => {
   process.env.NEXT_PUBLIC_SHARE_BASE_URL = "https://jtylerray.com";
+  process.env.RESEND_API_KEY = "test-key";
+  process.env.ALERT_FROM_EMAIL = "alerts@jtylerray.com";
+  process.env.ALERT_TO_EMAIL = "me@jtylerray.com";
+  sendMock.mockReset();
+  sendMock.mockResolvedValue({ data: { id: "email-1" }, error: null });
+  getSettingsMock.mockReset();
+  getSettingsMock.mockResolvedValue({
+    id: 1,
+    alert_on_first_view: true,
+    alert_on_completion: true,
+    updated_at: null,
+  });
+});
+
+afterEach(() => {
+  delete process.env.RESEND_API_KEY;
+  delete process.env.ALERT_FROM_EMAIL;
+  delete process.env.ALERT_TO_EMAIL;
 });
 
 describe("deviceFromUserAgent", () => {
@@ -122,5 +156,79 @@ describe("renderSummaryEmail", () => {
     const { html, text } = renderSummaryEmail(session, video);
     expect(html).toContain("64%");
     expect(text).toContain("64%");
+  });
+});
+
+describe("sendFirstPlayEmail", () => {
+  it("sends when settings allow and env is set", async () => {
+    await sendFirstPlayEmail(session, video);
+    expect(sendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: "alerts@jtylerray.com",
+        to: "me@jtylerray.com",
+        subject: "▶ Ada started watching Q3 walkthrough",
+      }),
+    );
+  });
+
+  it("skips when alert_on_first_view is false", async () => {
+    getSettingsMock.mockResolvedValue({
+      id: 1,
+      alert_on_first_view: false,
+      alert_on_completion: true,
+      updated_at: null,
+    });
+    await sendFirstPlayEmail(session, video);
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it("skips without throwing when RESEND_API_KEY is unset", async () => {
+    delete process.env.RESEND_API_KEY;
+    await expect(sendFirstPlayEmail(session, video)).resolves.toBeUndefined();
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it("throws when send resolves with an error", async () => {
+    sendMock.mockResolvedValue({ data: null, error: { message: "boom" } });
+    await expect(sendFirstPlayEmail(session, video)).rejects.toThrow(
+      "Resend failed: boom",
+    );
+  });
+});
+
+describe("sendSummaryEmail", () => {
+  it("sends when settings allow and env is set", async () => {
+    await sendSummaryEmail(session, video);
+    expect(sendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: "alerts@jtylerray.com",
+        to: "me@jtylerray.com",
+        subject: "✅ Ada watched 64% of Q3 walkthrough",
+      }),
+    );
+  });
+
+  it("skips when alert_on_completion is false", async () => {
+    getSettingsMock.mockResolvedValue({
+      id: 1,
+      alert_on_first_view: true,
+      alert_on_completion: false,
+      updated_at: null,
+    });
+    await sendSummaryEmail(session, video);
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it("skips without throwing when RESEND_API_KEY is unset", async () => {
+    delete process.env.RESEND_API_KEY;
+    await expect(sendSummaryEmail(session, video)).resolves.toBeUndefined();
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it("throws when send resolves with an error", async () => {
+    sendMock.mockResolvedValue({ data: null, error: { message: "boom" } });
+    await expect(sendSummaryEmail(session, video)).rejects.toThrow(
+      "Resend failed: boom",
+    );
   });
 });
