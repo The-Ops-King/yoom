@@ -12,6 +12,9 @@ things a browser on macOS cannot do:
    you need them during a screen recording.
 3. **A floating camera bubble** over the desktop, draggable, whose position
    drives the bubble burned into the recording.
+4. **A recording HUD.** During a take the recorder window hides entirely and a
+   small always-on-top pill — timer, pause, stop, mark, camera toggle, discard —
+   is the whole UI. This is the "make the app disappear" behaviour.
 
 There is no dock icon; the app lives in the menu bar.
 
@@ -64,6 +67,83 @@ If Chromium's CoreAudio tap misbehaves, `YOOM_LEGACY_AUDIO=1` forces the older
 "Screen & System Audio Recording" permission path via the
 `MacCatapLoopbackAudioForScreenShare` feature flag.
 
+## The recording HUD
+
+Entering the 3-2-1 countdown **hides** the recorder window (it is not closed —
+the encoder, the compositor and the unsaved-work guard all live in that
+renderer) and puts a 320×48 pill at the top centre of the screen:
+
+| Control | Action | Hotkey |
+|---|---|---|
+| ⏸ / ▶ | Pause / resume | ⌘⇧P |
+| ■ | Stop and go to review | ⌘⇧L |
+| ⚑ | Drop a marker | ⌘⇧M |
+| ◉ | Show/hide the camera bubble | — |
+| 🗑 | Discard the take | ⌘⇧X |
+
+Drag the pill anywhere by its body. The recorder window comes back — shown and
+focused — as soon as the take reaches review, error or idle. The tray mirrors
+the same controls, and ⌘⇧L works throughout.
+
+**The HUD will appear in a full-screen recording.** `setContentProtection(true)`
+is applied, but macOS ≥ 14's ScreenCaptureKit — which Chromium uses — ignores
+it, exactly as it does for the bubble. Unlike the bubble, the HUD has no
+composited twin drawn over it to hide it. Two answers:
+
+- Drag the pill onto a second display, or onto the part of the screen you are
+  not capturing. This is what Loom users do with Loom's control bar, which has
+  the same limitation.
+- Run with `YOOM_HUD_HIDE_WHILE_RECORDING=1`. The pill hides itself 1 s after
+  your last interaction with it and reappears for 2 s whenever a hotkey fires,
+  the status changes, or you use the tray's "Show/hide controls".
+
+## Debugging
+
+There is no menu bar (`LSUIElement: true`), so the usual View → Toggle
+Developer Tools is not there.
+
+- **Recorder window DevTools:** tray → Developer → Developer tools. Opens
+  detached, so it does not resize the page mid-recording.
+- **Hard reload the web app:** tray → Developer → Reload recorder
+  (`reloadIgnoringCache`). Use it after a deploy rather than restarting the shell.
+- **HUD / bubble / picker renderers:** they have no menu either. In dev they are
+  served by electron-vite, so the quickest path is `console.log` plus the
+  terminal running `npm run dev`, which carries renderer console output. To
+  attach real DevTools, temporarily add `win.webContents.openDevTools({ mode: "detach" })`
+  next to the window's `loadURL`/`loadFile` call.
+- **Main-process logs:** the terminal running `npm run dev`. In a packaged
+  build, launch from a terminal — `/Applications/Yoom.app/Contents/MacOS/Yoom` —
+  to see them.
+- **IPC not arriving?** Check `desktop/src/preload/channels.test.ts` first
+  (`npm --prefix desktop test`). A preload silently missing its bridge is
+  almost always a channel-string drift or a sandbox chunking regression — see
+  the header comment in `app.channels.ts`.
+- **Permissions:** tray → Permissions… shows all three statuses and offers the
+  deep links. Remember that an unsigned rebuild is a new app to macOS TCC.
+- **"Terminal has access to my camera":** under `npm run dev` macOS attributes
+  camera and microphone use to the **launching process** — your terminal —
+  because the running binary is `node_modules/electron/dist/Electron.app` and
+  the privacy indicator follows the responsible process. The packaged app shows
+  up as "Yoom". So the scary Terminal entry in Control Centre is a dev-only
+  artefact of *who launched it*, not of *what is holding the device*. To check
+  whether the camera is genuinely still open, watch the green LED / menu-bar
+  dot: it should go out within ~2 s of a take reaching review (see "Camera
+  release" below).
+
+## Camera release
+
+The floating bubble is a second, independent `getUserMedia` in its own
+renderer. Hiding that window does **not** stop its tracks, so the shell sends
+the renderer an explicit release on every hide path — it stops every track and
+clears `srcObject` — and destroys the window entirely if it stays unwanted for
+2 s. Recreating it is cheap. `before-quit` destroys it while it still exists,
+so the indicator goes out when you quit rather than when the process exits.
+
+The recorder page's *own* camera is separate and stays live through
+`review → setup` on purpose: you are about to shoot another take, and
+re-acquiring would re-prompt and re-flash the camera. Loom behaves the same
+way. It is released by `teardown()` on upload, reset, idle and error.
+
 ## The floating bubble
 
 The bubble window is a **live camera preview positioned over the desktop**, not
@@ -83,6 +163,11 @@ The bubble's own hover strip has two controls: cycle shape and hide. Both echo
 back into the web app so the setting persists.
 
 ## Known limits (v1)
+
+- **The HUD is captured in full-screen recordings on macOS ≥ 14.** See
+  "The recording HUD" above for the two workarounds.
+- **The HUD's position is not remembered across launches.** It returns to the
+  top centre of the primary display every time.
 
 - **The live bubble hides itself while recording a window, and with framed
   capture on.** Self-occlusion only works when the composited bubble covers the
