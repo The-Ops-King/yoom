@@ -278,6 +278,38 @@ describe("parseEdits staging fields", () => {
     expect(parsed.camera?.mirror).toBe(false);
   });
 
+  it("keeps a per-keyframe shape and drops an unrecognised one", () => {
+    const parsed = parseEdits({
+      ...base,
+      camera: {
+        shape: "circle",
+        mirror: true,
+        keyframes: [
+          { t: 0, mode: "bubble", rect: { x: 0, y: 0, w: 0.2, h: 0.2 } },
+          { t: 1, mode: "bubble", rect: { x: 0, y: 0, w: 0.2, h: 0.2 }, shape: "square" },
+          { t: 2, mode: "bubble", rect: { x: 0, y: 0, w: 0.2, h: 0.2 }, shape: "hexagon" },
+        ],
+      },
+    });
+    expect(parsed.camera?.keyframes.map((k) => k.shape)).toEqual([undefined, "square", undefined]);
+  });
+
+  it("accepts the hidden camera mode and rejects any other string", () => {
+    const parsed = parseEdits({
+      ...base,
+      camera: {
+        shape: "circle",
+        mirror: true,
+        keyframes: [
+          { t: 0, mode: "bubble", rect: { x: 0, y: 0, w: 0.2, h: 0.2 } },
+          { t: 1, mode: "hidden", rect: { x: 0, y: 0, w: 0.2, h: 0.2 } },
+          { t: 2, mode: "invisible", rect: { x: 0, y: 0, w: 0.2, h: 0.2 } },
+        ],
+      },
+    });
+    expect(parsed.camera?.keyframes.map((k) => k.mode)).toEqual(["bubble", "hidden", "bubble"]);
+  });
+
   it("truncates camera keyframes to 64", () => {
     const keyframes = Array.from({ length: 70 }, (_, i) => ({
       t: i,

@@ -7,10 +7,12 @@ import { drawFrame, outputSize, type RenderInputs } from "./render";
  * `Path2D` only exists in a browser; `render.ts` builds clip paths with it, so
  * the node run needs a stand-in (same trick as `geometry.test.ts`).
  */
+/** Every corner radius any `roundRect` was built with, in call order. */
+const radii: number[] = [];
 class StubPath2D {
   ops: string[] = [];
   rect() { this.ops.push("rect"); }
-  roundRect() { this.ops.push("roundRect"); }
+  roundRect(_x: number, _y: number, _w: number, _h: number, r: number) { this.ops.push("roundRect"); radii.push(r); }
   arc() { this.ops.push("arc"); }
 }
 beforeAll(() => { vi.stubGlobal("Path2D", StubPath2D); });
@@ -92,9 +94,47 @@ describe("drawFrame", () => {
       { t: 0, mode: "bubble", rect: { x: 0.7, y: 0.7, w: 0.2, h: 0.2 } },
       { t: 1, mode: "full", rect: { x: 0, y: 0, w: 1, h: 1 } },
     ] };
-    drawFrame(ctx, inputs({ ...base, camera: track }), 1.15, 1920, 1080);
+    // Keyframes settle AT their `t`, so the cross-fade is the window before it.
+    drawFrame(ctx, inputs({ ...base, camera: track }), 0.85, 1920, 1080);
     // Screen once, then the outgoing bubble and the incoming full frame.
     expect(ctx.calls.filter((c) => c[0] === "drawImage")).toHaveLength(3);
+    // ...and by the keyframe's own `t` only the full-screen camera is drawn.
+    const settled = fakeCtx();
+    drawFrame(settled, inputs({ ...base, camera: track }), 1, 1920, 1080);
+    expect(settled.calls.filter((c) => c[0] === "drawImage")).toHaveLength(2);
+  });
+  it("draws no camera at all once a hidden keyframe has settled", () => {
+    const track: CameraTrack = { shape: "circle", mirror: false, keyframes: [
+      { t: 0, mode: "bubble", rect: { x: 0.7, y: 0.7, w: 0.2, h: 0.2 } },
+      { t: 1, mode: "hidden", rect: { x: 0.7, y: 0.7, w: 0.2, h: 0.2 } },
+    ] };
+    const hidden = fakeCtx();
+    drawFrame(hidden, inputs({ ...base, camera: track }), 1, 1920, 1080);
+    expect(hidden.calls.filter((c) => c[0] === "drawImage")).toHaveLength(1); // screen only
+    // Mid-fade the outgoing bubble is still drawn (once), so hiding is a fade.
+    const fading = fakeCtx();
+    drawFrame(fading, inputs({ ...base, camera: track }), 0.85, 1920, 1080);
+    expect(fading.calls.filter((c) => c[0] === "drawImage")).toHaveLength(2);
+  });
+  it("morphs the bubble radius between a keyframe's shape and the track default", () => {
+    const rect = { x: 0.7, y: 0.7, w: 0.2, h: 0.2 };
+    const track: CameraTrack = { shape: "circle", mirror: false, keyframes: [
+      { t: 0, mode: "bubble", rect },
+      { t: 2, mode: "bubble", rect, shape: "square" },
+    ] };
+    const e = { ...base, camera: track };
+    // The box is 0.2 × 1080 = 216 px tall: a circle clips at 108, a square at
+    // 4% of the short side = 8.64, and mid-morph lands strictly between.
+    const radiusAt = (t: number) => {
+      radii.length = 0;
+      drawFrame(fakeCtx(), inputs(e), t, 1920, 1080);
+      return radii[0];
+    };
+    expect(radiusAt(0)).toBeCloseTo(108);
+    expect(radiusAt(2)).toBeCloseTo(8.64);
+    const mid = radiusAt(2 - 0.15);
+    expect(mid).toBeGreaterThan(8.64);
+    expect(mid).toBeLessThan(108);
   });
   it("draws the camera as the primary source in camera-only mode, with no bubble", () => {
     const ctx = fakeCtx();

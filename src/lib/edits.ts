@@ -33,9 +33,17 @@ export type Overlay = {
 /** A recorder-placed timestamp marker (seconds from the start of the video). */
 export type Marker = { t: number; label?: string };
 
-export type CameraMode = "bubble" | "full";
-export type CameraKeyframe = { t: number; mode: CameraMode; rect: Rect };
+/** `hidden` removes the camera from the frame entirely (it cross-fades out). */
+export type CameraMode = "bubble" | "full" | "hidden";
+export type CameraKeyframe = {
+  t: number;
+  mode: CameraMode;
+  rect: Rect;
+  /** Bubble shape from this keyframe on; falls back to the track's `shape`. */
+  shape?: BubbleShape;
+};
 export type CameraTrack = {
+  /** The default shape, for keyframes that do not carry their own. */
   shape: BubbleShape;
   mirror: boolean;
   /** Sorted by t; the first is always t = 0. */
@@ -144,8 +152,15 @@ function parseCamera(value: unknown): CameraTrack | null | undefined {
     const t = num(raw.t);
     const rect = parseRect(raw.rect);
     if (t === null || t < 0 || !rect) continue;
-    const mode: CameraMode = raw.mode === "full" ? "full" : "bubble";
-    keyframes.push({ t, mode, rect: clampRect(rect) });
+    const mode: CameraMode =
+      raw.mode === "full" ? "full" : raw.mode === "hidden" ? "hidden" : "bubble";
+    const kf: CameraKeyframe = { t, mode, rect: clampRect(rect) };
+    // Only a shape the settings sanitizer recognises survives; an absent or
+    // bogus one falls back to the track's `shape` at sample time.
+    if (typeof raw.shape === "string" && (SHAPES as string[]).includes(raw.shape)) {
+      kf.shape = pick(raw.shape, SHAPES, shape);
+    }
+    keyframes.push(kf);
   }
   keyframes.sort((a, b) => a.t - b.t);
   if (keyframes.length === 0) return undefined;

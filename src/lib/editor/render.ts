@@ -1,4 +1,4 @@
-import type { Overlay, Rect, VideoEdits } from "@/lib/edits";
+import type { CameraMode, Overlay, Rect, VideoEdits } from "@/lib/edits";
 import { computeFrameLayout, coverCrop, shapeRadius } from "@/lib/recording/geometry";
 import type { BackgroundConfig, RecordingMode } from "@/lib/recording/types";
 import { cameraAt } from "./camera-track";
@@ -214,13 +214,24 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
   const track = inputs.edits.camera;
   if (inputs.mode === "screen+camera" && cam && track && cam.videoWidth > 0) {
     const s = cameraAt(track, t);
-    const drawCam = (mode: "bubble" | "full", rect: Rect, alpha: number) => {
+    // A shape change morphs the corner radius: every shape is just a radius,
+    // so circle → square is one eased number (same trick as the compositor).
+    const bubbleRadius = (w: number, h: number) => {
+      const to = shapeRadius(s.shape, w, h);
+      if (!s.fromShape || s.shapeFade >= 1) return to;
+      const from = shapeRadius(s.fromShape, w, h);
+      return from + (to - from) * s.shapeFade;
+    };
+    const drawCam = (mode: CameraMode, rect: Rect, alpha: number) => {
+      // `hidden` draws nothing at all; the cross-fade alpha on the *other*
+      // mode is what makes hiding and un-hiding a fade rather than a pop.
+      if (mode === "hidden" || alpha <= 0) return;
       const box = mode === "full"
         ? content
         : { x: content.x + rect.x * content.w, y: content.y + rect.y * content.h, w: rect.w * content.w, h: rect.h * content.h };
       if (box.w < 1 || box.h < 1) return;
       const crop = coverCrop(cam.videoWidth, cam.videoHeight, box.w, box.h);
-      const r = mode === "full" ? 0 : shapeRadius(track.shape, box.w, box.h);
+      const r = mode === "full" ? 0 : bubbleRadius(box.w, box.h);
       ctx.save(); ctx.globalAlpha = alpha; ctx.clip(roundedPath(box.x, box.y, box.w, box.h, r));
       if (track.mirror) { ctx.translate(box.x + box.w, box.y); ctx.scale(-1, 1); ctx.drawImage(cam, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, box.w, box.h); }
       else ctx.drawImage(cam, crop.sx, crop.sy, crop.sw, crop.sh, box.x, box.y, box.w, box.h);

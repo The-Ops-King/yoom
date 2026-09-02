@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EMPTY_EDITS, MAX_CUTS, parseEdits } from "@/lib/edits";
-import { defaultCameraTrack } from "./camera-track";
+import { cameraAt, defaultCameraTrack } from "./camera-track";
 import * as ops from "./edit-ops";
 
 const start = () => parseEdits(EMPTY_EDITS);
@@ -36,6 +36,17 @@ describe("edit-ops", () => {
     e = ops.removeCameraKeyframe(e, 3);
     expect(e.camera?.keyframes).toHaveLength(1);
     expect(ops.setCameraOffset(e, 9999).cameraOffsetMs).toBe(5000);
+  });
+  it("a shape or hidden keyframe is visible at the playhead it was written at", () => {
+    let e = ops.setCamera(start(), defaultCameraTrack("circle", "small", 16 / 9));
+    e = ops.upsertCameraKeyframe(e, 4, { shape: "square" });
+    e = ops.upsertCameraKeyframe(e, 8, { mode: "hidden" });
+    expect(cameraAt(e.camera!, 4).shape).toBe("square");
+    expect(cameraAt(e.camera!, 8).mode).toBe("hidden");
+    // The track's default shape is untouched: it only backs keyframes that
+    // carry none of their own.
+    expect(e.camera?.shape).toBe("circle");
+    expect(cameraAt(e.camera!, 0).shape).toBe("circle");
   });
   it("zoom ops keep the list disjoint", () => {
     let e = ops.addZoom(start(), { start: 1, end: 4, rect: { x: 0, y: 0, w: 0.5, h: 0.5 } });
