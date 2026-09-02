@@ -157,12 +157,21 @@ function clearAutoHide(): void {
   autoHideTimer = null;
 }
 
+/**
+ * True while the pill has been deliberately hidden (idle auto-hide or the tray
+ * toggle). `sync()` runs on every 4 Hz state push from the page and must not
+ * undo that hide; only an interaction, a hotkey wake, the tray toggle, or a
+ * status change clears it.
+ */
+let suppressed = false;
+
 function armAutoHide(delayMs: number): void {
   clearAutoHide();
   if (!AUTO_HIDE) return;
   if (!VISIBLE_DURING.has(state.status)) return;
   autoHideTimer = setTimeout(() => {
     autoHideTimer = null;
+    suppressed = true;
     alive()?.hide();
   }, delayMs);
 }
@@ -171,6 +180,7 @@ function armAutoHide(delayMs: number): void {
 export function noteHudInteraction(): void {
   if (!AUTO_HIDE) return;
   if (!VISIBLE_DURING.has(state.status)) return;
+  suppressed = false;
   const win = alive();
   if (win && !win.isVisible()) win.showInactive();
   armAutoHide(AUTO_HIDE_DELAY_MS);
@@ -180,6 +190,7 @@ export function noteHudInteraction(): void {
 export function wakeHud(): void {
   if (!AUTO_HIDE) return;
   if (!VISIBLE_DURING.has(state.status)) return;
+  suppressed = false;
   alive()?.showInactive();
   armAutoHide(AUTO_HIDE_WAKE_MS);
 }
@@ -193,8 +204,10 @@ export function toggleHud(): void {
   }
   if (win.isVisible()) {
     clearAutoHide();
+    suppressed = true;
     win.hide();
   } else {
+    suppressed = false;
     win.showInactive();
     armAutoHide(AUTO_HIDE_WAKE_MS);
   }
@@ -203,14 +216,16 @@ export function toggleHud(): void {
 function sync(): void {
   if (!VISIBLE_DURING.has(state.status)) {
     clearAutoHide();
+    suppressed = false;
     alive()?.hide();
     return;
   }
   const win = createHudWindow();
   win.webContents.send(IPC.hudApply, state);
   // Showing before the renderer has painted flashes an unstyled transparent
-  // frame; `onLoaded` shows it itself once the first paint lands.
-  if (hudLoaded && !win.isVisible()) win.showInactive();
+  // frame; `onLoaded` shows it itself once the first paint lands. A deliberate
+  // hide (auto-hide / tray toggle) is respected until something wakes it.
+  if (hudLoaded && !suppressed && !win.isVisible()) win.showInactive();
 }
 
 /**
@@ -226,8 +241,9 @@ function parseHudState(value: unknown): HudState | null {
     typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0;
   return {
     status,
-    elapsedMs: num(raw.elapsedMs),
-    countdown: num(raw.countdown),
+    // 30 min cap mirrors the recorder's MAX_DURATION; countdown is 0–10.
+    elapsedMs: Math.min(num(raw.elapsedMs), 30 * 60 * 1000),
+    countdown: Math.min(num(raw.countdown), 10),
     markers: Math.round(num(raw.markers)),
     bubbleVisible: !!raw.bubbleVisible,
   };
@@ -239,6 +255,8 @@ export function setHudState(next: HudState): void {
   state = next;
 
   if (statusChanged) {
+    // A status change always un-suppresses the pill (wakeHud below re-arms).
+    suppressed = false;
     // Loom-style disappearing act, decided by a pure function so it is
     // testable: see mapping.ts#recorderWindowVisibility.
     const action = recorderWindowVisibility(prev, next.status);
