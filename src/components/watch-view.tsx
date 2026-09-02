@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { YoomLogo } from "./logo";
 import { useViewTracker } from "@/hooks/use-view-tracker";
+import { EMPTY_EDITS, type VideoEdits } from "@/lib/edits";
+import { EditPlayer } from "@/components/video/edit-player";
 
 const VIEWER_NAME_KEY = "yoom_viewer_name";
 
@@ -20,9 +22,16 @@ type WatchViewProps = {
   /** Absolute app origin; the page may be served from jtylerray.com. */
   apiBase: string;
   shareUrl: string;
+  /** Non-destructive edit list; empty until the Phase 5 editor ships. */
+  edits?: VideoEdits;
 };
 
-export function WatchView({ video, apiBase, shareUrl }: WatchViewProps) {
+export function WatchView({
+  video,
+  apiBase,
+  shareUrl,
+  edits = EMPTY_EDITS,
+}: WatchViewProps) {
   const [viewerName, setViewerName] = useState<string | null>(null);
   const [nameResolved, setNameResolved] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -92,14 +101,11 @@ export function WatchView({ video, apiBase, shareUrl }: WatchViewProps) {
       </div>
 
       <div className="relative">
-        <video
-          ref={videoRef}
+        <EditPlayer
           src={`${apiBase}/api/stream/${video.id}`}
           poster={video.hasThumbnail ? `${apiBase}/api/thumb/${video.id}` : undefined}
-          controls
-          preload="metadata"
-          playsInline
-          className="w-full rounded-xl border border-border bg-black shadow-lg shadow-black/30"
+          edits={edits}
+          videoRef={videoRef}
         />
 
         {mounted && !nameResolved && (

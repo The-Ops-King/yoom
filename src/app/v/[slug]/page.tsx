@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import { getVideoById, getVideoBySlug, getVideoIdByOldSlug } from "@/lib/db";
+import { parseEdits } from "@/lib/edits";
 import { appUrl } from "@/lib/env";
 import { shareUrl } from "@/lib/share";
 import { SLUG_RE } from "@/lib/slug";
@@ -87,6 +88,7 @@ export default async function WatchPage({ params }: PageProps) {
       }}
       apiBase={appUrl()}
       shareUrl={shareUrl(video.slug)}
+      edits={parseEdits(video.edits)}
     />
   );
 }
