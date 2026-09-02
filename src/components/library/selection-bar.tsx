@@ -45,11 +45,13 @@ export function SelectionBar({
       >
         {pending ? "Deleting…" : `Delete ${count}`}
       </button>
-      {failures.length > 0 && (
-        <p aria-live="polite" className="w-full text-xs text-red-400/90">
-          Could not delete: {failures.map((f) => `${f.title} (${f.error})`).join(", ")}
-        </p>
-      )}
+      {/* Always in the DOM: a live region only announces mutations a screen
+          reader was already observing. */}
+      <p aria-live="polite" className="w-full text-xs text-red-400/90">
+        {failures.length > 0
+          ? `Could not delete: ${failures.map((f) => `${f.title} (${f.error})`).join(", ")}`
+          : ""}
+      </p>
     </div>
   );
 }

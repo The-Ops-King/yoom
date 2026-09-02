@@ -1,13 +1,18 @@
 import Link from "next/link";
 import type { VideoListItem } from "@/lib/db";
 import { fmtDuration, fmtRelative } from "@/lib/format";
-import { shareUrl } from "@/lib/share";
 import { CopyLinkButton } from "@/components/library/copy-link-button";
 
 type VideoCardProps = {
   video: VideoListItem;
   /** Absolute app origin, used for the thumbnail URL. */
   apiBase: string;
+  /**
+   * Public share origin, resolved on the server. This card renders inside a
+   * Client Component, where `shareBaseUrl()` would fall back to localhost
+   * unless the NEXT_PUBLIC_* vars happen to be inlined.
+   */
+  shareBase: string;
   /** Show the selection checkbox and route plain clicks to `onToggle`. */
   selectable: boolean;
   selected: boolean;
@@ -19,6 +24,7 @@ type VideoCardProps = {
 export function VideoCard({
   video,
   apiBase,
+  shareBase,
   selectable,
   selected,
   anySelected,
@@ -96,12 +102,14 @@ export function VideoCard({
           <h2 className="truncate text-sm font-medium text-foreground group-hover:text-accent">
             {video.title}
           </h2>
-          <p className="text-xs text-muted-dim">
+          {/* Relative times are computed from the clock, so the server and the
+              client can disagree by a minute across the hydration boundary. */}
+          <p className="text-xs text-muted-dim" suppressHydrationWarning>
             {video.views} {video.views === 1 ? "view" : "views"} ·{" "}
             {video.uniqueViewers} {video.uniqueViewers === 1 ? "viewer" : "viewers"} ·{" "}
             {fmtRelative(video.created_at)}
           </p>
-          <p className="text-xs text-muted-dim">
+          <p className="text-xs text-muted-dim" suppressHydrationWarning>
             {video.lastViewedAt
               ? `viewed ${fmtRelative(video.lastViewedAt)}`
               : "never viewed"}
@@ -110,7 +118,8 @@ export function VideoCard({
       </Link>
       <div className="flex items-center justify-end border-t border-border px-3 py-2">
         <CopyLinkButton
-          url={shareUrl(video.slug)}
+          // Mirrors shareUrl() in @/lib/share, with the origin passed in.
+          url={`${shareBase}/v/${video.slug}`}
           label="Copy link"
           className="rounded-lg px-2 py-1 text-xs text-muted transition-colors hover:text-foreground"
         />

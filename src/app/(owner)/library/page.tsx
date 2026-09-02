@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { isOwner } from "@/lib/auth";
 import { listVideos, type VideoSort } from "@/lib/db";
-import { appUrl } from "@/lib/env";
+import { appUrl, shareBaseUrl } from "@/lib/env";
 import { PasswordGate } from "@/components/password-gate";
 import { LibraryToolbar } from "@/components/library/library-toolbar";
 import { LibraryGrid } from "@/app/(owner)/library/library-grid";
@@ -55,8 +55,11 @@ export default async function LibraryPage({ searchParams }: PageProps) {
         // so the client grid can swap it for the selection bar without pulling
         // it into the client bundle.
         <LibraryGrid
+          // Remount on a new query or sort: the selection belongs to one list.
+          key={`${q}-${sort}`}
           videos={videos}
           apiBase={base}
+          shareBase={shareBaseUrl()}
           toolbar={<LibraryToolbar q={q} sort={sort} count={videos.length} />}
         />
       )}

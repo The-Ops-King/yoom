@@ -10,18 +10,26 @@ import { SelectionBar } from "@/components/library/selection-bar";
 type LibraryGridProps = {
   videos: VideoListItem[];
   apiBase: string;
+  /** Public share origin, resolved on the server (see VideoCard). */
+  shareBase: string;
   /** Rendered in place of the selection bar while nothing is selected. */
   toolbar: ReactNode;
 };
 
 type Failure = { id: string; title: string; error: string };
 
-export function LibraryGrid({ videos, apiBase, toolbar }: LibraryGridProps) {
+export function LibraryGrid({ videos, apiBase, shareBase, toolbar }: LibraryGridProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [last, setLast] = useState<string | null>(null);
   const [failures, setFailures] = useState<Failure[]>([]);
   const [pending, start] = useTransition();
   const router = useRouter();
+
+  // A router.refresh() can drop rows from `videos` while their ids are still in
+  // `selected`, so the live selection is always the intersection with what is
+  // on screen. The count, the bar and the delete set then never name a row the
+  // user cannot see.
+  const visible = videos.filter((v) => selected.has(v.id)).map((v) => v.id);
 
   const toggle = (id: string, shift: boolean) => {
     setSelected((prev) => {
@@ -45,7 +53,7 @@ export function LibraryGrid({ videos, apiBase, toolbar }: LibraryGridProps) {
   };
 
   const remove = () => {
-    const ids = [...selected];
+    const ids = visible;
     if (ids.length === 0) return;
     if (
       !window.confirm(
@@ -68,9 +76,9 @@ export function LibraryGrid({ videos, apiBase, toolbar }: LibraryGridProps) {
 
   return (
     <>
-      {selected.size > 0 ? (
+      {visible.length > 0 ? (
         <SelectionBar
-          count={selected.size}
+          count={visible.length}
           total={videos.length}
           pending={pending}
           failures={failures}
@@ -91,9 +99,10 @@ export function LibraryGrid({ videos, apiBase, toolbar }: LibraryGridProps) {
             key={video.id}
             video={video}
             apiBase={apiBase}
+            shareBase={shareBase}
             selectable
             selected={selected.has(video.id)}
-            anySelected={selected.size > 0}
+            anySelected={visible.length > 0}
             onToggle={(shift) => toggle(video.id, shift)}
           />
         ))}
