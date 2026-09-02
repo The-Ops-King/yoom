@@ -1,5 +1,45 @@
 import { NextResponse } from "next/server";
+import { appUrl } from "@/lib/env";
+import { createResumableSession } from "@/lib/google-drive";
 
-export async function POST() {
-  return NextResponse.json({ error: "Upload not configured" }, { status: 501 });
+const MAX_SIZE_BYTES = 5 * 1024 * 1024 * 1024;
+
+export async function POST(request: Request) {
+  let body: { mimeType?: string; sizeBytes?: number; filename?: string };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
+    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+  }
+
+  const mimeType = body.mimeType || "video/webm";
+  const sizeBytes = Number(body.sizeBytes);
+  const filename = body.filename?.trim() || `yoom-${Date.now()}.webm`;
+
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_SIZE_BYTES) {
+    return NextResponse.json({ error: "Invalid sizeBytes" }, { status: 400 });
+  }
+
+  // In dev the browser origin is http://localhost:3000; in production it must be
+  // the deployed app origin so Google echoes the right CORS headers.
+  const origin =
+    process.env.NODE_ENV === "production"
+      ? appUrl()
+      : request.headers.get("origin") || appUrl();
+
+  try {
+    const sessionUri = await createResumableSession({
+      name: filename,
+      mimeType,
+      sizeBytes,
+      origin,
+    });
+    return NextResponse.json({ sessionUri });
+  } catch (error) {
+    console.error("createResumableSession failed", error);
+    return NextResponse.json(
+      { error: "Could not start the upload" },
+      { status: 502 },
+    );
+  }
 }
