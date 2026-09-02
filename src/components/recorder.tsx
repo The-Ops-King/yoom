@@ -157,6 +157,7 @@ export function Recorder() {
         markFlash={markFlash}
         screenVideoRef={screenVideoRef}
         cameraVideoRef={cameraVideoRef}
+        mirror={state.bubble.mirror}
       />
 
       {state.status === "staging" && staging ? (

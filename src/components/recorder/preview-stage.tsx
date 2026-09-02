@@ -11,6 +11,8 @@ interface PreviewStageProps {
   markFlash?: boolean;
   screenVideoRef: RefObject<HTMLVideoElement | null>;
   cameraVideoRef: RefObject<HTMLVideoElement | null>;
+  /** Mirror the camera preview, matching the bubble default the user picked. */
+  mirror: boolean;
 }
 
 export function formatElapsed(ms: number): string {
@@ -29,15 +31,13 @@ export function PreviewStage({
   markFlash = false,
   screenVideoRef,
   cameraVideoRef,
+  mirror,
 }: PreviewStageProps) {
   const live = status === "recording" || status === "paused";
-  // Hidden — never unmounted — outside capture: the two <video> elements are
-  // the raw preview sinks, and the hook's refs must survive staging.
+  // Hidden — not unmounted — during staging: the two <video> elements are the
+  // raw preview sinks, and the hook's refs must survive the transition.
   const showStage =
-    status !== "idle" &&
-    status !== "acquiring" &&
-    status !== "staging" &&
-    status !== "rendering";
+    status !== "idle" && status !== "acquiring" && status !== "staging";
   const cameraIsStage = mode === "camera";
 
   return (
@@ -59,6 +59,7 @@ export function PreviewStage({
         playsInline
         autoPlay
         draggable={false}
+        aria-label="Screen preview"
         className={`h-full w-full object-contain ${cameraIsStage ? "hidden" : ""}`}
       />
 
@@ -69,7 +70,8 @@ export function PreviewStage({
           playsInline
           autoPlay
           draggable={false}
-          style={{ transform: "scaleX(-1)" }}
+          aria-label="Camera preview"
+          style={{ transform: mirror ? "scaleX(-1)" : undefined }}
           className="h-full w-full object-contain"
         />
       ) : (
@@ -84,7 +86,8 @@ export function PreviewStage({
             playsInline
             autoPlay
             draggable={false}
-            style={{ transform: "scaleX(-1)" }}
+            aria-label="Camera preview"
+            style={{ transform: mirror ? "scaleX(-1)" : undefined }}
             className="aspect-video w-full rounded-lg border border-border object-cover"
           />
           <p className="mt-1 text-center text-[10px] leading-tight text-muted-dim">
