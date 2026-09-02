@@ -33,6 +33,8 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
   const rectRef = useRef<{ left: number; width: number } | null>(null);
   /** Where the zoom being dragged ended up, so its (re-sorted) index can be re-found. */
   const zoomStartRef = useRef(0);
+  /** Likewise for a dragged camera keyframe, which is addressed by time. */
+  const kfTimeRef = useRef(0);
   const [drag, setDrag] = useState<Drag | null>(null);
 
   const trim = edits.trim ?? { start: 0, end: duration };
@@ -86,6 +88,9 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
         const k = track?.keyframes[d.index];
         if (!k || d.index === 0) return;
         const nt = clamp(t, MIN_SPAN, duration);
+        // Keyframes are addressed by time: stash the new one so the release
+        // can re-select it, or Delete would look for the pre-drag time.
+        kfTimeRef.current = nt;
         ctx.applyLive(() =>
           ops.upsertCameraKeyframe(ops.removeCameraKeyframe(d.from, k.t), nt, { mode: k.mode, rect: k.rect, ...(k.shape ? { shape: k.shape } : {}) }),
         );
@@ -123,6 +128,14 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
         const i = ctx.edits.zooms.findIndex((z) => z.start === zoomStartRef.current);
         ctx.setSelected(i >= 0 ? { kind: "zoom", index: i } : null);
       }
+      // A moved keyframe is re-inserted at its new time and the list re-sorted,
+      // so both the index and the selection's `t` (what Delete removes by) are
+      // stale until they are re-found.
+      if (drag.kind === "keyframe") {
+        const t = kfTimeRef.current;
+        const i = ctx.edits.camera?.keyframes.findIndex((k) => k.t === t) ?? -1;
+        ctx.setSelected(i >= 0 ? { kind: "keyframe", index: i, t } : null);
+      }
       rectRef.current = null;
       setDrag(null);
     };
@@ -141,6 +154,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
     e.stopPropagation();
     measure();
     if (d.kind === "zoom") zoomStartRef.current = d.start;
+    if (d.kind === "keyframe") kfTimeRef.current = d.from.camera?.keyframes[d.index]?.t ?? 0;
     setDrag(d);
   };
 
@@ -237,8 +251,18 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
           One lane per zoom and per overlay so each can be grabbed on its own,
           plus the single camera-keyframe lane. Past eight lanes the stack
           scrolls rather than pushing the rest of the screen down.
+
+          The scrollbar is given no layout width (and no reserved gutter — that
+          would narrow the rows permanently): every clip's percentage is
+          resolved against the same width as `trackRef`, so a classic scrollbar
+          eating ~15px would slide the whole stack out from under the playhead.
+          The ninth lane deliberately peeks instead, as the scroll affordance.
         */}
-        <div className={`mt-1 space-y-1 ${laneCount > 8 ? "max-h-[172px] overflow-y-auto" : ""}`}>
+        <div
+          className={`mt-1 space-y-1 ${
+            laneCount > 8 ? "max-h-[184px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""
+          }`}
+        >
           {edits.zooms.map((z, i) => (
             <div key={`zoom-lane-${i}`} className={`${laneRow} ${isSel("zoom", i) ? "border-accent" : "border-border"}`}>
               <span className={laneLabel}>Zoom {i + 1}</span>
