@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { IPC as SHARED } from "../shared/ipc";
 import { IPC as APP } from "./app.channels";
 import { IPC as BUBBLE } from "./bubble.channels";
+import { IPC as HUD } from "./hud.channels";
 import { IPC as PICKER } from "./picker.channels";
 
 /**
@@ -17,6 +18,7 @@ describe("preload channel constants", () => {
     ["app", APP],
     ["bubble", BUBBLE],
     ["picker", PICKER],
+    ["hud", HUD],
   ] as const) {
     it(`${label}: every channel exists in shared/ipc.ts`, () => {
       for (const [key, value] of Object.entries(table)) {
@@ -29,11 +31,12 @@ describe("preload channel constants", () => {
     });
   }
 
-  it("covers every shared channel between the three preloads", () => {
+  it("covers every shared channel between the preloads", () => {
     const covered = new Set<string>([
       ...Object.values(APP),
       ...Object.values(BUBBLE),
       ...Object.values(PICKER),
+      ...Object.values(HUD),
     ]);
     // `bubbleApply`/`bubbleCamera` reach the bubble renderer and the picker
     // channels reach the picker renderer, so the union is the whole contract.

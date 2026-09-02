@@ -1,7 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
 // Types only — a *value* import of `../shared/ipc` would make Rollup emit a
 // shared chunk that a sandboxed preload cannot require. See `app.channels.ts`.
-import type { BubbleAppearance, DesktopShortcut, SurfacePref } from "../shared/ipc";
+import type {
+  BubbleAppearance,
+  DesktopShortcut,
+  HudState,
+  SurfacePref,
+} from "../shared/ipc";
 import { IPC } from "./app.channels";
 
 /**
@@ -70,6 +75,10 @@ export const bridge = {
 
   setCameraDevice(deviceId: string | null): void {
     ipcRenderer.send(IPC.setCameraDevice, deviceId);
+  },
+
+  setHudState(state: HudState): void {
+    ipcRenderer.send(IPC.setHudState, state);
   },
 };
 

@@ -12,7 +12,45 @@
 export type SurfacePref = "monitor" | "window" | "browser";
 export type BubbleShape = "circle" | "rounded" | "square" | "portrait" | "full";
 export type BubbleSize = "small" | "medium" | "large";
-export type DesktopShortcut = "toggle" | "pause" | "mark" | "restart" | "cancel";
+/**
+ * `bubbleToggle` has no global accelerator — it is the HUD's camera button
+ * only. It rides the same channel because it is the same kind of thing: a
+ * remote-control action forwarded to the recorder renderer.
+ */
+export type DesktopShortcut =
+  | "toggle"
+  | "pause"
+  | "mark"
+  | "restart"
+  | "cancel"
+  | "bubbleToggle";
+
+/**
+ * The subset of the web app's `RecorderStatus` the HUD needs. Everything the
+ * HUD does not distinguish collapses to `"other"`, so the shell never mirrors
+ * the full state machine.
+ *
+ * MUST stay identical to `HudStatus` in `src/lib/recording/types.ts`.
+ */
+export type HudStatus =
+  | "idle"
+  | "countdown"
+  | "recording"
+  | "paused"
+  | "stopping"
+  | "review"
+  | "error"
+  | "other";
+
+/** MUST stay identical to `HudState` in `src/lib/recording/types.ts`. */
+export interface HudState {
+  status: HudStatus;
+  elapsedMs: number;
+  countdown: number;
+  /** A COUNT, not the marker array — this rides a ~4 Hz push. */
+  markers: number;
+  bubbleVisible: boolean;
+}
 
 export interface BubbleAppearance {
   shape: BubbleShape;
@@ -66,6 +104,19 @@ export const IPC = {
   /** app renderer → main. Payload: string | null. */
   setCameraDevice: "yoom:bubble-camera",
 
+  /** app renderer → main. Payload: HudState. ~4 Hz while a take is live. */
+  setHudState: "yoom:hud-state",
+
+  /** main → HUD renderer. Payload: HudState. */
+  hudApply: "yoom:hud:apply",
+  /** HUD renderer → main. Payload: DesktopShortcut. */
+  hudAction: "yoom:hud:action",
+  /**
+   * HUD renderer → main. No payload. Resets the idle timer behind
+   * YOOM_HUD_HIDE_WHILE_RECORDING. Sent on hover and on every click.
+   */
+  hudInteract: "yoom:hud:interact",
+
   /** main → bubble renderer. Payload: BubbleAppearance. */
   bubbleApply: "yoom:bubble:apply",
   /** main → bubble renderer. Payload: string | null (deviceId). */
@@ -115,9 +166,16 @@ export interface PickerApi {
   cancel(): void;
 }
 
+export interface HudApi {
+  onApply(cb: (state: HudState) => void): void;
+  action(action: DesktopShortcut): void;
+  interact(): void;
+}
+
 declare global {
   interface Window {
     __yoomBubble?: BubbleApi;
     __yoomPicker?: PickerApi;
+    __yoomHud?: HudApi;
   }
 }

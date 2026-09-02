@@ -20,4 +20,5 @@ export const IPC = {
   setBubbleVisible: "yoom:bubble-visible",
   setRecordingActive: "yoom:recording-active",
   setCameraDevice: "yoom:bubble-camera",
+  setHudState: "yoom:hud-state",
 } as const;
