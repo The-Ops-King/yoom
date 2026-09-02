@@ -128,6 +128,13 @@ function createHudWindow(): BrowserWindow {
   // AUTO_HIDE above and README.md § "The recording HUD".
   win.setContentProtection(true);
 
+  // A `-webkit-app-region: drag` gesture is handled by macOS, not by the page:
+  // once the drag starts the renderer stops receiving `pointermove`, so the
+  // idle timer that `hud.ts` feeds would fire mid-drag and hide the pill out
+  // from under the cursor. The window's own move events are the interaction.
+  win.on("move", () => noteHudInteraction());
+  win.on("moved", () => noteHudInteraction());
+
   win.on("closed", () => {
     unregisterShellWebContents(wcId);
     hudWindow = null;

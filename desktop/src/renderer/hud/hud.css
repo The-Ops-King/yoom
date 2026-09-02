@@ -23,11 +23,20 @@ body {
   color: var(--fg);
 }
 
+/* The drag region is the WHOLE window, not just the pill — the same shape as
+   the bubble window, which drags reliably. Scoping it to `#pill` left the 8 px
+   shadow margin as a dead ring around a 48 px-tall target in a 64 px-tall
+   window: a grab aimed at the pill's visible edge (the shadow reads as part of
+   it) landed on body, which is not draggable, and nothing moved. Buttons still
+   opt out with `no-drag` below. */
+body {
+  -webkit-app-region: drag;
+  cursor: grab;
+}
+
 /* 300×64 window, 284×48 pill: the margin is where the shadow lives, because a
    transparent window cannot paint outside its own bounds. */
 #pill {
-  -webkit-app-region: drag;
-  cursor: grab;
   margin: 8px;
   height: 48px;
   display: flex;
