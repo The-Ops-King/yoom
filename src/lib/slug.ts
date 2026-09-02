@@ -13,3 +13,18 @@ export function newSlug(): string {
   }
   return out;
 }
+
+/**
+ * Best-effort tidy-up of a hand-typed slug. Deliberately does NOT validate —
+ * the caller still tests the result against SLUG_RE so the user sees an error
+ * for input that cannot be rescued (e.g. "AB" is too short).
+ */
+export function normalizeSlug(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "");
+}

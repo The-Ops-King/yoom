@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SLUG_RE, newSlug } from "@/lib/slug";
+import { SLUG_RE, newSlug, normalizeSlug } from "@/lib/slug";
 
 describe("newSlug", () => {
   it("returns 8 lowercase base36 characters", () => {
@@ -32,4 +32,22 @@ describe("SLUG_RE", () => {
       expect(SLUG_RE.test(slug)).toBe(false);
     },
   );
+});
+
+describe("normalizeSlug", () => {
+  it("lowercases, trims and collapses separators", () => {
+    expect(normalizeSlug("  My Demo  ")).toBe("my-demo");
+    expect(normalizeSlug("My___Demo")).toBe("my-demo");
+    expect(normalizeSlug("my--demo")).toBe("my-demo");
+    expect(normalizeSlug("-my-demo-")).toBe("my-demo");
+  });
+
+  it("drops characters that SLUG_RE would reject", () => {
+    expect(normalizeSlug("my.demo!")).toBe("mydemo");
+  });
+
+  it("produces something SLUG_RE accepts, or an unusable short string", () => {
+    expect(SLUG_RE.test(normalizeSlug("My Demo"))).toBe(true);
+    expect(SLUG_RE.test(normalizeSlug("AB"))).toBe(false);
+  });
 });
