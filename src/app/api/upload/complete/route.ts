@@ -69,8 +69,14 @@ export async function POST(request: Request) {
     } catch (error) {
       if (error instanceof DbError && error.code === UNIQUE_VIOLATION) {
         // Either the slug collided (retry) or this Drive file is already
-        // recorded (surface it as a conflict rather than looping).
-        if (error.message.includes("drive_file_id")) {
+        // recorded (surface it as a conflict rather than looping). Match the
+        // videos_drive_file_id_key unique constraint specifically, not the
+        // slug's own unique constraint, which also mentions "drive_file_id"
+        // only incidentally in some drivers' error text.
+        if (
+          error.message.includes("drive_file_id") ||
+          error.message.includes("videos_drive_file_id_key")
+        ) {
           return NextResponse.json(
             { error: "This recording was already saved" },
             { status: 409 },

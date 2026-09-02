@@ -59,7 +59,7 @@ async function queryOffset(
   sessionUri: string,
   total: number,
   options: UploadOptions,
-): Promise<number> {
+): Promise<{ offset: number; id?: string }> {
   const [url, init] = putInit(sessionUri, `bytes */${total}`, undefined, options);
   const response = await fetch(url, init);
 
@@ -67,12 +67,13 @@ async function queryOffset(
     throw new Error("Upload session expired. Please try recording again.");
   }
   if (response.status === 200 || response.status === 201) {
-    return total;
+    const json = (await response.json()) as { id?: string };
+    return { offset: total, id: json.id };
   }
   if (response.status !== 308) {
     throw new Error(`Upload failed while resuming (${response.status})`);
   }
-  return offsetFromRange(response.headers.get("range"));
+  return { offset: offsetFromRange(response.headers.get("range")) };
 }
 
 /**
@@ -116,7 +117,13 @@ export async function uploadToDrive(
       if (attempts >= MAX_ATTEMPTS) {
         throw new Error("Upload failed after repeated network errors");
       }
-      offset = await queryOffset(sessionUri, total, options);
+      const result = await queryOffset(sessionUri, total, options);
+      if (result.id) {
+        onProgress?.(100);
+        return { id: result.id };
+      }
+      if (result.offset > offset) attempts = 0;
+      offset = result.offset;
       onProgress?.(Math.round((offset / total) * 100));
       continue;
     }
@@ -129,8 +136,17 @@ export async function uploadToDrive(
     }
 
     if (response.status === 308) {
-      const next = offsetFromRange(response.headers.get("range"));
-      offset = next > offset ? next : end;
+      const range = response.headers.get("range");
+      if (range) {
+        offset = offsetFromRange(range);
+        attempts = 0;
+      } else {
+        // Drive committed nothing for this chunk; retry from the same offset.
+        attempts += 1;
+        if (attempts >= MAX_ATTEMPTS) {
+          throw new Error("Upload failed (308 without Range)");
+        }
+      }
       onProgress?.(Math.round((offset / total) * 100));
       continue;
     }
@@ -143,7 +159,13 @@ export async function uploadToDrive(
     if (attempts >= MAX_ATTEMPTS) {
       throw new Error(`Upload failed (${response.status})`);
     }
-    offset = await queryOffset(sessionUri, total, options);
+    const result = await queryOffset(sessionUri, total, options);
+    if (result.id) {
+      onProgress?.(100);
+      return { id: result.id };
+    }
+    if (result.offset > offset) attempts = 0;
+    offset = result.offset;
     onProgress?.(Math.round((offset / total) * 100));
   }
 

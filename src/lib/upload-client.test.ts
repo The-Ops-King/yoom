@@ -130,4 +130,69 @@ describe("uploadToDrive", () => {
       "Upload failed",
     );
   });
+
+  it("does not lose a completed upload discovered via the offset query", async () => {
+    let attempt = 0;
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      attempt += 1;
+      if (attempt === 1) throw new TypeError("network error");
+      const headers = init.headers as Record<string, string>;
+      expect(headers["Content-Range"]).toBe("bytes */512");
+      return Response.json({ id: "drive-late" }, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(uploadToDrive(blobOf(512), SESSION_URI)).resolves.toEqual({
+      id: "drive-late",
+    });
+  });
+
+  it("does not skip bytes on a 308 without a Range header", async () => {
+    const size = 2048;
+    const ranges: string[] = [];
+    let attempt = 0;
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const headers = init.headers as Record<string, string>;
+      ranges.push(headers["Content-Range"]);
+      attempt += 1;
+      if (attempt <= 2) return new Response(null, { status: 308 });
+      if (attempt === 3) return resumeIncomplete(1023);
+      return Response.json({ id: "drive-final" }, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(uploadToDrive(blobOf(size), SESSION_URI)).resolves.toEqual({
+      id: "drive-final",
+    });
+    expect(ranges).toEqual([
+      `bytes 0-${size - 1}/${size}`,
+      `bytes 0-${size - 1}/${size}`,
+      `bytes 0-${size - 1}/${size}`,
+      `bytes 1024-${size - 1}/${size}`,
+    ]);
+  });
+
+  it("resets the retry budget after each acknowledged chunk", async () => {
+    const size = 4096;
+    const advances = [100, 200, 300, 400, 500, 600];
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      call += 1;
+      if (call <= 12) {
+        if (call % 2 === 1) throw new TypeError("network error");
+        const next = advances[call / 2 - 1];
+        return new Response(null, {
+          status: 308,
+          headers: { Range: `bytes=0-${next - 1}` },
+        });
+      }
+      return Response.json({ id: "drive-final" }, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(uploadToDrive(blobOf(size), SESSION_URI)).resolves.toEqual({
+      id: "drive-final",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(13);
+  });
 });

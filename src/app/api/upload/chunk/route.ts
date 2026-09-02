@@ -11,11 +11,26 @@ export async function PUT(request: Request) {
   const sessionUri = request.headers.get("x-upload-session-uri");
   const contentRange = request.headers.get("x-upload-content-range");
 
-  if (!sessionUri || !sessionUri.startsWith("https://")) {
+  if (!sessionUri) {
     return NextResponse.json({ error: "Missing upload session URI" }, {
       status: 400,
     });
   }
+
+  let url: URL;
+  try {
+    url = new URL(sessionUri);
+  } catch {
+    return NextResponse.json({ error: "Invalid upload session URI" }, {
+      status: 400,
+    });
+  }
+  if (url.origin !== "https://www.googleapis.com" || !url.pathname.startsWith("/upload/")) {
+    return NextResponse.json({ error: "Invalid upload session URI" }, {
+      status: 400,
+    });
+  }
+
   if (!contentRange) {
     return NextResponse.json({ error: "Missing content range" }, { status: 400 });
   }
@@ -25,15 +40,20 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Chunk too large" }, { status: 413 });
   }
 
-  const upstream = await fetch(sessionUri, {
-    method: "PUT",
-    headers: {
-      "Content-Range": contentRange,
-      "Content-Type": "application/octet-stream",
-    },
-    body: body.byteLength > 0 ? body : undefined,
-    cache: "no-store",
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(sessionUri, {
+      method: "PUT",
+      headers: {
+        "Content-Range": contentRange,
+        "Content-Type": "application/octet-stream",
+      },
+      body: body.byteLength > 0 ? body : undefined,
+      cache: "no-store",
+    });
+  } catch {
+    return NextResponse.json({ error: "Upstream upload failed" }, { status: 502 });
+  }
 
   const headers = new Headers();
   const range = upstream.headers.get("range");

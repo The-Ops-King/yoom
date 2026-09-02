@@ -25,6 +25,7 @@ export function Recorder() {
   const screenStreamRef = useRef<MediaStream | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const thumbnailTimerRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number>(0);
   const screenVideoElRef = useRef<HTMLVideoElement | null>(null);
@@ -48,6 +49,10 @@ export function Recorder() {
     animationRef.current = 0;
     screenVideoElRef.current = null;
     cameraVideoElRef.current = null;
+    if (thumbnailTimerRef.current) {
+      window.clearTimeout(thumbnailTimerRef.current);
+      thumbnailTimerRef.current = null;
+    }
   }, []);
 
   function startCanvasCompositing(
@@ -266,8 +271,9 @@ export function Recorder() {
 
       console.log(`[Yoom] starting MediaRecorder with mimeType: "${mediaRecorder.mimeType}", stream tracks:`, recordStream.getTracks().map(t => `${t.kind}:${t.readyState}`));
       recordStartedAtRef.current = performance.now();
+      recordEndedAtRef.current = 0;
       thumbnailRef.current = null;
-      window.setTimeout(() => {
+      thumbnailTimerRef.current = window.setTimeout(() => {
         void captureThumbnail().then((blob) => {
           thumbnailRef.current = blob;
         });
@@ -291,7 +297,9 @@ export function Recorder() {
   }
 
   function stopRecording() {
-    recordEndedAtRef.current = performance.now();
+    if (recordEndedAtRef.current === 0) {
+      recordEndedAtRef.current = performance.now();
+    }
     if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.stop();
     }
