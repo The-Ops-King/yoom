@@ -1042,6 +1042,7 @@
     height int,
     thumbnail_drive_file_id text,
     created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
     deleted_at timestamptz
   );
 
@@ -1101,6 +1102,7 @@
 
   -- progress update ------------------------------------------------------------
   -- Monotonic max_percent, touch last_seen_at, optionally close the session.
+  -- Returns NULL (not an all-null row) when the session does not exist.
   create or replace function public.update_view_progress(
     p_session_id uuid,
     p_percent smallint,
@@ -1127,9 +1129,65 @@
      where id = p_session_id
      returning * into result;
 
+    if not found then
+      return null;
+    end if;
+
     return result;
   end;
   $$;
+
+  -- slug change (Phase 3 uses this; created now so there is one migration) -----
+  -- Records the old slug in slug_history and swaps the slug in one transaction.
+  create or replace function public.change_video_slug(
+    p_video_id uuid,
+    p_new_slug text
+  )
+  returns public.videos
+  language plpgsql
+  security definer
+  set search_path = public
+  as $$
+  declare
+    old_slug text;
+    result public.videos;
+  begin
+    select slug into old_slug from public.videos where id = p_video_id;
+    if old_slug is null then
+      return null;
+    end if;
+    if old_slug = p_new_slug then
+      select * into result from public.videos where id = p_video_id;
+      return result;
+    end if;
+
+    insert into public.slug_history (old_slug, video_id)
+    values (old_slug, p_video_id)
+    on conflict (old_slug) do update set video_id = excluded.video_id;
+
+    -- If the new slug was a previous slug of this or another video, free it.
+    delete from public.slug_history where old_slug = p_new_slug;
+
+    update public.videos
+       set slug = p_new_slug, updated_at = now()
+     where id = p_video_id
+     returning * into result;
+
+    return result;
+  end;
+  $$;
+
+  -- per-video aggregates (Phase 3 library/detail pages) ------------------------
+  create or replace view public.video_stats as
+  select
+    v.id as video_id,
+    count(s.id)::int as view_count,
+    count(distinct coalesce(s.viewer_name, s.ip_hash, s.id::text))::int as unique_viewers,
+    coalesce(avg(s.max_percent), 0)::numeric(5,2) as avg_max_percent,
+    max(s.last_seen_at) as last_viewed_at
+  from public.videos v
+  left join public.view_sessions s on s.video_id = v.id
+  group by v.id;
   ```
 - [ ] Apply it: `supabase db push` (or run the file through the Supabase SQL editor / MCP). Verify with `select * from public.settings;` → one row `(1, true, true, …)`.
 - [ ] Create `src/lib/supabase.ts`:
@@ -1192,6 +1250,7 @@
     getVideoById,
     getVideoBySlug,
     getVideoIdByOldSlug,
+    getViewSession,
     insertVideo,
     setVideoThumbnail,
     updateViewSession,
@@ -1370,6 +1429,27 @@
       rpc.mockResolvedValue({ data: null, error: null });
       await expect(updateViewSession("nope", 10, false)).resolves.toBeNull();
     });
+
+    it("treats an all-null composite row as absent", async () => {
+      rpc.mockResolvedValue({ data: { id: null, video_id: null }, error: null });
+      await expect(updateViewSession("nope", 10, false)).resolves.toBeNull();
+    });
+  });
+
+  describe("getViewSession", () => {
+    it("selects a session by id", async () => {
+      const builder = chain({ data: { id: "session-1", video_id: VIDEO.id }, error: null });
+      from.mockReturnValue(builder);
+      const row = await getViewSession("session-1");
+      expect(from).toHaveBeenCalledWith("view_sessions");
+      expect(builder.eq).toHaveBeenCalledWith("id", "session-1");
+      expect(row?.id).toBe("session-1");
+    });
+
+    it("returns null when absent", async () => {
+      from.mockReturnValue(chain({ data: null, error: null }));
+      await expect(getViewSession("nope")).resolves.toBeNull();
+    });
   });
 
   describe("claimAlert", () => {
@@ -1454,6 +1534,7 @@
     height: number | null;
     thumbnail_drive_file_id: string | null;
     created_at: string;
+    updated_at: string;
     deleted_at: string | null;
   };
 
@@ -1590,6 +1671,15 @@
     return unwrap(result).id;
   }
 
+  export async function getViewSession(sessionId: string): Promise<ViewSession | null> {
+    const result = (await getSupabase()
+      .from("view_sessions")
+      .select("*")
+      .eq("id", sessionId)
+      .maybeSingle()) as QueryResult<ViewSession | null>;
+    return unwrap(result);
+  }
+
   export async function updateViewSession(
     sessionId: string,
     percent: number,
@@ -1600,7 +1690,9 @@
       p_percent: percent,
       p_ended: ended,
     })) as QueryResult<ViewSession | null>;
-    return unwrap(result);
+    const row = unwrap(result);
+    // PostgREST can surface a missing composite as an all-null row; treat it as absent.
+    return row && row.id ? row : null;
   }
 
   /**
