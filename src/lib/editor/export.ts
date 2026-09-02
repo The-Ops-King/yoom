@@ -16,6 +16,7 @@ export interface RenderOptions {
   thumbnailAt: number;
   onProgress: (percent: number) => void;
   signal: AbortSignal;
+  /** Canvas capture rate; defaults to 30 fps. */
   fps?: number;
 }
 
@@ -26,8 +27,15 @@ const CODECS = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "vid
 /** Camera drift past this many seconds is corrected with a hard seek. */
 const RESYNC_S = 0.08;
 
+/** How long a seek or a frame callback may stall before we give up. */
+const STALL_MS = 4000;
+
 function abortError(): DOMException {
   return new DOMException("Aborted", "AbortError");
+}
+
+function stallError(): Error {
+  return new Error("Playback stalled while rendering.");
 }
 
 /** `requestVideoFrameCallback` aligns draws to decoded frames; not everywhere yet. */
@@ -40,6 +48,13 @@ function hasRvfc(el: HTMLVideoElement): el is RvfcVideo {
   return "requestVideoFrameCallback" in el;
 }
 
+/**
+ * @param muted load-bearing: the primary element must stay unmuted, because a
+ * muted element also silences the `MediaElementAudioSourceNode` we record from.
+ * Its output is routed into a `MediaStreamDestination` and never to the
+ * speakers, so an unmuted primary is still silent to the user. Secondary
+ * (camera) elements are muted — their audio is not part of the render.
+ */
 function makeVideo(blob: Blob, muted: boolean): Promise<HTMLVideoElement> {
   return new Promise((resolve, reject) => {
     const el = document.createElement("video");
@@ -55,7 +70,9 @@ function seek(el: HTMLVideoElement, t: number, signal: AbortSignal): Promise<voi
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(abortError());
     if (Math.abs(el.currentTime - t) < 0.02) return resolve();
+    const timer = setTimeout(() => { off(); reject(stallError()); }, STALL_MS);
     const off = () => {
+      clearTimeout(timer);
       el.removeEventListener("seeked", onSeeked);
       signal.removeEventListener("abort", onAbort);
     };
@@ -93,20 +110,31 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
   const primary = await makeVideo(primaryBlob, false);
 
   let camera: HTMLVideoElement | null = null;
+  let background: HTMLImageElement | HTMLVideoElement | null = null;
   let stream: MediaStream | null = null;
   let recorder: MediaRecorder | null = null;
+  let audioCtx: AudioContext | null = null;
   let cleaned = false;
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
     primary.pause(); camera?.pause();
     URL.revokeObjectURL(primary.src); if (camera) URL.revokeObjectURL(camera.src);
+    if (background && "pause" in background) {
+      background.pause();
+      background.removeAttribute("src");
+      background.load();
+    }
     stream?.getTracks().forEach((t) => t.stop());
+    audioCtx?.close().catch(() => {});
   };
 
   try {
+    if (primary.videoWidth <= 0 || primary.videoHeight <= 0) {
+      throw new Error("The recording has no video track we can render.");
+    }
     camera = sources.mode === "screen+camera" && sources.camera ? await makeVideo(sources.camera, true) : null;
-    const background = await loadBackground(edits);
+    background = await loadBackground(edits);
     const duration = sources.durationMs / 1000;
     const offset = (edits.cameraOffsetMs ?? 0) / 1000;
 
@@ -123,8 +151,15 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
     };
 
     stream = canvas.captureStream(fps);
-    const audioStream = (primary as HTMLVideoElement & { captureStream?: () => MediaStream }).captureStream?.();
-    audioStream?.getAudioTracks().forEach((t) => stream?.addTrack(t));
+    // Route the primary's audio into the recorded stream only — never to
+    // `audioCtx.destination` — so the export is silent to the user.
+    audioCtx = new AudioContext();
+    await audioCtx.resume().catch(() => {});
+    if (audioCtx.state !== "running") throw new Error("Audio could not start; click Upload again.");
+    const dest = audioCtx.createMediaStreamDestination();
+    audioCtx.createMediaElementSource(primary).connect(dest);
+    dest.stream.getAudioTracks().forEach((t) => stream?.addTrack(t));
+
     const mimeType = CODECS.find((c) => MediaRecorder.isTypeSupported(c)) ?? "";
     recorder = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 10_000_000 });
     const chunks: Blob[] = [];
@@ -137,6 +172,17 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
     let thumbnail: Blob | null = null;
     let thumbRequested = false;
     const thumbSource = editedToSource(edits, duration, opts.thumbnailAt);
+
+    let lastPct = -1;
+    const report = (pct: number) => {
+      if (pct === lastPct) return;
+      lastPct = pct;
+      opts.onProgress(pct);
+    };
+
+    // Wall-clock time the recorder actually ran, for the WebM duration fix.
+    let recordedMs = 0;
+    let segmentStart = 0;
 
     // rVFC fires once per decoded frame; rAF is the fallback.
     const rvfc = hasRvfc(primary) ? primary : null;
@@ -157,19 +203,30 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
       if (opts.signal.aborted) throw abortError();
       await seek(primary, r.start, opts.signal);
       if (camera) await seek(camera, Math.max(0, r.start + offset), opts.signal);
-      recorder.resume();
       await primary.play();
       if (camera) await camera.play().catch(() => {});
+      // Paint this range's first frame before the recorder wakes up, so the
+      // encoder never picks up the previous range's last frame.
+      drawFrame(ctx, inputs, r.start, width, height);
+      recorder.resume();
+      segmentStart = performance.now();
       await new Promise<void>((resolve, reject) => {
+        let timer = 0;
         const off = () => {
+          clearTimeout(timer);
           unschedule();
           primary.removeEventListener("ended", onEnded);
           opts.signal.removeEventListener("abort", onAbort);
+        };
+        const arm = () => {
+          clearTimeout(timer);
+          timer = window.setTimeout(() => { off(); reject(stallError()); }, STALL_MS);
         };
         const onEnded = () => { off(); resolve(); };
         const onAbort = () => { off(); reject(abortError()); };
         const tick = () => {
           if (opts.signal.aborted) return onAbort();
+          arm();
           const t = primary.currentTime;
           if (camera && Math.abs(camera.currentTime - (t + offset)) > RESYNC_S) {
             camera.currentTime = Math.max(0, t + offset);
@@ -179,16 +236,18 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
             thumbRequested = true;
             canvas.toBlob((b) => { thumbnail = b; }, "image/jpeg", 0.8);
           }
-          opts.onProgress(Math.min(99, Math.round(((done + (t - r.start)) / total) * 100)));
+          report(Math.min(99, Math.round(((done + (t - r.start)) / total) * 100)));
           if (t >= r.end || primary.ended) { off(); return resolve(); }
           schedule(tick);
         };
         primary.addEventListener("ended", onEnded, { once: true });
         opts.signal.addEventListener("abort", onAbort, { once: true });
+        arm();
         schedule(tick);
       });
-      primary.pause(); camera?.pause();
       recorder.pause();
+      recordedMs += performance.now() - segmentStart;
+      primary.pause(); camera?.pause();
       done += r.end - r.start;
     }
     const stopped = new Promise<void>((resolve) => recorder?.addEventListener("stop", () => resolve(), { once: true }));
@@ -205,8 +264,9 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
 
     const type = recorder.mimeType?.split(";")[0] || "video/webm";
     let blob = new Blob(chunks, { type });
-    try { blob = await fixWebmDuration(blob, Math.round(total * 1000), { logger: false }); } catch { /* keep raw */ }
-    opts.onProgress(100);
+    const durationMs = Math.round(recordedMs > 0 ? recordedMs : total * 1000);
+    try { blob = await fixWebmDuration(blob, durationMs, { logger: false }); } catch { /* keep raw */ }
+    report(100);
     return { blob, thumbnail, width, height };
   } catch (err) {
     if (recorder && recorder.state !== "inactive") { recorder.ondataavailable = null; recorder.stop(); }
