@@ -1296,6 +1296,7 @@
     height: 720,
     thumbnail_drive_file_id: null,
     created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-01T00:00:00Z",
     deleted_at: null,
   };
 
@@ -1777,6 +1778,7 @@
     height: 720,
     thumbnail_drive_file_id: null,
     created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-01T00:00:00Z",
     deleted_at: null,
   };
 
@@ -2651,7 +2653,7 @@ Drive is exercised end-to-end in the manual verification task; the pure helpers 
 **Files:**
 - Create: `src/proxy.ts`
 
-Next 16 deprecates `middleware.ts` in favour of `proxy.ts` exporting `proxy()`. Note that the gate does **not** rewrite `/` — it lets the page render and passes the auth verdict down as the `x-yoom-auth` request header, which `page.tsx` reads in Task 18.
+Next 16 deprecates `middleware.ts` in favour of `proxy.ts` exporting `proxy()`. The proxy only hard-rejects the owner API routes; pages decide for themselves by reading the cookie through `isOwner()` (Task 18), so there is no trust-me request header to forge or forget. Phase 3 adds `/api/videos/:path*` to the matcher.
 
 - [ ] Create `src/proxy.ts`:
   ```ts
@@ -2660,21 +2662,14 @@ Next 16 deprecates `middleware.ts` in favour of `proxy.ts` exporting `proxy()`. 
 
   export function proxy(request: NextRequest) {
     const authed = verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-
-    if (request.nextUrl.pathname.startsWith("/api/upload")) {
-      if (!authed) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      return NextResponse.next();
+    if (!authed) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-
-    const headers = new Headers(request.headers);
-    headers.set("x-yoom-auth", authed ? "1" : "0");
-    return NextResponse.next({ request: { headers } });
+    return NextResponse.next();
   }
 
   export const config = {
-    matcher: ["/", "/library/:path*", "/api/upload/:path*"],
+    matcher: ["/api/upload/:path*"],
   };
   ```
 - [ ] Run `npm test` — expect PASS (unchanged count).
@@ -3548,7 +3543,9 @@ Nothing imports `src/lib/r2.ts` except `src/app/watch/[key]/page.tsx`, which is 
     const headers = new Headers(cors);
     headers.set("Accept-Ranges", "bytes");
     headers.set("Content-Type", video.mime || "video/webm");
-    headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    // `private`: the browser may cache ranges, but no shared cache (Vercel CDN)
+    // may store a 206 under this URL and replay it for a different Range.
+    headers.set("Cache-Control", "private, max-age=31536000");
     headers.set("ETag", `"${video.drive_file_id}"`);
 
     if (requested && "unsatisfiable" in requested) {
@@ -3664,7 +3661,7 @@ Both read the body with `request.text()` because `navigator.sendBeacon` sends a 
     claimAlert,
     createViewSession,
     getVideoById,
-    updateViewSession,
+    getViewSession,
   } from "@/lib/db";
   import { readViewerContext } from "@/lib/geo";
   import { sendFirstPlayEmail } from "@/lib/alerts";
@@ -3715,7 +3712,7 @@ Both read the body with `request.text()` because `navigator.sendBeacon` sends a 
       try {
         const claimed = await claimAlert(sessionId, "alert_sent_at");
         if (!claimed) return;
-        const session = await updateViewSession(sessionId, 0, false);
+        const session = await getViewSession(sessionId);
         if (!session) return;
         await sendFirstPlayEmail(session, video);
       } catch (error) {
@@ -3915,9 +3912,12 @@ This hook touches `HTMLVideoElement`, `navigator.sendBeacon` and `document.visib
         heartbeat(lastPercentRef.current, true, true);
       };
 
+      // Tab switches are not the end of a session: persist progress only. Only
+      // `pagehide` and the `ended` event close the session (and trigger the
+      // summary email), otherwise a glance at another tab at 5% would claim it.
       const onVisibility = () => {
         if (document.visibilityState === "hidden") {
-          heartbeat(lastPercentRef.current, true, true);
+          heartbeat(lastPercentRef.current, false, true);
         }
       };
 
@@ -3948,7 +3948,7 @@ This hook touches `HTMLVideoElement`, `navigator.sendBeacon` and `document.visib
   ```
 - [ ] Run `npm test` — expect PASS (unchanged count).
 - [ ] Run `npm run build` — expect PASS.
-- [ ] Manual verification (deferred to Task 28 step 5): first `play` issues exactly one `POST /api/view/start`; a heartbeat fires every 10s while playing; closing the tab sends one `sendBeacon` to `/api/view/heartbeat` with `ended: true`.
+- [ ] Manual verification (deferred to Task 28 step 5): first `play` issues exactly one `POST /api/view/start`; a heartbeat fires every 10s while playing; switching tabs sends a beacon with `ended: false`; closing the tab sends one `sendBeacon` to `/api/view/heartbeat` with `ended: true`.
 - [ ] Commit:
   ```bash
   git add -A && git commit -m "$(cat <<'EOF'
