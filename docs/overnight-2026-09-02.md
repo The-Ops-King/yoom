@@ -40,6 +40,9 @@ All four phases are merged to `main`. Web app is live with the dashboard and the
 - **Phase 4 (Electron) started on branch `phase4-electron`.** Plan reviewed; I added four amendments: auto-hide the live desktop bubble during *window/tab* captures (self-occlusion only lines up for full-display captures), pin the bubble window's sizing to the compositor's exact fractions with a drift test, grant camera permission to the bubble window's own origin, and **never launch the app overnight** (TCC prompts are yours). Overnight goal: root tests green, desktop typecheck + unit tests green, `electron-vite build` and an unsigned `dmg`/`zip` in `desktop/dist/`.
 - The plan corrected the spec's Electron feature-flag name to `MacCatapLoopbackAudioForScreenShare` (verified in the Electron 44 docs).
 
+## Ready for your review (not built)
+- **Phase 5 editor**: design `docs/superpowers/specs/2026-09-03-phase5-editor-design.md` and a 26-task plan `docs/superpowers/plans/2026-09-03-phase5-editor.md`. Key calls to confirm: non-destructive edit list first, burned-in export as sub-phase 5b; cuts stored as removed ranges in source time; coordinates normalized to the source frame; blur fails closed to a solid redact; editor loads lazily so the public watch page stays light.
+
 ## Follow-ups / known rough edges
 - Library card thumbnails load through `/api/thumb/<id>` (Drive proxy, ~400 KB JPEG each) so the grid shows black boxes for a beat before they paint; the detail page poster is fine. Cheap win later: cache thumbs on Vercel (`Cache-Control: public` is already set) or generate smaller ones at upload.
 - If an upload fails after the link was copied at click time, the clipboard holds a link to a video that never saved (`/v/<slug>` → 404). The review screen shows the error; a "link not live" note could be added.
