@@ -44,3 +44,15 @@ If #2/#3 land, persist the event stream as a JSON sidecar next to the video in D
 - `db.test.ts` is mostly mock plumbing; add a real integration test against a Supabase branch before Phase 3 grows the query surface.
 - ~~Phase 2 must add the overlay-layer seam in the compositor (see "For later" above) and Safari `video/mp4` codec fallback.~~ Both shipped in Phase 2.
 - Verification artefact: video `bc040bca-a0fd-44aa-a8f3-f5843685eeb5` (slug `uunrv7zm`, 700 KB of random bytes named `yoom-verify.webm`) exists in Drive + DB; delete it from the Phase 3 dashboard once that exists, or via SQL + Drive trash.
+
+## Proposed Phase 5 — Post-recording editor (Tyler, 2026-09-02)
+
+**Wanted:** blur/redact regions over sensitive info; numbered callout circles that pop in and out; underlines and highlights; cut (remove segments) and crop; animated zoom-in.
+
+**Design direction (decide at planning time, leaning non-destructive):**
+- **Non-destructive edit list, rendered at playback.** Store an "edit decision list" JSON next to the video (`videos.edits jsonb`, or a Drive sidecar): `{ cuts: [{start,end}], crop: {x,y,w,h}, zooms: [{start,end,rect,ease}], overlays: [{type: "blur"|"callout"|"underline"|"highlight", start,end, rect|points, n?, style}] }`. The watch page draws overlays on a canvas layered over the `<video>` (blur = draw the video region back through `ctx.filter = blur()`; callouts = animated circles with numbers, pop-in/out via scale + opacity keyed on time; underline/highlight = rounded rects), applies zoom/crop with a CSS transform on a wrapper (eased with `transition` or rAF), and skips cut ranges by seeking on `timeupdate`. Pros: instant, fully editable later, no re-encode, thumbnail untouched. Cons: downloads and OG previews don't include edits; watch page gets heavier.
+- **Optional burned-in export** as a second step: render the edit list into a new WebM/MP4 in the browser (canvas + MediaRecorder at 1×, or WebCodecs for faster-than-realtime) and upload it as a new Drive file, keeping the original. Gives a clean downloadable file and lets the share link play a plain video on weak devices.
+- **Editor UI lives on the Phase 3 detail page** (`/library/[id]`): a timeline scrubber under the player, an overlay toolbox (blur, callout, underline, highlight, zoom), drag-to-draw on the video frame, per-item start/end handles, and a Cut tool that marks ranges. Keyboard: I/O for in/out points, Delete for cut.
+- **Foundations to lay in Phase 3:** give the detail page a canvas-capable player component (not the bare `<video>`), keep `video-player.tsx` or replace it with one that accepts an `edits` prop; add `edits jsonb` to `videos` in the Phase 3 migration so the column exists; make the watch page read the same `edits` and render them (initially empty).
+- **Animated zoom** should reuse the cursor sidecar idea (#4 above) later for auto-zoom; manual keyframed zoom comes first.
+- **Cost note:** blur at playback is cheap for small rects; full-frame `ctx.filter` blur on 4K in Safari is not — clamp blur regions and downscale the blurred source.
