@@ -102,6 +102,26 @@ describe("saveSettings", () => {
     expect(s.frame.background).toEqual({ kind: "none" });
   });
 
+  it("strips blob:/data: sources at save time, not just at load time", () => {
+    saveSettings({
+      ...DEFAULT_SETTINGS,
+      background: { kind: "image", src: "data:image/png;base64,AAAA" },
+      frame: {
+        ...DEFAULT_SETTINGS.frame,
+        background: { kind: "video", src: "blob:http://x/abc" },
+      },
+    });
+    // What actually reached localStorage must already be clean: a reload in a
+    // new tab must never see a URL that only existed in the previous document.
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY)!);
+    expect(stored.background).toEqual({ kind: "none" });
+    expect(stored.background.src).toBeUndefined();
+    expect(stored.frame.background).toEqual({ kind: "none" });
+    expect(stored.frame.background.src).toBeUndefined();
+    expect(JSON.stringify(stored)).not.toContain("blob:");
+    expect(JSON.stringify(stored)).not.toContain("data:");
+  });
+
   it("keeps preset sources served from /backgrounds", () => {
     saveSettings({
       ...DEFAULT_SETTINGS,

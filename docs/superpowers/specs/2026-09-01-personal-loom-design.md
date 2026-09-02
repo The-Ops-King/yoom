@@ -152,7 +152,7 @@ Delete `src/lib/r2.ts`, `src/app/watch/`; rewrite README (OAuth script, `supabas
 - Cleanup: all tracks `ended`, AudioContext closed, no rAF after stop.
 
 ### Browser caveats
-Chrome: tab audio everywhere, monitor/window audio only on Windows. Safari/Firefox: no system audio; Safari has no WebM MediaRecorder (codec fallback must include `video/mp4`, and `mime` is stored per video in Phase 1). `ctx.filter` blur needs Safari 18+ (fallback: downscale/upscale). Cmd+Shift+R only fires while the tab is focused (Electron bridge fixes that). Presets must be served from `public/` so thumbnail canvases stay untainted.
+Chrome: tab audio everywhere, monitor/window audio only on Windows. Safari/Firefox: no system audio; Safari has no WebM MediaRecorder (codec fallback must include `video/mp4`, and `mime` is stored per video in Phase 1). `ctx.filter` blur needs Safari 18+ (fallback: downscale/upscale). Cmd+Shift+L only fires while the tab is focused (Electron bridge fixes that). Presets must be served from `public/` so thumbnail canvases stay untainted.
 
 ---
 

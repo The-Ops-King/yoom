@@ -30,13 +30,18 @@ export class PersonSegmenter {
 
   private segmenter: Segmenter | null = null;
   private maskCtx: CanvasRenderingContext2D;
+  /** The segmenter's input frame. Never read back, only drawn from. */
   private scratch: HTMLCanvasElement;
   private scratchCtx: CanvasRenderingContext2D;
+  /** Where `putImageData` lands, kept separate from the segmenter's input. */
+  private staging: HTMLCanvasElement;
+  private stagingCtx: CanvasRenderingContext2D;
   private video: HTMLVideoElement | null = null;
   private frameCallbackId = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
-  private inFlight = false;
+  /** Bumped by start()/stop() so a restarted loop cannot double up. */
+  private generation = 0;
   private imageData: ImageData | null = null;
   private delegate: "GPU" | "CPU" = "GPU";
 
@@ -45,8 +50,16 @@ export class PersonSegmenter {
     this.delegate = delegate;
     this.mask = document.createElement("canvas");
     this.maskCtx = this.mask.getContext("2d")!;
+    // Start opaque so the compositor's `destination-in` shows the full camera
+    // until the first real mask lands, rather than erasing the person.
+    this.mask.width = 2;
+    this.mask.height = 2;
+    this.maskCtx.fillStyle = "#fff";
+    this.maskCtx.fillRect(0, 0, 2, 2);
     this.scratch = document.createElement("canvas");
-    this.scratchCtx = this.scratch.getContext("2d", { willReadFrequently: true })!;
+    this.scratchCtx = this.scratch.getContext("2d")!;
+    this.staging = document.createElement("canvas");
+    this.stagingCtx = this.staging.getContext("2d")!;
     this.ready = true;
   }
 
@@ -84,6 +97,7 @@ export class PersonSegmenter {
     if (this.running) this.stop();
     this.video = video;
     this.running = true;
+    const gen = ++this.generation;
 
     const targetWidth = options.width ?? 256;
     // The CPU delegate cannot keep up at 30fps at this size.
@@ -92,8 +106,10 @@ export class PersonSegmenter {
     let lastRun = 0;
 
     const step = (nowMs: number) => {
-      if (!this.running || !this.video) return;
-      if (!this.inFlight && nowMs - lastRun >= minIntervalMs) {
+      // A stop()+start() bumps the generation, so the old loop dies here
+      // instead of running alongside the new one.
+      if (!this.running || !this.video || this.generation !== gen) return;
+      if (nowMs - lastRun >= minIntervalMs) {
         lastRun = nowMs;
         this.segmentOnce(this.video, targetWidth);
       }
@@ -130,6 +146,8 @@ export class PersonSegmenter {
     if (this.scratch.width !== w || this.scratch.height !== h) {
       this.scratch.width = w;
       this.scratch.height = h;
+      this.staging.width = w;
+      this.staging.height = h;
       this.mask.width = w;
       this.mask.height = h;
       this.imageData = this.maskCtx.createImageData(w, h);
@@ -142,46 +160,44 @@ export class PersonSegmenter {
       this.maskCtx.fillRect(0, 0, w, h);
     }
 
-    this.inFlight = true;
     try {
       this.scratchCtx.drawImage(video, 0, 0, w, h);
       this.segmenter.segmentForVideo(this.scratch, performance.now(), (result) => {
-        const confidence = result.confidenceMasks?.[0];
-        if (!confidence || !this.imageData) {
+        try {
+          const confidence = result.confidenceMasks?.[0];
+          if (!confidence || !this.imageData) return;
+          const floats = confidence.getAsFloat32Array();
+          const px = this.imageData.data;
+          for (let i = 0, p = 0; i < floats.length; i += 1, p += 4) {
+            const alpha = Math.round(floats[i] * 255);
+            px[p] = 255;
+            px[p + 1] = 255;
+            px[p + 2] = 255;
+            px[p + 3] = alpha;
+          }
+          // The mask lands on its own canvas: `scratch` still holds the
+          // camera frame the segmenter is reading from.
+          this.stagingCtx.putImageData(this.imageData, 0, 0);
+          // Temporal smoothing: 70% new over the previous mask kills flicker.
+          this.maskCtx.save();
+          this.maskCtx.globalAlpha = 0.7;
+          this.maskCtx.globalCompositeOperation = "source-over";
+          // Feather the edge at low resolution — cheap because w is 256.
+          this.maskCtx.filter = "blur(1px)";
+          this.maskCtx.drawImage(this.staging, 0, 0);
+          this.maskCtx.restore();
+        } finally {
           result.close?.();
-          return;
         }
-        const floats = confidence.getAsFloat32Array();
-        const px = this.imageData.data;
-        for (let i = 0, p = 0; i < floats.length; i += 1, p += 4) {
-          const alpha = Math.round(floats[i] * 255);
-          px[p] = 255;
-          px[p + 1] = 255;
-          px[p + 2] = 255;
-          px[p + 3] = alpha;
-        }
-        // Temporal smoothing: 70% new over the previous mask kills flicker.
-        this.maskCtx.save();
-        this.maskCtx.globalAlpha = 0.7;
-        this.maskCtx.globalCompositeOperation = "source-over";
-        const tmp = this.scratchCtx;
-        tmp.putImageData(this.imageData, 0, 0);
-        // Feather the edge at low resolution — cheap because w is 256.
-        this.maskCtx.filter = "blur(1px)";
-        this.maskCtx.drawImage(this.scratch, 0, 0);
-        this.maskCtx.restore();
-        // Redraw the camera frame into the scratch next tick.
-        result.close?.();
       });
     } catch (err) {
       console.warn("[Yoom] segmentation frame failed", err);
-    } finally {
-      this.inFlight = false;
     }
   }
 
   stop(): void {
     this.running = false;
+    this.generation += 1;
     const video = this.video as
       | (HTMLVideoElement & { cancelVideoFrameCallback?: (id: number) => void })
       | null;

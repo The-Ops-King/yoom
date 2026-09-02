@@ -49,6 +49,11 @@ function stopStream(stream: MediaStream | null): void {
   stream?.getTracks().forEach((t) => t.stop());
 }
 
+/** Object URLs come from the background picker; only it creates `blob:` srcs. */
+function revokeBlob(src: string | undefined): void {
+  if (src?.startsWith("blob:")) URL.revokeObjectURL(src);
+}
+
 export interface UseRecorderResult {
   state: RecorderState;
   capabilities: Capabilities;
@@ -83,6 +88,14 @@ export interface UseRecorderResult {
   };
 }
 
+/**
+ * The recorder hook.
+ *
+ * **Hard contract for the preview component:** `canvasRef` MUST be mounted
+ * whenever `state.status` is `idle`, `acquiring` or `setup`. Camera and
+ * screen+camera modes composite into that canvas, and `acquire()` fails loudly
+ * (`ACQUIRE_FAILED`) rather than silently recording nothing if it is missing.
+ */
 export function useRecorder(): UseRecorderResult {
   const [state, dispatch] = useReducer(recorderReducer, DEFAULT_SETTINGS, initialRecorderState);
   const [capabilities, setCapabilities] = useState<Capabilities>({
@@ -115,6 +128,12 @@ export function useRecorder(): UseRecorderResult {
   });
   const stateRef = useRef(state);
   stateRef.current = state;
+  // Settings are only persisted once the stored settings have been read back,
+  // so the first render never writes DEFAULT_SETTINGS over the saved ones.
+  const hydratedRef = useRef(false);
+  // Object URLs the background picker created; revoked when replaced.
+  const prevBackgroundSrcRef = useRef<string | undefined>(undefined);
+  const prevFrameSrcRef = useRef<string | undefined>(undefined);
 
   // ---------- boot: settings + capabilities ----------
 
@@ -130,10 +149,20 @@ export function useRecorder(): UseRecorderResult {
     dispatch({ type: "SET_BACKGROUND", background: settings.background });
     dispatch({ type: "SET_FRAME", patch: settings.frame });
     setCapabilities(getProvider().capabilities());
+    prevBackgroundSrcRef.current = settings.background.src;
+    prevFrameSrcRef.current = settings.frame.background.src;
+    hydratedRef.current = true;
   }, []);
 
   // Persist preferences whenever they change.
+  //
+  // React runs both mount effects in the same commit, in declaration order, so
+  // the boot effect above has already set `hydratedRef` by the time this runs
+  // on the first commit — that is intentional: the first pass is skipped only
+  // if hydration somehow has not happened, and the dispatches from the boot
+  // effect re-run this effect with the loaded values anyway.
   useEffect(() => {
+    if (!hydratedRef.current) return;
     saveSettings({
       mode: state.mode,
       surfacePref: state.surfacePref,
@@ -180,7 +209,19 @@ export function useRecorder(): UseRecorderResult {
     recorderRef.current = null;
   }, []);
 
-  useEffect(() => teardown, [teardown]);
+  // Unmount: tear the pipeline down and release the picker's object URLs.
+  // `teardown` deliberately does NOT revoke them — it also runs on upload,
+  // where the user keeps the background as a setting.
+  useEffect(
+    () => () => {
+      teardown();
+      revokeBlob(prevBackgroundSrcRef.current);
+      revokeBlob(prevFrameSrcRef.current);
+      prevBackgroundSrcRef.current = undefined;
+      prevFrameSrcRef.current = undefined;
+    },
+    [teardown],
+  );
 
   // ---------- acquisition ----------
 
@@ -204,7 +245,15 @@ export function useRecorder(): UseRecorderResult {
       }
 
       if (current.mode !== "screen") {
-        cameraStreamRef.current = await provider.getCamera(current.cameraId || undefined);
+        // Camera and screen+camera composite into the canvas. A missing canvas
+        // means the preview is not mounted and we would silently record
+        // nothing — fail loudly instead (see the hook's contract above).
+        if (!canvasRef.current) throw new Error("Recorder canvas is not mounted");
+        const camera = await provider.getCamera(current.cameraId || undefined);
+        cameraStreamRef.current = camera;
+        camera.getVideoTracks()[0]?.addEventListener("ended", () => {
+          dispatch({ type: "STREAM_ENDED" });
+        });
       }
 
       // The mic is always its own stream so the mixer owns it independently.
@@ -280,7 +329,9 @@ export function useRecorder(): UseRecorderResult {
       const message =
         err instanceof Error && err.name === "NotAllowedError"
           ? "Permission denied. Please allow screen and camera access."
-          : "Could not start capture. Check your device permissions.";
+          : err instanceof Error && err.message === "Recorder canvas is not mounted"
+            ? "The recorder is not ready yet. Please try again."
+            : "Could not start capture. Check your device permissions.";
       dispatch({ type: "ACQUIRE_FAILED", error: message });
     }
   }, [teardown]);
@@ -289,14 +340,21 @@ export function useRecorder(): UseRecorderResult {
 
   useEffect(() => {
     if (!compositorRef.current) return;
+    // Depends on `state.mode` so switching to/from camera mode re-pushes the
+    // `shape: "full"` override even when the bubble config itself is unchanged.
     compositorRef.current.setBubble(
-      stateRef.current.mode === "camera"
+      state.mode === "camera"
         ? { ...state.bubble, shape: "full", visible: true }
         : state.bubble,
     );
-  }, [state.bubble]);
+  }, [state.bubble, state.mode]);
 
   useEffect(() => {
+    const prev = prevBackgroundSrcRef.current;
+    if (prev !== state.background.src) {
+      revokeBlob(prev);
+      prevBackgroundSrcRef.current = state.background.src;
+    }
     compositorRef.current?.setBackground(state.background);
     // Turning a background on for the first time lazily loads the segmenter.
     if (state.background.kind !== "none" && !segmenterRef.current && cameraStreamRef.current) {
@@ -313,6 +371,11 @@ export function useRecorder(): UseRecorderResult {
   }, [state.background]);
 
   useEffect(() => {
+    const prev = prevFrameSrcRef.current;
+    if (prev !== state.frame.background.src) {
+      revokeBlob(prev);
+      prevFrameSrcRef.current = state.frame.background.src;
+    }
     compositorRef.current?.setFrame(state.frame);
   }, [state.frame]);
 
@@ -344,7 +407,10 @@ export function useRecorder(): UseRecorderResult {
     let recordStream: MediaStream;
     if (current.mode === "screen") {
       const videoTrack = screenStreamRef.current?.getVideoTracks()[0];
-      if (!videoTrack) return;
+      if (!videoTrack) {
+        dispatch({ type: "RECORD_FAILED", error: "Could not start the encoder." });
+        return;
+      }
       const settings = videoTrack.getSettings();
       dimensionsRef.current = {
         width: settings.width ?? null,
@@ -354,7 +420,10 @@ export function useRecorder(): UseRecorderResult {
         mixer ? [videoTrack, mixer.outputTrack] : [videoTrack],
       );
     } else {
-      if (!compositor || !canvasRef.current) return;
+      if (!compositor || !canvasRef.current) {
+        dispatch({ type: "RECORD_FAILED", error: "Could not start the encoder." });
+        return;
+      }
       compositor.lockSize();
       dimensionsRef.current = {
         width: canvasRef.current.width,
@@ -588,15 +657,37 @@ export function useRecorder(): UseRecorderResult {
     if (state.status === "idle" || state.status === "error") teardown();
   }, [state.streamsAlive, state.status, teardown]);
 
+  // ---------- leave-page guard ----------
+
+  // Navigating away mid-capture throws the recording away, so warn first.
+  useEffect(() => {
+    const risky =
+      state.status === "recording" ||
+      state.status === "paused" ||
+      state.status === "stopping" ||
+      state.status === "uploading" ||
+      (state.status === "review" && !!state.blob);
+    if (!risky) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [state.status, state.blob]);
+
   // ---------- hotkeys ----------
 
+  // Cmd/Ctrl+Shift+L starts and stops (Loom's default). Cmd/Ctrl+Shift+P
+  // pauses and resumes. `R` is deliberately avoided: it is Chrome's hard
+  // reload, and a missed chord there destroys the recording in progress.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
       if (!meta || !e.shiftKey) return;
       const key = e.key.toLowerCase();
       const status = stateRef.current.status;
-      if (key === "r") {
+      if (key === "l") {
         e.preventDefault();
         if (status === "recording" || status === "paused") dispatch({ type: "STOP" });
         else if (status === "setup") dispatch({ type: "START" });

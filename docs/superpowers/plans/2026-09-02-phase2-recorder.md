@@ -4817,7 +4817,7 @@ export function useRecorder(): UseRecorderResult {
       if (!meta || !e.shiftKey) return;
       const key = e.key.toLowerCase();
       const status = stateRef.current.status;
-      if (key === "r") {
+      if (key === "l") {
         e.preventDefault();
         if (status === "recording" || status === "paused") dispatch({ type: "STOP" });
         else if (status === "setup") dispatch({ type: "START" });
@@ -6445,7 +6445,7 @@ export function Recorder() {
 
           {(state.status === "setup" || live) && (
             <p className="text-center text-[11px] text-muted-dim">
-              ⌘⇧R start / stop · ⌘⇧P pause
+              ⌘⇧L start / stop · ⌘⇧P pause
             </p>
           )}
         </div>
@@ -6543,7 +6543,7 @@ Browser-only behaviour (MediaRecorder, the canvas draw loop, MediaPipe, permissi
 - [ ] Countdown counts 3-2-1; Skip jumps straight in.
 - [ ] Pause freezes the timer and the encoder; Resume continues; the final duration excludes the paused span (compare against a stopwatch).
 - [ ] Restart mid-recording discards chunks and re-runs the countdown without re-prompting for permissions.
-- [ ] ⌘⇧R in idle → setup, in setup → start, while recording → stop. ⌘⇧P pauses and resumes.
+- [ ] ⌘⇧L in idle → setup, in setup → start, while recording → stop. ⌘⇧P pauses and resumes.
 - [ ] Review → Discard returns to setup with the streams still live.
 - [ ] Review → Upload → Drive file appears in the Yoom folder, a `videos` row exists, a thumbnail is attached, and the "done" screen shows `https://jtylerray.com/v/<slug>`.
 - [ ] The share link plays on the watch page with a working seek bar (the WebM duration patch still runs).

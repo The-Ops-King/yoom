@@ -85,6 +85,10 @@ function resolveBackground(cfg: BackgroundConfig): ResolvedBackground {
   };
 }
 
+/**
+ * Detaches the media elements only. Object URLs are NOT revoked here: the hook
+ * creates them (via the background picker) and owns their lifetime.
+ */
 function releaseBackground(bg: ResolvedBackground | null): void {
   if (!bg) return;
   if (bg.video) {
@@ -261,6 +265,8 @@ export class Compositor {
   }
 
   captureStream(fps: number): MediaStream {
+    // A restart must not leave the previous capture track live on the canvas.
+    this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = this.canvas.captureStream(fps);
     return this.stream;
   }
@@ -392,6 +398,8 @@ export class Compositor {
         bubble.size,
         bubble.pos.x.toFixed(4),
         bubble.pos.y.toFixed(4),
+        bubble.visible,
+        bubble.mirror,
       ].join("|");
       if (key !== this.cacheKey) {
         this.cachedRect = computeBubbleRect(W, H, camW, camH, bubble);
@@ -416,6 +424,7 @@ export class Compositor {
       }
     } else {
       this.cachedRect = null;
+      this.cacheKey = "";
     }
 
     ctx.restore();
@@ -468,10 +477,20 @@ export class Compositor {
     };
   }
 
+  private roundedKey = "";
+  private roundedCached: Path2D | null = null;
+
+  /**
+   * The framed screen needs the same rounded path twice per frame (shadow fill
+   * + clip) and it only changes when the destination rect or radius does, so
+   * it is cached rather than reallocated 60 times a second.
+   */
   private roundedPath(
     box: { x: number; y: number; w: number; h: number },
     radius: number,
   ): Path2D {
+    const key = `${box.x}|${box.y}|${box.w}|${box.h}|${radius}`;
+    if (this.roundedCached && key === this.roundedKey) return this.roundedCached;
     const p = new Path2D();
     const maybe = p as Path2D & {
       roundRect?: (x: number, y: number, w: number, h: number, r: number) => void;
@@ -481,6 +500,8 @@ export class Compositor {
     } else {
       p.rect(box.x, box.y, box.w, box.h);
     }
+    this.roundedKey = key;
+    this.roundedCached = p;
     return p;
   }
 
