@@ -16,19 +16,26 @@ const field =
 
 const label = "block text-[11px] uppercase tracking-wider text-muted-dim";
 
-type SlugStatus = "auto" | "checking" | "available" | "taken" | "invalid" | "error";
+type SlugStatus = "auto" | "checking" | "unchecked" | "available" | "taken" | "invalid" | "error";
 
 type SlugResponse = { slug?: string; valid?: boolean; available?: boolean };
 
 /**
- * What to show for a slug the form has not checked itself — a draft restored
- * from session storage, or the section being re-expanded. `slugOk` is the
- * verdict the last check left behind.
+ * What a slug reads as before this mount has checked it — a draft restored
+ * from session storage, or the section being re-expanded. A well-formed slug
+ * is "unchecked" whatever `slugOk` says: a stored verdict may be stale, so it
+ * is never reported as available or taken until the check answers again.
  */
 function statusFor(details: Details): SlugStatus {
   if (details.slug === "") return "auto";
   if (!SLUG_RE.test(details.slug)) return "invalid";
-  return details.slugOk ? "available" : "taken";
+  return "unchecked";
+}
+
+/** Seed for `status`: an unchecked slug is re-checked on mount, so say so. */
+function initialStatus(details: Details): SlugStatus {
+  const status = statusFor(details);
+  return status === "unchecked" ? "checking" : status;
 }
 
 function hintFor(status: SlugStatus, slug: string): { text: string; tone: string } {
@@ -37,6 +44,8 @@ function hintFor(status: SlugStatus, slug: string): { text: string; tone: string
       return { text: "Auto — a random link is generated.", tone: "text-muted-dim" };
     case "checking":
       return { text: "Checking…", tone: "text-muted-dim" };
+    case "unchecked":
+      return { text: `${slug} — not checked yet.`, tone: "text-muted-dim" };
     case "available":
       return { text: `${slug} is available.`, tone: "text-emerald-400/90" };
     case "taken":
@@ -58,7 +67,9 @@ function hintFor(status: SlugStatus, slug: string): { text: string; tone: string
 export function DetailsForm({ ctx }: { ctx: StagingContext }) {
   const { details, setDetails, player } = ctx;
   const [draft, setDraft] = useState(details.slug);
-  const [status, setStatus] = useState<SlugStatus>(() => statusFor(details));
+  const [status, setStatus] = useState<SlugStatus>(() => initialStatus(details));
+  // Frozen at mount, so the effect below runs once and never on a keystroke.
+  const [initialSlug] = useState(details.slug);
 
   // The check outlives a keystroke but not a newer one: `seq` stamps each
   // request so a slow answer for an old slug is dropped.
@@ -87,10 +98,24 @@ export function DetailsForm({ ctx }: { ctx: StagingContext }) {
     [setDetails],
   );
 
-  // Collapsing the section unmounts the form: drop the pending timer, and run
-  // its check straight away so `slugOk` still resolves for the upload button.
+  // Verify the slug this mount inherited — a restored draft, or the section
+  // re-expanded while a check was in flight — so `slugOk` is never a stale
+  // yes. `status` is already seeded "checking", so nothing is set here.
+  // Collapsing the section unmounts the form: the cleanup drops the pending
+  // timer and runs its check straight away so `slugOk` still resolves.
   useEffect(() => {
     alive.current = true;
+    if (initialSlug !== "" && SLUG_RE.test(initialSlug)) {
+      // Through the same timer the debounce uses, so the cleanup below owns
+      // it and the request never fires during the render pass.
+      const id = ++seq.current;
+      debounced.current = { slug: initialSlug, id };
+      timer.current = setTimeout(() => {
+        timer.current = null;
+        debounced.current = null;
+        void check(initialSlug, id);
+      }, 0);
+    }
     return () => {
       alive.current = false;
       if (timer.current !== null) {
@@ -101,7 +126,7 @@ export function DetailsForm({ ctx }: { ctx: StagingContext }) {
       debounced.current = null;
       if (pending !== null) void check(pending.slug, pending.id);
     };
-  }, [check]);
+  }, [check, initialSlug]);
 
   function onSlugChange(raw: string) {
     setDraft(raw);
@@ -176,7 +201,7 @@ export function DetailsForm({ ctx }: { ctx: StagingContext }) {
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
-          maxLength={60}
+          maxLength={40}
           placeholder="auto"
           className={field}
         />
@@ -199,7 +224,7 @@ export function DetailsForm({ ctx }: { ctx: StagingContext }) {
           onClick={() => setDetails((d) => ({ ...d, thumbnailAt: player.editedTime }))}
           className="rounded-md border border-border bg-surface-raised px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground"
         >
-          Use this frame
+          Use this frame for the thumbnail
         </button>
       </div>
     </div>

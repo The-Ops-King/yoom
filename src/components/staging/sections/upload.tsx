@@ -47,13 +47,16 @@ export function UploadSection({ ctx }: { ctx: StagingContext }) {
       <button
         type="button"
         disabled={disabled}
+        aria-describedby={reason ? "staging-upload-reason" : undefined}
         onClick={ctx.finish}
         className="w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-all hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
       >
         Upload
       </button>
 
-      {reason && <p className="text-[11px] text-muted-dim">{reason}</p>}
+      <p id="staging-upload-reason" aria-live="polite" className="text-[11px] text-muted-dim empty:hidden">
+        {reason}
+      </p>
       {ctx.error && (
         <p role="alert" className="text-[11px] text-red-400/90">
           {ctx.error}
