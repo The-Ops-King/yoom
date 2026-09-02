@@ -2,9 +2,13 @@
 
 Tyler went to sleep after Phase 3 merged and the Phase 2.1 recorder patch shipped. Instruction: build everything unblocked, list what's blocked, no pauses. This file is the morning briefing. Sections are appended as work lands.
 
+## TL;DR
+All four phases are merged to `main`. Web app is live with the dashboard and the desktop-bridge wiring (inert in a browser). The Electron app is built (`desktop/dist/Yoom-0.1.0-arm64.dmg`, unsigned, 122 MB) but **never launched** — that's your first job this morning (checklist at the bottom). One production bug found and fixed overnight (slug changes failed at the DB layer). Nothing destructive was done; your two real recordings are intact (one renamed as a test).
+
 ## Shipped (live at https://yoom.jtylerray.com)
 - Phase 1 — Drive storage, Supabase, `/v/<slug>` via jtylerray.com, view tracking, Resend alerts.
 - Phase 2 + 2.1 — new recorder: modes/surfaces, draggable animated bubble, shapes/sizes, mirror, on/off, framed capture, mic + system audio mixing, countdown, pause, restart-now (⌘⇧K), cancel (⌘⇧X), review, markers (⌘⇧M). Camera virtual backgrounds removed at Tyler's request.
+- Phase 4 — Electron desktop shell in `desktop/` (merged, built, unlaunched): tray, global ⌘⇧L/P/K/X/M, native screen/window picker, macOS loopback system audio, floating always-on-top camera bubble that drives the recorded bubble position.
 - Phase 3 — owner dashboard (`/library`, `/library/[id]`, `/settings`), inline title/description/slug editing with old-slug redirects, download, delete, analytics, share-link copied at Upload click (slug reserved up front), `edits jsonb` + `EditPlayer` foundations for the Phase 5 editor.
 
 ## Verified overnight

@@ -2,6 +2,8 @@
 
 > **For agentic workers:** This plan is written for a fresh session with no prior context. Work the tasks in order, top to bottom. Each task is self-contained: read the files it names, make exactly the changes it specifies, run the commands shown, and confirm the expected output before moving on. Do not skip the test-first steps, do not batch commits, and do not substitute your own versions for the pinned ones. Every symbol referenced here is defined here — if something looks missing, re-read the task, do not invent it.
 
+**Status:** MERGED to `main` 2026-09-03 (Tasks 1–21 built, reviewed, fixed; root 333 / desktop 26 tests; unsigned arm64 dmg+zip built in `desktop/dist/`). Task 22 sections B–I (everything needing a running app and macOS permission prompts) pending Tyler — see `docs/overnight-2026-09-02.md`.
+
 ## Goal
 
 Ship `desktop/` — a macOS menu-bar Electron shell that wraps the already-deployed Yoom web recorder and adds the three things a browser cannot do on macOS:
