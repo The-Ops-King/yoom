@@ -51,7 +51,14 @@ If #2/#3 land, persist the event stream as a JSON sidecar next to the video in D
 
 ## Phase 4 requirements from Phase 2 testing
 
-- Floating always-on-top camera bubble window over the desktop while recording (Loom-style), draggable; the recording's bubble position follows it.
+- ~~Floating always-on-top camera bubble window over the desktop while recording
+  (Loom-style), draggable; the recording's bubble position follows it.~~
+  **Shipped in Phase 4** as `desktop/src/main/bubble.ts` +
+  `desktop/src/renderer/bubble/`, with the mapping in
+  `desktop/src/main/mapping.ts` (`bubbleCentreToNormalized`, `bubbleWindowSize`)
+  and `displayPosToCanvasPos` in `src/lib/recording/geometry.ts`. Known limit:
+  window captures map against the display, not the captured window, and the live
+  window hides itself while recording a window or with framed capture on.
 
 ## Proposed Phase 5 — Post-recording editor (Tyler, 2026-09-02)
 

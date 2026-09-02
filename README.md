@@ -202,6 +202,27 @@ After an upload the recorder copies the share URL to the clipboard and pushes to
 is reserved by `/api/upload` before the bytes go up, so the copy happens inside the
 click's transient activation rather than minutes later when it would silently fail.
 
+## Desktop app
+
+`desktop/` is a separate npm package: an Electron menu-bar shell that wraps this
+web app and adds full macOS system audio (screens and windows, not just tabs),
+global hotkeys that work while another app is focused, and a floating camera
+bubble over the desktop whose position drives the bubble in the recording.
+
+```sh
+cd desktop && npm install && npm run icons
+npm run dev      # loads http://localhost:3000
+npm run build    # unsigned dmg + zip in desktop/dist
+```
+
+It is excluded from the root `tsconfig.json`, ESLint, `npm test` and Vercel
+deploys (`.vercelignore`), so it never affects the web build. See
+[`desktop/README.md`](desktop/README.md) for permissions and known limits.
+
+The web app detects the shell through `window.__yoomDesktop`
+(`src/lib/recording/desktop-bridge.ts`). Without it, every desktop call is a
+no-op and the browser behaviour is unchanged.
+
 ## Known limits
 
 - All video bytes flow through Vercel functions; 206 responses are not CDN-cached.
