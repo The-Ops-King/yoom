@@ -57,6 +57,9 @@ supabase link --project-ref <ref>
 supabase db push
 ```
 
+Phase 3 adds `supabase/migrations/20260902000000_phase3.sql` (the `videos.edits` column
+and a view-session index). `supabase db push` applies both migrations in order.
+
 Or paste `supabase/migrations/20260901000000_init.sql` into the SQL editor. Copy the
 project URL into `SUPABASE_URL` and the **service role** key into
 `SUPABASE_SERVICE_ROLE_KEY`. The service role key is server-only — it must never be
@@ -151,8 +154,53 @@ npm test        # vitest (unit tests for the pure modules)
   **Restart** (immediate — no second countdown), **Cancel** (trash: discards the take
   and returns to setup with the capture still live), then a review screen to play
   back, discard, or upload. 30-minute cap; Safari records `video/mp4`.
-- **Hotkeys** — ⌘⇧L start/stop, ⌘⇧P pause/resume, ⌘⇧K restart now, ⌘⇧X cancel
+- **Markers** — ⌘⇧M (or the **Mark** button next to Pause) drops a timestamp at the
+  current elapsed time; the REC chip flashes to acknowledge it. Markers upload with the
+  recording into `videos.edits.markers` and show as ticks on `/library/[id]`. They are
+  cleared by Restart, Cancel and Discard, i.e. whenever the take is thrown away.
+- **Hotkeys** — ⌘⇧L start/stop, ⌘⇧P pause/resume, ⌘⇧M mark, ⌘⇧K restart now, ⌘⇧X cancel
   (⌃ on Windows/Linux).
+
+## Dashboard
+
+Everything under `/library` and `/settings` lives in the `src/app/(owner)/` route group.
+Its layout calls `isOwner()` and renders the password gate in place of the page when the
+`yoom_session` cookie is missing, so the URL survives signing in.
+
+- **`/library`** — grid of every live recording with thumbnail, duration, view count and
+  age. `?q=` searches title, description and slug; `?sort=` is `newest` (default),
+  `oldest`, `views` or `title`. Both live in the URL, so the page stays a server
+  component and the view is shareable.
+- **`/library/[id]`** — the player, click-to-edit title and description (saved on blur or
+  ⌘/Ctrl+Enter), the slug editor showing the full `jtylerray.com/v/` prefix, copy link,
+  download the Drive original, and delete. Recorder markers appear as clickable ticks
+  under the player and as a timestamped list beside it. On the right: views / unique
+  viewers / average watched %, a ten-bucket retention histogram, and the last 50 viewers
+  with location, device, relative time and watched %.
+- **`/settings`** — the two alert toggles. `alerts.ts` reads the same `settings` row
+  before sending, so switching one off silences that email immediately.
+
+Mutations are Server Actions in `src/app/(owner)/actions.ts`. Every one re-checks
+`isOwner()`, because Server Actions are reachable by direct POST and not only through the
+UI. Changing a slug goes through the `change_video_slug` Postgres function, which records
+the old slug in `slug_history` in the same transaction, so old links keep 308-redirecting.
+Delete is a soft delete (`deleted_at`) plus a Drive trash for the video and its thumbnail.
+
+`GET /api/videos/[id]/download` streams the Drive original with a
+`Content-Disposition: attachment` header. `src/proxy.ts` gates `/api/videos/*` on the
+session cookie alongside `/api/upload/*`.
+
+**Editor foundation.** `videos.edits` (jsonb) holds a non-destructive edit decision list
+typed and validated by `src/lib/edits.ts` (`parseEdits` is total: bad data degrades to
+"no edits"). `src/components/video/edit-player.tsx` wraps the `<video>` with a
+ResizeObserver-sized `<canvas>` overlay and is used by both the detail page and the public
+watch page. It draws nothing today — the seam exists for the proposed post-recording
+editor. Markers are the first thing that actually lands in the column.
+
+After an upload the recorder copies the share URL to the clipboard and pushes to
+`/library/<id>?new=1`, which focuses the title and shows a "Link copied" toast. The slug
+is reserved by `/api/upload` before the bytes go up, so the copy happens inside the
+click's transient activation rather than minutes later when it would silently fail.
 
 ## Known limits
 
