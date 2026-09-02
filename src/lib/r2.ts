@@ -1,45 +1,9 @@
-import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-
-export const r2 = new S3Client({
-  region: "auto",
-  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
-  },
-});
-
-export async function createPresignedUploadUrl(key: string): Promise<string> {
-  const command = new PutObjectCommand({
-    Bucket: process.env.R2_BUCKET_NAME!,
-    Key: key,
-    ContentType: "video/webm",
-  });
-
-  return getSignedUrl(r2, command, { expiresIn: 600 }); // 10 minutes
-}
-
-export async function videoExists(key: string): Promise<boolean> {
-  try {
-    await r2.send(
-      new HeadObjectCommand({
-        Bucket: process.env.R2_BUCKET_NAME!,
-        Key: key,
-      })
-    );
-    return true;
-  } catch (err: unknown) {
-    if (err instanceof Error && err.name === "NotFound") return false;
-    if (err instanceof Error && "$$metadata" in err) {
-      const meta = err as Error & { $$metadata: { httpStatusCode?: number } };
-      if (meta.$$metadata.httpStatusCode === 404) return false;
-    }
-    throw err;
-  }
+// Deprecated: R2 storage. Retained only so the legacy /watch route compiles
+// until it is deleted in the "Remove R2" task. No AWS SDK dependency.
+export async function videoExists(_key: string): Promise<boolean> {
+  return false;
 }
 
 export function getPublicVideoUrl(key: string): string {
-  return `${process.env.R2_PUBLIC_URL}/${key}`;
+  return `${process.env.R2_PUBLIC_URL ?? ""}/${key}`;
 }
