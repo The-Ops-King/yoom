@@ -68,4 +68,21 @@ describe("withCors", () => {
     const res = withCors(req, Response.json({ ok: true }));
     await expect(res.json()).resolves.toEqual({ ok: true });
   });
+
+  it("does not mutate a response with immutable headers", async () => {
+    const req = new Request("https://yoom.vercel.app/api/view/start", {
+      headers: { origin: "https://jtylerray.com" },
+    });
+    const original = new Response("x", {
+      status: 206,
+      headers: { "x-a": "1" },
+    });
+    const res = withCors(req, original);
+    expect(res).not.toBe(original);
+    expect(res.status).toBe(206);
+    expect(res.headers.get("x-a")).toBe("1");
+    expect(res.headers.get("access-control-allow-origin")).toBe(
+      "https://jtylerray.com",
+    );
+  });
 });

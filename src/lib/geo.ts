@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { env } from "@/lib/env";
+import { createHmac } from "node:crypto";
+import { optionalEnv } from "@/lib/env";
 
 export type ViewerContext = {
   ipHash: string | null;
@@ -23,9 +23,9 @@ export function readViewerContext(request: Request): ViewerContext {
     ? forwarded.split(",")[0]?.trim() || null
     : request.headers.get("x-real-ip");
 
-  const ipHash = ip
-    ? createHash("sha256").update(`${env("SESSION_SECRET")}:${ip}`).digest("hex")
-    : null;
+  const secret = optionalEnv("SESSION_SECRET");
+  const ipHash =
+    ip && secret ? createHmac("sha256", secret).update(ip).digest("hex") : null;
 
   return {
     ipHash,

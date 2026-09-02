@@ -34,6 +34,13 @@ describe("readViewerContext", () => {
     expect(readViewerContext(req({})).ipHash).toBeNull();
   });
 
+  it("returns null ipHash when SESSION_SECRET is unset", () => {
+    delete process.env.SESSION_SECRET;
+    expect(
+      readViewerContext(req({ "x-forwarded-for": "1.2.3.4" })).ipHash,
+    ).toBeNull();
+  });
+
   it("reads user agent and Vercel geo headers", () => {
     const ctx = readViewerContext(
       req({

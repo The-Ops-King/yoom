@@ -1,12 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { Video, ViewSession } from "@/lib/db";
-
-// `@/lib/db` re-exports the service-role Supabase client chain, which imports
-// `server-only` — a hard throw outside Next's bundler (no `react-server`
-// resolve condition under Vitest). Stub it out; none of the functions under
-// test here call into Supabase.
-vi.mock("@/lib/supabase", () => ({ getSupabase: () => ({}) }));
-
 import {
   deviceFromUserAgent,
   locationLabel,

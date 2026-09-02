@@ -29,9 +29,16 @@ export function preflight(request: Request): Response {
 
 /** Copy CORS headers onto an existing response, preserving status and body. */
 export function withCors(request: Request, response: Response): Response {
-  const headers = corsHeaders(request.headers.get("origin"));
-  for (const [key, value] of Object.entries(headers)) {
-    response.headers.set(key, value);
+  const cors = corsHeaders(request.headers.get("origin"));
+  // `fetch()` responses carry immutable headers, so we can't mutate them
+  // in place — build a new Headers instance and a new Response instead.
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(cors)) {
+    headers.set(key, value);
   }
-  return response;
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
