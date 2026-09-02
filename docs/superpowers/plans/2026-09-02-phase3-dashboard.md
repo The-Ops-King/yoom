@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** MERGED to `main` 2026-09-02 (Tasks 1–21 built, reviewed, fixed; 320 tests; page-level auth gate added after the final review found the layout gate leaked RSC data). Task 22 manual checklist pending Tyler.
+
 ## Goal
 
 Give the single owner a private dashboard at `/library`, `/library/[id]` and `/settings`:
