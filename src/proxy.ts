@@ -10,5 +10,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/upload/:path*"],
+  matcher: ["/api/upload/:path*", "/api/videos/:path*"],
 };
