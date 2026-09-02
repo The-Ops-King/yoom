@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="content-security-policy"
+      content="default-src 'none'; img-src data:; style-src 'self'; script-src 'self'"
+    />
+    <title>Choose what to share</title>
+    <link rel="stylesheet" href="./picker.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Choose what to share</h1>
+      <p id="audio-note" hidden>System audio will be included</p>
+    </header>
+    <nav role="tablist">
+      <button id="tab-screen" role="tab" type="button" aria-selected="true">Screens</button>
+      <button id="tab-window" role="tab" type="button" aria-selected="false">Windows</button>
+    </nav>
+    <ul id="grid" role="listbox" aria-label="Capture sources"></ul>
+    <footer>
+      <span class="hint">↑↓ move · Enter share · Esc cancel</span>
+      <button id="cancel" type="button">Cancel</button>
+    </footer>
+    <script type="module" src="./picker.ts"></script>
+  </body>
+</html>

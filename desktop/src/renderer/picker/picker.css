@@ -1,0 +1,148 @@
+:root {
+  color-scheme: dark;
+  --border: #2e2e2e;
+  --fg: #f5f5f5;
+  --muted: #9a9a9a;
+  --accent: #4f7cff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Plus Jakarta Sans", sans-serif;
+  color: var(--fg);
+  background: transparent;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+header {
+  padding: 14px 16px 6px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#audio-note {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+nav {
+  display: flex;
+  gap: 6px;
+  padding: 6px 16px 10px;
+  -webkit-app-region: no-drag;
+}
+
+nav button {
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  border-radius: 7px;
+  padding: 4px 12px;
+  font: inherit;
+  cursor: default;
+}
+
+nav button[aria-selected="true"] {
+  color: var(--fg);
+  border-color: var(--accent);
+  background: rgba(79, 124, 255, 0.16);
+}
+
+#grid {
+  -webkit-app-region: no-drag;
+  flex: 1;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0 16px 8px;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  align-content: start;
+}
+
+#grid li {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+  cursor: default;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+#grid li[aria-selected="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+#grid img.thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #0d0d0d;
+}
+
+#grid .label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+#grid .label img {
+  width: 14px;
+  height: 14px;
+}
+
+#grid .label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  padding: 24px 0;
+  text-align: center;
+}
+
+footer {
+  -webkit-app-region: no-drag;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+footer button {
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  border-radius: 7px;
+  padding: 4px 12px;
+  font: inherit;
+  cursor: default;
+}

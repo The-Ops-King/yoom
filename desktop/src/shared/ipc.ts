@@ -42,6 +42,13 @@ export const IPC = {
   setBubbleAppearance: "yoom:bubble-appearance",
   /** app renderer → main. Payload: boolean. */
   setBubbleVisible: "yoom:bubble-visible",
+  /**
+   * app renderer → main. Payload: boolean — true while the encoder is running
+   * (status `recording` or `paused`). Drives the auto-hide of the live bubble
+   * window for window captures and the YOOM_BUBBLE_HIDE_WHILE_RECORDING
+   * escape hatch. See `bubble.ts#setRecordingActive`.
+   */
+  setRecordingActive: "yoom:recording-active",
   /** app renderer → main. Payload: string | null. */
   setCameraDevice: "yoom:bubble-camera",
 
