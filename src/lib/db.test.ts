@@ -127,6 +127,7 @@ describe("insertVideo", () => {
       insertVideo({
         slug: "abc12345",
         title: "Demo",
+        description: "A demo recording",
         drive_file_id: "drive-1",
         mime: "video/webm",
         size_bytes: 100,
@@ -136,7 +137,11 @@ describe("insertVideo", () => {
       }),
     ).resolves.toEqual(VIDEO);
     expect(builder.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ slug: "abc12345", drive_file_id: "drive-1" }),
+      expect.objectContaining({
+        slug: "abc12345",
+        drive_file_id: "drive-1",
+        description: "A demo recording",
+      }),
     );
   });
 

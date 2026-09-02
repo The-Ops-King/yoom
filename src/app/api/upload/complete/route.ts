@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { DbError, UNIQUE_VIOLATION, insertVideo, updateVideoMeta } from "@/lib/db";
+import { DbError, UNIQUE_VIOLATION, insertVideo } from "@/lib/db";
 import { getFileMeta } from "@/lib/google-drive";
 import { newSlug, SLUG_RE } from "@/lib/slug";
 import { parseEdits } from "@/lib/edits";
@@ -84,6 +84,7 @@ export async function POST(request: Request) {
       const video = await insertVideo({
         slug,
         title,
+        description,
         drive_file_id: meta.id,
         mime: meta.mimeType || "video/webm",
         size_bytes: meta.size,
@@ -92,17 +93,6 @@ export async function POST(request: Request) {
         height: toInt(body.height),
         edits,
       });
-      // `NewVideo` has no `description` column yet, so it can't go through
-      // `insertVideo` above; fold it in with the existing metadata patch path
-      // instead of widening the insert type here. The video is already saved
-      // at this point, so a failure here must not surface as a save error.
-      if (description) {
-        try {
-          await updateVideoMeta(video.id, { description });
-        } catch (error) {
-          console.error("updateVideoMeta (description) failed", error);
-        }
-      }
       return NextResponse.json({
         id: video.id,
         slug: video.slug,

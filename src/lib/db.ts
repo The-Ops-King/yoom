@@ -47,6 +47,8 @@ export type Settings = {
 export type NewVideo = {
   slug: string;
   title: string;
+  /** Optional description; omitted or undefined, the column's `null` default applies. */
+  description?: string | null;
   drive_file_id: string;
   mime: string;
   size_bytes: number | null;
@@ -129,6 +131,7 @@ export async function insertVideo(input: NewVideo): Promise<Video> {
       duration_ms: input.duration_ms,
       width: input.width,
       height: input.height,
+      ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.edits ? { edits: input.edits } : {}),
     })
     .select("*")
