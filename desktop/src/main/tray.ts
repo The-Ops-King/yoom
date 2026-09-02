@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { Menu, Tray, app, nativeImage } from "electron";
-import { showPermissionsDialog } from "./permissions";
+import { hudStatus, toggleHud } from "./hud";
+import { permissionStatuses, showPermissionsDialog } from "./permissions";
 import {
   createRecorderWindow,
   getRecorderWindow,
@@ -40,6 +41,16 @@ export function createTray(): Tray {
 export function refreshTrayMenu(): void {
   if (!tray) return;
   const hasWindow = !!getRecorderWindow();
+  const status = hudStatus();
+  const live = status === "recording" || status === "paused";
+  const capturing = live || status === "countdown" || status === "stopping";
+  const { screen, camera, microphone } = permissionStatuses();
+  // A one-glance summary; the full dialog is one click away.
+  const missing = [
+    screen !== "granted" ? "Screen" : null,
+    camera !== "granted" ? "Camera" : null,
+    microphone !== "granted" ? "Mic" : null,
+  ].filter(Boolean);
 
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -50,8 +61,11 @@ export function refreshTrayMenu(): void {
           refreshTrayMenu();
         },
       },
+      { type: "separator" },
+      // Mirrors the HUD. Enabled only mid-take, so the menu says what is
+      // actually possible rather than firing no-ops into the renderer.
       {
-        label: "Toggle recording",
+        label: live ? "Stop recording" : "Toggle recording",
         accelerator: "CommandOrControl+Shift+L",
         enabled: hasWindow,
         click: () => {
@@ -59,8 +73,48 @@ export function refreshTrayMenu(): void {
           else toggleRecorderWindow();
         },
       },
+      {
+        label: status === "paused" ? "Resume" : "Pause",
+        accelerator: "CommandOrControl+Shift+P",
+        enabled: live,
+        click: () => sendToRecorder(IPC.shortcut, "pause"),
+      },
+      {
+        label: "Discard recording",
+        accelerator: "CommandOrControl+Shift+X",
+        enabled: capturing,
+        click: () => sendToRecorder(IPC.shortcut, "cancel"),
+      },
+      {
+        label: "Show/hide controls",
+        enabled: capturing,
+        click: () => toggleHud(),
+      },
       { type: "separator" },
-      { label: "Permissions…", click: () => void showPermissionsDialog() },
+      {
+        label: missing.length
+          ? `Permissions… (${missing.join(", ")} missing)`
+          : "Permissions…",
+        click: () => void showPermissionsDialog(),
+      },
+      {
+        label: "Developer",
+        submenu: [
+          {
+            label: "Developer tools",
+            click: () => {
+              const win = getRecorderWindow();
+              if (!win) return;
+              win.show();
+              win.webContents.openDevTools({ mode: "detach" });
+            },
+          },
+          {
+            label: "Reload recorder",
+            click: () => getRecorderWindow()?.webContents.reloadIgnoringCache(),
+          },
+        ],
+      },
       { type: "separator" },
       { label: "Quit Yoom", accelerator: "Command+Q", click: () => app.quit() },
     ]),
