@@ -203,6 +203,31 @@ describe("STREAM_ENDED", () => {
     expect(s.status).toBe("stopping");
     expect(s.streamsAlive).toBe(false);
   });
+
+  it("while uploading only clears streamsAlive, so a failed upload discards to idle", () => {
+    const uploading = run(init(), [
+      { type: "ACQUIRE" },
+      ACQUIRED,
+      { type: "START" },
+      { type: "SKIP_COUNTDOWN" },
+      { type: "STOP" },
+      {
+        type: "BLOB_READY",
+        blob: new Blob(["x"]),
+        durationMs: 1_000,
+        width: 1280,
+        height: 720,
+      },
+      { type: "UPLOAD" },
+      { type: "STREAM_ENDED" },
+    ]);
+    expect(uploading.status).toBe("uploading");
+    expect(uploading.streamsAlive).toBe(false);
+
+    const failed = recorderReducer(uploading, { type: "UPLOAD_FAILED", error: "nope" });
+    expect(failed.status).toBe("review");
+    expect(recorderReducer(failed, { type: "DISCARD" }).status).toBe("idle");
+  });
 });
 
 describe("review, upload and done", () => {

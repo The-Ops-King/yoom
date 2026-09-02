@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   computeBubbleRect,
   contentBox,
@@ -30,37 +30,61 @@ export function BubbleDragOverlay({
   cameraHeight,
   onMove,
 }: BubbleDragOverlayProps) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
+  const hostElRef = useRef<HTMLDivElement | null>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
   const [dragging, setDragging] = useState(false);
   const [hostSize, setHostSize] = useState({ width: 0, height: 0 });
 
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-    const update = () => {
-      const bounds = host.getBoundingClientRect();
-      setHostSize({ width: bounds.width, height: bounds.height });
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(host);
-    return () => observer.disconnect();
+  // A callback ref, not an effect: this component returns `null` until the
+  // canvas reports a size, so a `[]`-dep effect would run once with a null
+  // host and never observe anything. The callback fires on every real
+  // mount/unmount of the host, and seeds `hostSize` immediately so the very
+  // first render with a sized canvas already positions the handle correctly.
+  const hostRef = useCallback((el: HTMLDivElement | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    hostElRef.current = el;
+    if (!el) return;
+
+    const bounds = el.getBoundingClientRect();
+    setHostSize({ width: bounds.width, height: bounds.height });
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      const next = el.getBoundingClientRect();
+      setHostSize((prev) =>
+        prev.width === next.width && prev.height === next.height
+          ? prev
+          : { width: next.width, height: next.height },
+      );
+    });
+    observer.observe(el);
+    observerRef.current = observer;
   }, []);
 
-  const rect =
-    canvasWidth > 0 && canvasHeight > 0
-      ? computeBubbleRect(canvasWidth, canvasHeight, cameraWidth, cameraHeight, bubble)
-      : null;
+  useEffect(() => () => observerRef.current?.disconnect(), []);
+
+  const rect = useMemo(
+    () =>
+      canvasWidth > 0 && canvasHeight > 0
+        ? computeBubbleRect(canvasWidth, canvasHeight, cameraWidth, cameraHeight, bubble)
+        : null,
+    [canvasWidth, canvasHeight, cameraWidth, cameraHeight, bubble],
+  );
 
   // The canvas renders with `object-contain` inside the stage, so it may be
   // letterboxed on the sides or top/bottom. The handle must be positioned —
   // and drags interpreted — relative to that rendered content box, not the
-  // full (possibly letterboxed) host box.
-  const box = contentBox({ left: 0, top: 0, ...hostSize }, canvasWidth, canvasHeight);
+  // full (possibly letterboxed) host box. Recomputed whenever the host is
+  // measured or the canvas dimensions arrive/change.
+  const box = useMemo(
+    () => contentBox({ left: 0, top: 0, ...hostSize }, canvasWidth, canvasHeight),
+    [hostSize, canvasWidth, canvasHeight],
+  );
 
   const handlePointer = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      const host = hostRef.current;
+      const host = hostElRef.current;
       if (!host) return;
       const bounds = host.getBoundingClientRect();
       const content = contentBox(bounds, canvasWidth, canvasHeight);

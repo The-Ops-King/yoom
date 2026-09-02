@@ -176,6 +176,17 @@ describe("contentBox", () => {
     expect(contentBox(bounds, 0, 0)).toEqual(bounds);
     expect(contentBox(bounds, -10, 900)).toEqual(bounds);
   });
+
+  it("returns a zero rect (never NaN) for a zero-size host", () => {
+    // The drag overlay measures its host before layout has given it a size.
+    const bounds = { left: 0, top: 0, width: 0, height: 0 };
+    const box = contentBox(bounds, 1920, 1080);
+    expect(box).toEqual({ left: 0, top: 0, width: 0, height: 0 });
+    expect(Number.isNaN(box.left)).toBe(false);
+    expect(Number.isNaN(box.top)).toBe(false);
+    expect(Number.isNaN(box.width)).toBe(false);
+    expect(Number.isNaN(box.height)).toBe(false);
+  });
 });
 
 describe("pointerToNormalized", () => {

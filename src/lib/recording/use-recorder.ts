@@ -128,6 +128,12 @@ export function useRecorder(): UseRecorderResult {
   const mixerRef = useRef<AudioMixer | null>(null);
   const compositorRef = useRef<Compositor | null>(null);
   const segmenterRef = useRef<PersonSegmenter | null>(null);
+  // Generation counter for in-flight `PersonSegmenter.load()` calls. Every
+  // teardown (and every new load) bumps it, so a load that resolves after the
+  // pipeline it belonged to is gone disposes itself instead of attaching to a
+  // compositor that no longer exists.
+  const segmenterLoadRef = useRef(0);
+  const segmenterLoadingRef = useRef(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startedAtRef = useRef(0);
@@ -206,6 +212,9 @@ export function useRecorder(): UseRecorderResult {
       window.clearTimeout(thumbnailTimerRef.current);
       thumbnailTimerRef.current = null;
     }
+    // Discard any load still in flight before disposing the current one.
+    segmenterLoadRef.current += 1;
+    segmenterLoadingRef.current = false;
     segmenterRef.current?.dispose();
     segmenterRef.current = null;
     compositorRef.current?.dispose();
@@ -240,6 +249,10 @@ export function useRecorder(): UseRecorderResult {
 
   const acquire = useCallback(async () => {
     const current = stateRef.current;
+    // Only `idle` and `error` may acquire — the reducer would ignore ACQUIRE
+    // from anywhere else, and re-running the side effects (a second picker
+    // prompt, a second camera stream) would leak streams behind it.
+    if (current.status !== "idle" && current.status !== "error") return;
     dispatch({ type: "ACQUIRE" });
     const provider = getProvider();
 
@@ -315,8 +328,15 @@ export function useRecorder(): UseRecorderResult {
 
         // Segmentation is optional: a null segmenter means "plain camera".
         if (current.background.kind !== "none" && cameraStreamRef.current) {
+          const gen = ++segmenterLoadRef.current;
+          segmenterLoadingRef.current = true;
           void PersonSegmenter.load().then((segmenter) => {
+            if (gen === segmenterLoadRef.current) segmenterLoadingRef.current = false;
             if (!segmenter) return;
+            if (gen !== segmenterLoadRef.current || !compositorRef.current) {
+              segmenter.dispose();
+              return;
+            }
             segmenterRef.current = segmenter;
             // Reuse the compositor's decoded camera element: one decoder,
             // not two, for the same camera stream.
@@ -370,9 +390,23 @@ export function useRecorder(): UseRecorderResult {
     }
     compositorRef.current?.setBackground(state.background);
     // Turning a background on for the first time lazily loads the segmenter.
-    if (state.background.kind !== "none" && !segmenterRef.current && cameraStreamRef.current) {
+    // An in-flight load counts as "already loading", so flipping backgrounds
+    // quickly cannot start a second WASM load.
+    if (
+      state.background.kind !== "none" &&
+      !segmenterRef.current &&
+      !segmenterLoadingRef.current &&
+      cameraStreamRef.current
+    ) {
+      const gen = ++segmenterLoadRef.current;
+      segmenterLoadingRef.current = true;
       void PersonSegmenter.load().then((segmenter) => {
+        if (gen === segmenterLoadRef.current) segmenterLoadingRef.current = false;
         if (!segmenter) return;
+        if (gen !== segmenterLoadRef.current || !compositorRef.current) {
+          segmenter.dispose();
+          return;
+        }
         segmenterRef.current = segmenter;
         // Reuse the compositor's decoded camera element (one decoder).
         const el = compositorRef.current?.cameraElement() ?? null;
@@ -521,6 +555,21 @@ export function useRecorder(): UseRecorderResult {
     }
   }, [state.status]);
 
+  // Watchdog: `stopping` waits on MediaRecorder's `onstop`. If the encoder
+  // never fires it (a dead track, a browser bug) the UI would hang forever on
+  // "Finishing…", so give up after 10s and surface a retryable error.
+  useEffect(() => {
+    if (state.status !== "stopping") return;
+    const id = window.setTimeout(() => {
+      if (stateRef.current.status !== "stopping") return;
+      dispatch({
+        type: "RECORD_FAILED",
+        error: "Recording did not finalize. Please try again.",
+      });
+    }, 10_000);
+    return () => window.clearTimeout(id);
+  }, [state.status]);
+
   const captureThumbnail = useCallback(async (): Promise<Blob | null> => {
     const compositor = compositorRef.current;
     if (compositor) return compositor.snapshot();
@@ -630,8 +679,12 @@ export function useRecorder(): UseRecorderResult {
     const blob = current.blob;
     if (!blob) return;
     dispatch({ type: "UPLOAD" });
-    // Free the camera and screen while the bytes go up.
+    // Free the camera and screen while the bytes go up. The streams are gone,
+    // so the machine must know it: otherwise an UPLOAD_FAILED drops back to
+    // `review` still believing `streamsAlive`, and Discard lands in a `setup`
+    // screen with no capture behind it.
     teardown();
+    dispatch({ type: "STREAM_ENDED" });
     try {
       const result = await uploadRecording({
         blob,

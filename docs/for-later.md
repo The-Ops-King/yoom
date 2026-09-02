@@ -4,7 +4,9 @@ Ideas parked here so they're designed once, at the right phase. Not in any curre
 
 ## Recording polish (CleanShot X / Screen Studio style)
 
-### 1. Framed capture: padding + colorful background
+### 1. Framed capture: padding + colorful background — **shipped in Phase 2**
+Shipped as `FrameConfig` (`{ enabled, padding, radius, shadow, background }`) in `src/lib/recording/types.ts`, laid out by `computeFrameLayout` in `geometry.ts`, drawn by `compositor.ts`, and persisted in `settings.ts`. The notes below are the original design.
+
 Record the screen inset inside a larger canvas with a gradient / solid / image background, rounded corners, and a drop shadow. User picks the background like CleanShot's "Background" tool.
 
 - **Where it lives:** Phase 2 `compositor.ts`. Today the canvas is locked to the screen's dimensions; add a `frame` config `{ padding, radius, shadow, background: BackgroundConfig }` that enlarges the canvas and draws background → inset screen (rounded clip) → camera bubble. The `BackgroundConfig` type from the camera-bubble backgrounds (`none | blur | color | image | video`) can be reused as-is for the frame background, minus `blur`.
@@ -30,7 +32,7 @@ Visual pulse where the user clicks.
 If #2/#3 land, persist the event stream as a JSON sidecar next to the video in Drive (`<slug>-events.json`). That makes post-hoc auto-zoom ("zoom to where the cursor is active", Loom/Screen Studio) possible without re-recording, and lets the watch page render cursor effects on top of a clean recording instead of burning them in.
 
 ## Sequencing note
-Build #1 in Phase 2 (pure compositor work, browser-only). Build #2–#4 as a Phase 5 "desktop polish" after the Electron shell exists, since all three depend on OS-level cursor data. Phase 2 should still add the overlay-layer seam so Phase 5 doesn't have to refactor the draw loop.
+#1 shipped in Phase 2 (pure compositor work, browser-only). #2–#4 remain future work — a Phase 5 "desktop polish" after the Electron shell exists, since all three depend on OS-level cursor data. Phase 2 added the overlay-layer seam (`OverlayLayer`, `compositor.addOverlay`) so Phase 5 doesn't have to refactor the draw loop.
 
 ## Phase 1 follow-ups (non-blocking, from the final review, 2026-09-01)
 
@@ -40,5 +42,5 @@ Build #1 in Phase 2 (pure compositor work, browser-only). Build #2–#4 as a Pha
 - HEAD with a Range on `/api/stream` is RFC-consistent now; rangeless GET on files > 32 MiB returns 206 by design (Chrome/Safari fine; watch Firefox).
 - `use-view-tracker`: bfcache restores after `pagehide` never re-close a session (documented).
 - `db.test.ts` is mostly mock plumbing; add a real integration test against a Supabase branch before Phase 3 grows the query surface.
-- Phase 2 must add the overlay-layer seam in the compositor (see "For later" above) and Safari `video/mp4` codec fallback.
+- ~~Phase 2 must add the overlay-layer seam in the compositor (see "For later" above) and Safari `video/mp4` codec fallback.~~ Both shipped in Phase 2.
 - Verification artefact: video `bc040bca-a0fd-44aa-a8f3-f5843685eeb5` (slug `uunrv7zm`, 700 KB of random bytes named `yoom-verify.webm`) exists in Drive + DB; delete it from the Phase 3 dashboard once that exists, or via SQL + Drive trash.

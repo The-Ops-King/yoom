@@ -154,12 +154,16 @@ export class Compositor {
   }
 
   setSources(sources: CompositorSources): void {
+    // A replaced <video> must let go of its MediaStream, or the old element
+    // keeps a decoder (and the tracks) alive until GC gets around to it.
     if (sources.screen !== undefined) {
       this.screenVideo?.pause();
+      if (this.screenVideo) this.screenVideo.srcObject = null;
       this.screenVideo = sources.screen ? makeVideo(sources.screen) : null;
     }
     if (sources.camera !== undefined) {
       this.cameraVideo?.pause();
+      if (this.cameraVideo) this.cameraVideo.srcObject = null;
       this.cameraVideo = sources.camera ? makeVideo(sources.camera) : null;
     }
     if (sources.maskCanvas !== undefined) this.maskCanvas = sources.maskCanvas;
@@ -288,6 +292,9 @@ export class Compositor {
     if (this.cameraVideo) this.cameraVideo.srcObject = null;
     this.screenVideo = null;
     this.cameraVideo = null;
+    // The mask belongs to the segmenter, which is disposed separately; drop
+    // the reference so a disposed compositor cannot keep it alive or draw it.
+    this.maskCanvas = null;
     releaseBackground(this.background);
     releaseBackground(this.frameBackground);
     this.background = null;

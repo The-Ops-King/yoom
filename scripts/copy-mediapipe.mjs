@@ -1,12 +1,24 @@
 #!/usr/bin/env node
 /**
- * Copies the MediaPipe vision WASM out of node_modules and downloads the
- * selfie-segmentation model into public/, so both are served same-origin.
- * Same-origin matters: a cross-origin model or WASM taints nothing, but the
- * preset backgrounds and the thumbnail canvas must never be tainted, and
- * keeping every asset local also means the recorder works offline in Electron.
+ * Copies the MediaPipe vision WASM out of node_modules into public/, so it is
+ * served same-origin. Same-origin matters: a cross-origin model or WASM taints
+ * nothing, but the preset backgrounds and the thumbnail canvas must never be
+ * tainted, and keeping every asset local also means the recorder works offline
+ * in Electron.
+ *
+ * Asset policy:
+ *   - WASM  (`public/mediapipe/`)  — GENERATED at build from node_modules, and
+ *     therefore gitignored. It is versioned with @mediapipe/tasks-vision, so
+ *     committing it would just be a stale copy of a dependency.
+ *   - Model (`public/models/selfie_segmenter.tflite`) — COMMITTED (249 KB).
+ *     It is a fixed, versionless artefact behind a Google CDN URL, so a build
+ *     must not depend on that CDN being up (or reachable at all, on an air-
+ *     gapped or Electron build box). The download below stays only as a
+ *     fallback for the case where the file is somehow missing.
  *
  * Runs from `predev` and `prebuild`; it is a no-op when the files are current.
+ * Every failure here is warn-only — the recorder degrades to "no virtual
+ * backgrounds" rather than breaking `npm run dev` / `npm run build`.
  */
 import { createRequire } from "node:module";
 import { cp, mkdir, stat, writeFile } from "node:fs/promises";
@@ -57,6 +69,7 @@ async function fetchModel() {
   const outDir = path.join(process.cwd(), "public", "models");
   const out = path.join(outDir, "selfie_segmenter.tflite");
   await mkdir(outDir, { recursive: true });
+  // Normal path: the model is committed, so this returns immediately.
   if (await exists(out)) return;
 
   console.log(`downloading ${MODEL_URL}`);
@@ -68,11 +81,20 @@ async function fetchModel() {
   console.log("downloaded selfie_segmenter.tflite");
 }
 
+// Each step is warn-only and independent: a WASM copy failure must not stop
+// the model fallback from running, and neither may break dev/build.
+function warn(err) {
+  console.warn(`[copy-mediapipe] ${err instanceof Error ? err.message : err}`);
+}
+
 try {
   await copyWasm();
+} catch (err) {
+  warn(err);
+}
+
+try {
   await fetchModel();
 } catch (err) {
-  // Never break `npm run dev` / `npm run build` over an optional feature: the
-  // recorder falls back to "no virtual backgrounds" when the model is absent.
-  console.warn(`[copy-mediapipe] ${err instanceof Error ? err.message : err}`);
+  warn(err);
 }
