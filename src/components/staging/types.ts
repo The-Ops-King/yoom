@@ -21,8 +21,19 @@ export interface StagingProps {
   onDiscard: () => void;
 }
 
-/** The upload metadata the rail collects; handed to `onFinish` untouched. */
-export type Details = { title: string; description: string; slug: string; thumbnailAt: number };
+/**
+ * The upload metadata the rail collects; handed to `onFinish` untouched.
+ * `slugOk` is the details form's verdict on the slug (false while its
+ * availability check is in flight), read by the upload section to gate the
+ * button; an empty slug means "auto" and is always ok.
+ */
+export type Details = {
+  title: string;
+  description: string;
+  slug: string;
+  thumbnailAt: number;
+  slugOk?: boolean;
+};
 
 /** Which pointer gesture the preview is in. `select` drags/edits what exists. */
 export type Tool = "select" | "blur" | "callout" | "highlight" | "underline" | "zoom";
