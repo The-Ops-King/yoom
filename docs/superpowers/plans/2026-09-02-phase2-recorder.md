@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** MERGED to `main` 2026-09-02 (Tasks 1–21 built, reviewed, fixed; 239 tests). Task 22 (manual matrix) pending Tyler's run. Follow-ups from the final review are in `docs/for-later.md`.
+
 **Goal:** Turn the single 470-line `src/components/recorder.tsx` into a Loom-grade recorder: three capture modes with surface hints, a pre-mixed audio track so mic **and** system audio can both be on and be toggled mid-recording, a draggable camera bubble with shapes/sizes/mirror and an on/off toggle, MediaPipe virtual backgrounds (blur / color / image / **looping video**), CleanShot-style framed capture (padding + gradient background + rounded inset + shadow), countdown / pause / restart / review, hotkeys, an Electron-ready media-source seam, and a plug-in overlay-layer seam in the compositor. The Phase 1 upload flow (`uploadToDrive` → `/api/upload` → `/api/upload/complete` → `/api/upload/thumbnail`) is preserved byte-for-byte, just relocated. `npm run build` and `npm test` pass at every commit.
 
 **Architecture:**
