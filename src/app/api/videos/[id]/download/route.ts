@@ -5,6 +5,9 @@ import { fetchMedia } from "@/lib/google-drive";
 // /api/stream.
 export const maxDuration = 300;
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function extensionFor(mime: string): string {
   if (mime.startsWith("video/mp4")) return "mp4";
   if (mime.startsWith("video/quicktime")) return "mov";
@@ -20,6 +23,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  if (!UUID_RE.test(id)) {
+    return new Response("Not found", { status: 404 });
+  }
 
   const video = await getVideoById(id);
   if (!video) {
