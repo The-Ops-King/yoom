@@ -105,6 +105,7 @@ jtylerray.com loads no JS or CSS.
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Metadata database |
 | `RESEND_API_KEY` | Email transport |
 | `ALERT_FROM_EMAIL` / `ALERT_TO_EMAIL` | Alert sender and recipient |
+| `DESKTOP_TOKEN` | Optional shared secret that signs the Mac app in without a password |
 
 ## Scripts
 
@@ -222,6 +223,19 @@ deploys (`.vercelignore`), so it never affects the web build. See
 The web app detects the shell through `window.__yoomDesktop`
 (`src/lib/recording/desktop-bridge.ts`). Without it, every desktop call is a
 no-op and the browser behaviour is unchanged.
+
+### Desktop sign-in
+
+The Mac app has no password screen. Set `DESKTOP_TOKEN` to a long random string
+(server-side only — it is never sent to a browser) and give the shell the same
+value; it attaches it as `x-yoom-desktop-token` on every request to the app
+origin, and both `src/proxy.ts` and `isOwner()` treat a matching token as the
+owner (`desktopTokenMatches` in `src/lib/session.ts`, a constant-time compare).
+Leave `DESKTOP_TOKEN` unset and the header path is disabled entirely, so the
+website stays password-gated either way. The shell reads its copy from
+`YOOM_DESKTOP_TOKEN`, or from the file
+`~/Library/Application Support/yoom-desktop/desktop-token` — see
+[`desktop/README.md`](desktop/README.md#sign-in).
 
 ## Known limits
 

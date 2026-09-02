@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DESKTOP_TOKEN_HEADER,
   SESSION_COOKIE,
   SESSION_MAX_AGE,
+  desktopTokenMatches,
   signSession,
   verifySession,
 } from "@/lib/session";
@@ -12,6 +14,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  delete process.env.DESKTOP_TOKEN;
 });
 
 describe("session", () => {
@@ -61,5 +64,48 @@ describe("session", () => {
     const cookie = signSession();
     process.env.SESSION_SECRET = "a-completely-different-secret-value";
     expect(verifySession(cookie)).toBe(false);
+  });
+});
+
+describe("desktopTokenMatches", () => {
+  const TOKEN = "desktop-token-value-0123456789abcdef";
+
+  it("exposes the header name the shell sends", () => {
+    expect(DESKTOP_TOKEN_HEADER).toBe("x-yoom-desktop-token");
+  });
+
+  it("accepts an exact match", () => {
+    process.env.DESKTOP_TOKEN = TOKEN;
+    expect(desktopTokenMatches(TOKEN)).toBe(true);
+  });
+
+  it("rejects a wrong token of the same length", () => {
+    process.env.DESKTOP_TOKEN = TOKEN;
+    expect(desktopTokenMatches("x".repeat(TOKEN.length))).toBe(false);
+  });
+
+  it("rejects a token of a different length", () => {
+    process.env.DESKTOP_TOKEN = TOKEN;
+    expect(desktopTokenMatches(`${TOKEN}extra`)).toBe(false);
+    expect(desktopTokenMatches(TOKEN.slice(0, -1))).toBe(false);
+  });
+
+  it("rejects a missing or empty header", () => {
+    process.env.DESKTOP_TOKEN = TOKEN;
+    expect(desktopTokenMatches(null)).toBe(false);
+    expect(desktopTokenMatches(undefined)).toBe(false);
+    expect(desktopTokenMatches("")).toBe(false);
+  });
+
+  it("is disabled when DESKTOP_TOKEN is unset", () => {
+    delete process.env.DESKTOP_TOKEN;
+    expect(desktopTokenMatches(TOKEN)).toBe(false);
+    expect(desktopTokenMatches("")).toBe(false);
+  });
+
+  it("is disabled when DESKTOP_TOKEN is empty", () => {
+    process.env.DESKTOP_TOKEN = "";
+    expect(desktopTokenMatches("")).toBe(false);
+    expect(desktopTokenMatches(TOKEN)).toBe(false);
   });
 });

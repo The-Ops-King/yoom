@@ -53,6 +53,28 @@ export function verifySession(cookie: string | undefined | null): boolean {
   return timingSafeEqual(a, b);
 }
 
+/** Header the Electron shell attaches to every request to the app origin. */
+export const DESKTOP_TOKEN_HEADER = "x-yoom-desktop-token";
+
+/**
+ * True when the request carries the shared desktop secret. This is what lets the
+ * Mac app skip the password gate while the website stays gated. Unset or empty
+ * `DESKTOP_TOKEN` disables the whole path — a deployment that never provisions
+ * the secret can never be signed into by header alone.
+ */
+export function desktopTokenMatches(
+  header: string | null | undefined,
+): boolean {
+  const expected = process.env.DESKTOP_TOKEN;
+  if (!expected) return false;
+  if (!header) return false;
+
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(header, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
 export function sessionCookieOptions(): SessionCookieOptions {
   return {
     httpOnly: true,
