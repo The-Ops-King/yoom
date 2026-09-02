@@ -57,6 +57,8 @@ const ACTIONS = [
 
 for (const [id, action] of ACTIONS) {
   document.getElementById(id)?.addEventListener("click", () => {
+    // TEMPORARY (pause investigation): hop 1 of 5. HUD window devtools.
+    console.debug("[Yoom] pause-trace 1 hud click", id, "→", action, "api?", !!api);
     api?.interact();
     api?.action(action);
   });

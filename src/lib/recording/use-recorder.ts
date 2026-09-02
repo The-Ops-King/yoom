@@ -469,6 +469,18 @@ export function useRecorder(): UseRecorderResult {
   // Pause / resume / stop the encoder to match the machine.
   useEffect(() => {
     const recorder = recorderRef.current;
+    // TEMPORARY (pause investigation): hop 5 of 5. Recorder window devtools.
+    // `status paused / encoder recording` means the branch below should fire;
+    // `status paused / encoder paused` means it already did and the encoder is
+    // genuinely paused, so the fault is downstream (HUD render / the file).
+    console.debug(
+      "[Yoom] pause-trace 5 encoder effect, status",
+      state.status,
+      "encoder",
+      recorder?.state ?? "(none)",
+      "camera encoder",
+      cameraRecorderRef.current?.state ?? "(none)",
+    );
     if (!recorder) return;
     // The camera encoder shadows the primary one so the two files stay aligned.
     const cam = cameraRecorderRef.current;
@@ -800,6 +812,9 @@ export function useRecorder(): UseRecorderResult {
         else if (status === "setup") dispatch({ type: "START" });
         else if (status === "idle") void acquire();
       } else if (key === "p") {
+        // TEMPORARY (pause investigation): the IN-PAGE chord. If this and
+        // "pause-trace 4" both fire for one ⌘⇧P, the two dispatches cancel.
+        console.debug("[Yoom] pause-trace 3b in-page ⌘⇧P, status", status);
         e.preventDefault();
         if (status === "recording") dispatch({ type: "PAUSE" });
         else if (status === "paused") dispatch({ type: "RESUME" });
@@ -836,8 +851,14 @@ export function useRecorder(): UseRecorderResult {
   // status guards are duplicated rather than shared because the in-page
   // listener also has to call `preventDefault` on the raw event.
   useEffect(() => {
-    return onDesktopShortcut((action) => {
+    // TEMPORARY (pause investigation): if "+1" appears more than once without
+    // a matching "-1", every shortcut is delivered twice and PAUSE/RESUME
+    // cancel each other out while STOP/CANCEL survive (they are idempotent).
+    console.debug("[Yoom] pause-trace desktop shortcut listener +1");
+    const off = onDesktopShortcut((action) => {
       const status = stateRef.current.status;
+      // TEMPORARY (pause investigation): hop 4 of 5. Recorder window devtools.
+      console.debug("[Yoom] pause-trace 4 page shortcut", action, "status", status);
       if (action === "toggle") {
         if (status === "recording" || status === "paused") dispatch({ type: "STOP" });
         else if (status === "setup") dispatch({ type: "START" });
@@ -865,6 +886,10 @@ export function useRecorder(): UseRecorderResult {
         dispatch({ type: "CANCEL" });
       }
     });
+    return () => {
+      console.debug("[Yoom] pause-trace desktop shortcut listener -1");
+      off();
+    };
   }, [acquire, discardRecorder]);
 
   // ---------- recording HUD ----------

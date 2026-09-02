@@ -30,6 +30,10 @@ export function registerShortcuts(): void {
       // The recorder window is deliberately HIDDEN during a take, so `sendToRecorder`
       // must not depend on visibility — it does not: `webContents.send` reaches a
       // hidden window exactly as it reaches a visible one.
+      // TEMPORARY (pause investigation): hop 3 of 5. Main-process stdout.
+      // If this line appears TWICE for one ⌘⇧P press, the chord is reaching
+      // the page as well as the global hotkey, and pause+resume cancel out.
+      console.debug("[Yoom] pause-trace 3 globalShortcut", accelerator, "→", action);
       sendToRecorder(IPC.shortcut, action);
       // Under YOOM_HUD_HIDE_WHILE_RECORDING the pill is off screen; a hotkey is
       // the moment the user most wants to see the timer confirm what happened.
