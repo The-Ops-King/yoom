@@ -1,0 +1,96 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  font: 12px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #f5f5f5;
+}
+
+/* The entire bubble is grabbable — matching Loom, where you drag the bubble
+   itself rather than a handle. The control strip opts out below. */
+#shell {
+  -webkit-app-region: drag;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+#shape {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #0d0d0d;
+  /* border-radius and transform are set from JS via shapeToCss(). */
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.22);
+}
+
+#cam {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+#fallback {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: #9a9a9a;
+}
+
+body.no-camera #cam {
+  display: none;
+}
+
+body.no-camera #fallback {
+  display: flex;
+}
+
+#controls {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+#shell:hover #controls {
+  opacity: 1;
+}
+
+#controls button {
+  -webkit-app-region: no-drag;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.65);
+  color: #f5f5f5;
+  font: inherit;
+  line-height: 1;
+  cursor: default;
+}
+
+#controls button:hover {
+  background: rgba(0, 0, 0, 0.85);
+}

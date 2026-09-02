@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="content-security-policy"
+      content="default-src 'none'; media-src blob: mediastream:; style-src 'self'; script-src 'self'"
+    />
+    <title>Yoom camera</title>
+    <link rel="stylesheet" href="./bubble.css" />
+  </head>
+  <body>
+    <!-- The whole body is the drag region; only the control strip opts out. -->
+    <div id="shell">
+      <div id="shape">
+        <video id="cam" autoplay muted playsinline></video>
+        <p id="fallback">No camera</p>
+      </div>
+      <div id="controls">
+        <button id="cycle" type="button" title="Change shape" aria-label="Change shape">
+          ◑
+        </button>
+        <button id="hide" type="button" title="Hide bubble" aria-label="Hide bubble">
+          ✕
+        </button>
+      </div>
+    </div>
+    <script type="module" src="./bubble.ts"></script>
+  </body>
+</html>
