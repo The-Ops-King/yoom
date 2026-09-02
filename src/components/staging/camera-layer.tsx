@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Rect, VideoEdits } from "@/lib/edits";
-import { bubbleHeightFor, cameraAt } from "@/lib/editor/camera-track";
+import { bubbleHeightFor, cameraAt, type CameraSample } from "@/lib/editor/camera-track";
 import * as ops from "@/lib/editor/edit-ops";
 import { shapeRadius } from "@/lib/recording/geometry";
 import type { BubbleShape } from "@/lib/recording/types";
@@ -12,10 +12,15 @@ import type { StagingContext } from "./types";
 /** Smallest the bubble may be dragged to, as a fraction of the content width. */
 const MIN_W = 0.05;
 
-/** How far the playhead must move before a just-dragged rect stops being shown. */
-const HOLD_S = 1 / 30;
-
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/** The eased corner radius of a sample's bubble, matching `render.ts`. */
+function sampleRadius(s: CameraSample, w: number, h: number): number {
+  const to = shapeRadius(s.shape, w, h);
+  if (!s.fromShape || s.shapeFade >= 1) return to;
+  const from = shapeRadius(s.fromShape, w, h);
+  return from + (to - from) * s.shapeFade;
+}
 
 type Drag = {
   kind: "move" | "resize";
@@ -43,19 +48,17 @@ type Drag = {
  * The box is positioned from a rAF loop reading `player.timeRef` rather than
  * from React state: playback must not re-render the whole staging tree at
  * 60 Hz (the timeline's playhead does the same).
+ *
+ * Nothing is rendered until the real output size is known. `player.size`
+ * starts at the 16×9 placeholder, the default track is built against that
+ * guess, and `staging.tsx` rebuilds it once the metadata lands — so drawing a
+ * box before then would put it in the wrong place and move it out from under
+ * the pointer the moment the video loads.
  */
 export function CameraLayer({ ctx }: { ctx: StagingContext }) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const badgeRef = useRef<HTMLDivElement | null>(null);
-  /**
-   * The rect of the gesture in progress — or of the one just released, until
-   * the playhead moves off it. The rAF prefers it over `cameraAt` because a
-   * keyframe's eased move starts AT its own `t`: sampling at the drag's own
-   * time reports the *previous* rect, so the box would neither follow the
-   * pointer nor stay where it was dropped.
-   */
-  const liveRef = useRef<{ t: number; rect: Rect } | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
 
   /**
@@ -68,7 +71,9 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
     ctxRef.current = ctx;
   }, [ctx]);
 
-  const track = ctx.mode === "screen+camera" ? ctx.edits.camera ?? null : null;
+  /** False until the video's metadata has replaced the 16×9 placeholder size. */
+  const sized = ctx.player.size.width > 16;
+  const track = ctx.mode === "screen+camera" && sized ? ctx.edits.camera ?? null : null;
   const frame = ctx.edits.frame;
   const { timeRef } = ctx.player;
 
@@ -83,14 +88,12 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
       const r = layer.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0) return;
       const c = contentRect(r.width, r.height, frame);
-      const t = timeRef.current;
-      const sample = cameraAt(track, t);
-      // Release the held rect once the playhead leaves the keyframe it was
-      // dragged at — from there on `cameraAt` is the truth again.
-      const held = liveRef.current;
-      if (held && Math.abs(t - held.t) > HOLD_S) liveRef.current = null;
-      if (sample.mode === "full") {
-        liveRef.current = null;
+      const sample = cameraAt(track, timeRef.current);
+      // Settle-by-`t` means `cameraAt` at the drag's own time already reports
+      // the dragged rect, so the box needs no live override: what the dashed
+      // box shows and what `drawFrame` paints are the same sample.
+      if (sample.mode !== "bubble") {
+        badge.textContent = sample.mode === "hidden" ? "Camera hidden" : "Full screen";
         badge.style.display = "block";
         box.style.display = "none";
         badge.style.left = `${c.x + 8}px`;
@@ -99,14 +102,14 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
       }
       badge.style.display = "none";
       box.style.display = "block";
-      const rect = liveRef.current?.rect ?? sample.rect;
+      const rect = sample.rect;
       const w = rect.w * c.w;
       const h = rect.h * c.h;
       box.style.left = `${c.x + rect.x * c.w}px`;
       box.style.top = `${c.y + rect.y * c.h}px`;
       box.style.width = `${w}px`;
       box.style.height = `${h}px`;
-      box.style.borderRadius = `${shapeRadius(track.shape, w, h)}px`;
+      box.style.borderRadius = `${sampleRadius(sample, w, h)}px`;
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -139,12 +142,9 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
         }
         rect = { ...base, w, h: Math.min(h, hMax) };
       }
-      liveRef.current = { t: drag.t, rect };
       ctxRef.current.applyLive(() => ops.upsertCameraKeyframe(drag.from, drag.t, { rect }));
     };
     const onUp = () => {
-      // `liveRef` deliberately survives: the rAF keeps showing the dropped
-      // rect until the playhead moves off `drag.t`.
       ctxRef.current.commit(drag.from);
       setDrag(null);
     };
@@ -169,17 +169,18 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
     const r = layer.getBoundingClientRect();
     const c = contentRect(r.width, r.height, frame);
     const t = timeRef.current;
-    const rect = cameraAt(track, t).rect;
-    liveRef.current = { t, rect };
+    const sample = cameraAt(track, t);
     setDrag({
       kind,
       t,
       from: ctx.edits,
       startX: e.clientX,
       startY: e.clientY,
-      rect,
+      rect: sample.rect,
       content: { x: r.left + c.x, y: r.top + c.y, w: c.w, h: c.h },
-      shape: track.shape,
+      // The shape in force at `t`, which is what a resize must keep square /
+      // 16:9 / whatever — not the track-wide default.
+      shape: sample.shape,
     });
   };
 

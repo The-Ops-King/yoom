@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { formatElapsed } from "@/components/recorder/preview-stage";
-import { MAX_CAMERA_OFFSET_MS, type CameraTrack, type Rect, type VideoEdits } from "@/lib/edits";
+import {
+  MAX_CAMERA_OFFSET_MS,
+  type CameraKeyframe,
+  type CameraMode,
+  type Rect,
+  type VideoEdits,
+} from "@/lib/edits";
 import { bubbleHeightFor, cameraAt } from "@/lib/editor/camera-track";
 import * as ops from "@/lib/editor/edit-ops";
 import { SIZE_FRACTION } from "@/lib/recording/geometry";
@@ -29,6 +35,12 @@ const SIZES: { id: BubbleSize; label: string }[] = [
   { id: "medium", label: "M" },
   { id: "large", label: "L" },
 ];
+
+const MODE_LABEL: Record<CameraMode, string> = {
+  bubble: "bubble",
+  full: "full screen",
+  hidden: "hidden",
+};
 
 const fmt = (t: number) => `${t.toFixed(1)}s`;
 
@@ -71,33 +83,51 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
   const aspect = box.h > 0 ? box.w / box.h : 16 / 9;
   const sample = cameraAt(track, player.time);
 
-  /** Re-derive every keyframe's `h` so the pixel box keeps the new shape. */
+  /**
+   * Every "at the playhead" control writes one keyframe at `t` so the change
+   * animates in and is visible immediately (`cameraAt` settles *at* `t`).
+   */
+  const atPlayhead = (patch: Partial<Omit<CameraKeyframe, "t">>) => {
+    const t = player.timeRef.current;
+    ctx.apply((e) => ops.upsertCameraKeyframe(e, t, patch));
+  };
+
+  /** Shape is per-keyframe: the bubble morphs into it at the playhead. */
   const setShape = (shape: BubbleShape) => {
-    ctx.apply((e) => {
-      const cur = e.camera;
-      if (!cur) return e;
-      const next: CameraTrack = {
-        ...cur,
-        shape,
-        keyframes: cur.keyframes.map((k) => {
-          const h = Math.min(1, bubbleHeightFor(shape, k.rect.w, aspect));
-          return { ...k, rect: refit(k.rect, k.rect.w, h) };
-        }),
-      };
-      return ops.setCamera(e, next);
-    });
+    const t = player.timeRef.current;
+    const cur = cameraAt(track, t);
+    // Re-derive `h` for the new shape so the pixel box stays right (a circle
+    // is square in pixels, `rounded` follows the camera aspect, and so on).
+    const h = Math.min(1, bubbleHeightFor(shape, cur.rect.w, aspect));
+    ctx.apply((e) => ops.upsertCameraKeyframe(e, t, { shape, rect: refit(cur.rect, cur.rect.w, h) }));
   };
 
   const setSize = (size: BubbleSize) => {
     const t = player.timeRef.current;
-    const base = cameraAt(track, t).rect;
+    const cur = cameraAt(track, t);
     const w = SIZE_FRACTION[size];
-    const h = Math.min(1, bubbleHeightFor(track.shape, w, aspect));
-    ctx.apply((e) => ops.upsertCameraKeyframe(e, t, { mode: "bubble", rect: refit(base, w, h) }));
+    const h = Math.min(1, bubbleHeightFor(cur.shape, w, aspect));
+    ctx.apply((e) => ops.upsertCameraKeyframe(e, t, { mode: "bubble", rect: refit(cur.rect, w, h) }));
   };
 
-  const setMode = (mode: "bubble" | "full") => {
-    ctx.apply((e) => ops.upsertCameraKeyframe(e, player.timeRef.current, { mode }));
+  const setMode = (mode: CameraMode) => atPlayhead({ mode });
+
+  /**
+   * Un-hiding restores whatever the camera was doing before it was hidden —
+   * the last non-hidden keyframe at or before the playhead, else a bubble.
+   */
+  const toggleHidden = () => {
+    if (sample.mode !== "hidden") {
+      setMode("hidden");
+      return;
+    }
+    const t = player.timeRef.current;
+    let restored: CameraMode = "bubble";
+    for (const k of track.keyframes) {
+      if (k.t > t) break;
+      if (k.mode !== "hidden") restored = k.mode;
+    }
+    setMode(restored);
   };
 
   const offset = edits.cameraOffsetMs ?? 0;
@@ -105,14 +135,14 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
   return (
     <div className="space-y-3">
       <div className="space-y-1">
-        <span className="text-[11px] uppercase tracking-wider text-muted-dim">Shape</span>
+        <span className="text-[11px] uppercase tracking-wider text-muted-dim">Shape at the playhead</span>
         <div className="flex flex-wrap gap-1.5">
           {SHAPES.map((s) => (
             <button
               key={s.id}
               type="button"
-              aria-pressed={track.shape === s.id}
-              className={track.shape === s.id ? btnOn : btn}
+              aria-pressed={sample.shape === s.id}
+              className={sample.shape === s.id ? btnOn : btn}
               onClick={() => setShape(s.id)}
             >
               {s.label}
@@ -152,6 +182,14 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
           >
             Full screen
           </button>
+          <button
+            type="button"
+            aria-pressed={sample.mode === "hidden"}
+            className={sample.mode === "hidden" ? btnOn : btn}
+            onClick={toggleHidden}
+          >
+            {sample.mode === "hidden" ? "Show camera" : "Hide camera"}
+          </button>
           {SIZES.map((s) => (
             <button
               key={s.id}
@@ -184,7 +222,8 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
                   ctx.selected?.kind === "keyframe" && ctx.selected.index === i ? "text-foreground" : "text-muted"
                 }`}
               >
-                {fmt(k.t)} · {k.mode === "full" ? "full screen" : "bubble"}
+                {fmt(k.t)} · {MODE_LABEL[k.mode]}
+                {k.mode === "bubble" && k.shape ? ` · ${k.shape}` : ""}
               </button>
               <button
                 type="button"

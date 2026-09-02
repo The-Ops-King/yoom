@@ -93,11 +93,16 @@ collapsible panel and only one is open at a time.
    bands; clicking one selects it, `Delete` removes it. Markers render as ticks; a
    marker's context menu offers "cut 2 s before / after" shortcuts.
 2. **Camera** (hidden in camera-only or screen-only mode). Shape (circle, rounded,
-   square), mirror, and the keyframe list. Dragging the bubble on the preview moves
-   it; dragging a corner handle resizes it; a **Full screen** toggle sets `mode`.
-   Any change at time `t` upserts a keyframe at `t`. Between keyframes, `rect` is
-   interpolated with `lerpRect` + `easeInOutCubic` over `BUBBLE_ANIM_MS` (300 ms)
-   starting at the later keyframe's `t`; `mode` switches with a 300 ms cross-fade.
+   square, portrait), mirror, and the keyframe list. Dragging the bubble on the
+   preview moves it; dragging a corner handle resizes it; **Full screen** and
+   **Hide camera** set `mode` (`"bubble" | "full" | "hidden"`); the shape buttons
+   and S/M/L set the shape and width. Any change at time `t` upserts a keyframe
+   at `t`. A keyframe means "be in this state **at** `t`": its eased transition
+   occupies `[t - 0.3 s, t]` (`lerpRect` + `easeInOutCubic`, with `mode` and
+   `shape` cross-fading over the same window), so an edit made at the playhead is
+   visible at the playhead. The `t = 0` keyframe has no transition. `shape` is
+   per-keyframe and optional; `track.shape` is the default for keyframes without
+   one.
    Keyframes render as diamonds on a camera lane; drag to move in time, `Delete`
    removes (the `t = 0` keyframe cannot be removed). A **Sync** slider (±500 ms)
    adjusts `cameraOffsetMs`.
@@ -142,11 +147,11 @@ upload completes or Discard.
 field is optional so existing rows parse unchanged.
 
 ```ts
-export type CameraMode = "bubble" | "full";
-export type CameraKeyframe = { t: number; mode: CameraMode; rect: Rect };
+export type CameraMode = "bubble" | "full" | "hidden";
+export type CameraKeyframe = { t: number; mode: CameraMode; rect: Rect; shape?: BubbleShape };
 
 export type CameraTrack = {
-  shape: BubbleShape;          // "circle" | "rounded" | "square"
+  shape: BubbleShape;          // default for keyframes with no `shape` of their own
   mirror: boolean;
   keyframes: CameraKeyframe[]; // sorted by t, first is t = 0, ≤ 64
 };
