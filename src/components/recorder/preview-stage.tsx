@@ -8,6 +8,8 @@ interface PreviewStageProps {
   mode: RecordingMode;
   status: string;
   elapsedMs: number;
+  /** Flashes the REC chip for ~300 ms when a marker is dropped. */
+  markFlash?: boolean;
   canvasRef: RefObject<HTMLCanvasElement | null>;
   screenVideoRef: RefObject<HTMLVideoElement | null>;
   bubble: BubbleConfig;
@@ -31,6 +33,7 @@ export function PreviewStage({
   mode,
   status,
   elapsedMs,
+  markFlash = false,
   canvasRef,
   screenVideoRef,
   bubble,
@@ -86,7 +89,13 @@ export function PreviewStage({
         recorded frames. The overlay seam exists for cursor/annotation layers.
       */}
       {live && (
-        <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-full border border-border bg-background/80 px-3 py-1.5 backdrop-blur">
+        <div
+          className={`pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-full border bg-background/80 px-3 py-1.5 backdrop-blur transition-all duration-150 ${
+            markFlash
+              ? "scale-105 border-accent bg-accent/20 shadow-lg shadow-accent/30"
+              : "border-border"
+          }`}
+        >
           <span
             className={`h-2 w-2 rounded-full ${
               status === "paused" ? "bg-muted" : "bg-accent recording-dot"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { YoomLogo } from "./logo";
 import { DeviceSelector } from "./device-selector";
 import { AudioControls } from "./recorder/audio-controls";
@@ -25,6 +25,24 @@ export function Recorder() {
     actions,
   } = useRecorder();
   const [copied, setCopied] = useState(false);
+  const [markFlash, setMarkFlash] = useState(false);
+  const markFlashTimer = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (markFlashTimer.current) window.clearTimeout(markFlashTimer.current);
+    },
+    [],
+  );
+
+  // The marker itself is reducer state; this is only the acknowledgement, so
+  // it lives here rather than in the machine.
+  function mark() {
+    actions.mark();
+    if (markFlashTimer.current) window.clearTimeout(markFlashTimer.current);
+    setMarkFlash(true);
+    markFlashTimer.current = window.setTimeout(() => setMarkFlash(false), 300);
+  }
 
   const live = state.status === "recording" || state.status === "paused";
   // Restart and Cancel are reachable from the countdown too; Pause and Stop
@@ -120,6 +138,7 @@ export function Recorder() {
         mode={state.mode}
         status={state.status}
         elapsedMs={state.elapsedMs}
+        markFlash={markFlash}
         canvasRef={canvasRef}
         screenVideoRef={screenVideoRef}
         bubble={state.bubble}
@@ -250,6 +269,31 @@ export function Recorder() {
                     {state.status === "paused" ? "Resume" : "Pause"}
                   </button>
                 )}
+                {state.status === "recording" && (
+                  <button
+                    type="button"
+                    onClick={mark}
+                    title="Drop a marker (⌘⇧M)"
+                    aria-label="Drop a marker"
+                    className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-4 py-2.5 text-sm font-medium text-foreground transition-all hover:brightness-110"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                      <path
+                        d="M4 2v12M4 2.75h7.5l-1.75 2.5 1.75 2.5H4"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    Mark
+                    {state.markers.length > 0 && (
+                      <span className="font-mono text-xs tabular-nums text-muted">
+                        {state.markers.length}
+                      </span>
+                    )}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={actions.restartNow}
@@ -301,7 +345,7 @@ export function Recorder() {
 
           {(state.status === "setup" || capturing) && (
             <p className="text-center text-[11px] text-muted-dim">
-              ⌘⇧L start / stop · ⌘⇧P pause · ⌘⇧K restart · ⌘⇧X cancel
+              ⌘⇧L start / stop · ⌘⇧P pause · ⌘⇧M mark · ⌘⇧K restart · ⌘⇧X cancel
             </p>
           )}
         </div>

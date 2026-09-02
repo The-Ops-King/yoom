@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { appUrl } from "@/lib/env";
 import { createResumableSession } from "@/lib/google-drive";
+import { newSlug } from "@/lib/slug";
 
 const MAX_SIZE_BYTES = 5 * 1024 * 1024 * 1024;
 
@@ -34,7 +35,11 @@ export async function POST(request: Request) {
       sizeBytes,
       origin,
     });
-    return NextResponse.json({ sessionUri });
+    // Reserve a slug so the client can put the share link on the clipboard
+    // inside the click's transient activation, long before the upload
+    // finishes. Nothing is written yet — /api/upload/complete prefers this
+    // slug and only mints another one if it has collided by then.
+    return NextResponse.json({ sessionUri, slug: newSlug() });
   } catch (error) {
     console.error("createResumableSession failed", error);
     return NextResponse.json(

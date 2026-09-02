@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { DbError, UNIQUE_VIOLATION, insertVideo } from "@/lib/db";
 import { getFileMeta } from "@/lib/google-drive";
-import { newSlug } from "@/lib/slug";
+import { newSlug, SLUG_RE } from "@/lib/slug";
+import { parseEdits, type Marker } from "@/lib/edits";
 import { shareUrl } from "@/lib/share";
+
+const MAX_MARKERS = 500;
 
 function defaultTitle(): string {
   return `Recording — ${new Intl.DateTimeFormat("en-US", {
@@ -18,6 +21,8 @@ export async function POST(request: Request) {
     durationMs?: number;
     width?: number;
     height?: number;
+    slug?: string;
+    markers?: unknown;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -43,13 +48,38 @@ export async function POST(request: Request) {
   }
 
   const title = body.title?.trim() || defaultTitle();
+
+  // The slug the client reserved from /api/upload and already copied to the
+  // user's clipboard. Untrusted input, so it still has to pass SLUG_RE.
+  const reserved =
+    typeof body.slug === "string" && SLUG_RE.test(body.slug) ? body.slug : null;
+
+  // Recorder marks. `parseEdits` is the single normaliser for the jsonb shape;
+  // cap the list so a hostile client cannot stuff the column.
+  const markers: Marker[] = Array.isArray(body.markers)
+    ? body.markers.slice(0, MAX_MARKERS).flatMap((raw) => {
+        if (typeof raw !== "object" || raw === null) return [];
+        const t = Number((raw as { t?: unknown }).t);
+        return Number.isFinite(t) && t >= 0 ? [{ t }] : [];
+      })
+    : [];
+  const edits = parseEdits({
+    version: 1,
+    cuts: [],
+    crop: null,
+    zooms: [],
+    overlays: [],
+    markers,
+  });
   const toInt = (value: unknown): number | null => {
     const n = Number(value);
     return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
   };
 
   for (let attempt = 0; attempt < 5; attempt++) {
-    const slug = newSlug();
+    // Prefer the reserved slug on the first attempt so the link already on the
+    // clipboard stays correct; a genuine collision falls back to a fresh one.
+    const slug = attempt === 0 && reserved ? reserved : newSlug();
     try {
       const video = await insertVideo({
         slug,
@@ -60,6 +90,7 @@ export async function POST(request: Request) {
         duration_ms: toInt(body.durationMs),
         width: toInt(body.width),
         height: toInt(body.height),
+        edits,
       });
       return NextResponse.json({
         id: video.id,

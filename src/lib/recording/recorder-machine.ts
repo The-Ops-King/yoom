@@ -1,3 +1,4 @@
+import type { Marker } from "@/lib/edits";
 import { DEFAULT_SETTINGS } from "./settings";
 import type {
   BubbleConfig,
@@ -46,6 +47,14 @@ export interface RecorderState {
   countdown: number;
   elapsedMs: number;
 
+  /**
+   * Timestamps the user dropped mid-take (⌘⇧M / the Mark button), in seconds
+   * from the start of the recording. They survive `stopping` and `review` so
+   * the upload can persist them into `videos.edits.markers`; every transition
+   * that throws the take away clears them.
+   */
+  markers: Marker[];
+
   // result
   blob: Blob | null;
   durationMs: number;
@@ -79,6 +88,7 @@ export type RecorderEvent =
   | { type: "COUNTDOWN_TICK" }
   | { type: "SKIP_COUNTDOWN" }
   | { type: "TICK"; elapsedMs: number }
+  | { type: "MARK" }
   | { type: "PAUSE" }
   | { type: "RESUME" }
   | { type: "STOP" }
@@ -124,6 +134,7 @@ export function initialRecorderState(
     hasCamera: false,
     countdown: COUNTDOWN_SECONDS,
     elapsedMs: 0,
+    markers: [],
     blob: null,
     durationMs: 0,
     width: null,
@@ -223,6 +234,7 @@ export function recorderReducer(
         status: "countdown",
         countdown: COUNTDOWN_SECONDS,
         elapsedMs: 0,
+        markers: [],
         notice: "",
       };
 
@@ -240,6 +252,10 @@ export function recorderReducer(
     case "TICK":
       if (state.status !== "recording") return state;
       return { ...state, elapsedMs: event.elapsedMs };
+
+    case "MARK":
+      if (state.status !== "recording") return state;
+      return { ...state, markers: [...state.markers, { t: state.elapsedMs / 1000 }] };
 
     case "PAUSE":
       if (state.status !== "recording") return state;
@@ -268,6 +284,7 @@ export function recorderReducer(
         status: "countdown",
         countdown: COUNTDOWN_SECONDS,
         elapsedMs: 0,
+        markers: [],
         blob: null,
         error: "",
       };
@@ -283,6 +300,7 @@ export function recorderReducer(
         status: "recording",
         countdown: 0,
         elapsedMs: 0,
+        markers: [],
         blob: null,
         error: "",
       };
@@ -295,6 +313,7 @@ export function recorderReducer(
         status: "setup",
         countdown: COUNTDOWN_SECONDS,
         elapsedMs: 0,
+        markers: [],
         blob: null,
         durationMs: 0,
         error: "",
@@ -331,6 +350,7 @@ export function recorderReducer(
         blob: null,
         durationMs: 0,
         elapsedMs: 0,
+        markers: [],
         error: "",
         notice: "",
       };

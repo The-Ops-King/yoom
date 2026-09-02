@@ -53,6 +53,8 @@ export type NewVideo = {
   duration_ms: number | null;
   width: number | null;
   height: number | null;
+  /** Optional edit decision list; omitted, the column's `{}` default applies. */
+  edits?: VideoEdits;
 };
 
 export type NewViewSession = {
@@ -127,6 +129,7 @@ export async function insertVideo(input: NewVideo): Promise<Video> {
       duration_ms: input.duration_ms,
       width: input.width,
       height: input.height,
+      ...(input.edits ? { edits: input.edits } : {}),
     })
     .select("*")
     .single()) as QueryResult<Video>;

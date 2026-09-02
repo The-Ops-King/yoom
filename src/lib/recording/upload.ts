@@ -1,3 +1,5 @@
+import type { Marker } from "@/lib/edits";
+import { shareUrl } from "@/lib/share";
 import { uploadToDrive } from "@/lib/upload-client";
 
 export interface UploadRecordingInput {
@@ -8,6 +10,15 @@ export interface UploadRecordingInput {
   /** JPEG grabbed ~1s into the recording; a missing thumbnail is not fatal. */
   thumbnail: Blob | null;
   onProgress: (percent: number) => void;
+  /** Recorder-placed timestamps (seconds) persisted into `videos.edits`. */
+  markers?: Marker[];
+  /**
+   * Called with the share URL for the slug `/api/upload` reserved, right after
+   * that round-trip and before a single byte goes to Drive. The recorder copies
+   * it to the clipboard there, while the click's transient activation is still
+   * alive — by the time the upload finishes it is long gone.
+   */
+  onSlug?: (url: string) => void;
   signal?: AbortSignal;
 }
 
@@ -43,7 +54,17 @@ function extensionFor(mimeType: string): string {
 export async function uploadRecording(
   input: UploadRecordingInput,
 ): Promise<UploadRecordingResult> {
-  const { blob, durationMs, width, height, thumbnail, onProgress, signal } = input;
+  const {
+    blob,
+    durationMs,
+    width,
+    height,
+    thumbnail,
+    onProgress,
+    markers,
+    onSlug,
+    signal,
+  } = input;
 
   if (blob.size === 0) {
     throw new Error("Recording captured no data. Please try again.");
@@ -64,7 +85,20 @@ export async function uploadRecording(
   });
   if (!sessionRes.ok) throw new Error("Failed to start the upload");
 
-  const { sessionUri } = (await sessionRes.json()) as { sessionUri: string };
+  const { sessionUri, slug: reservedSlug } = (await sessionRes.json()) as {
+    sessionUri: string;
+    slug?: string;
+  };
+
+  if (reservedSlug && onSlug) {
+    // A failing callback (clipboard denied, insecure context) must never cost
+    // the user their recording.
+    try {
+      onSlug(shareUrl(reservedSlug));
+    } catch {
+      // ignored
+    }
+  }
 
   const { id: driveFileId } = await uploadToDrive(blob, sessionUri, onProgress);
 
@@ -77,6 +111,8 @@ export async function uploadRecording(
       width,
       height,
       title: defaultRecordingTitle(now),
+      slug: reservedSlug,
+      markers,
     }),
     signal,
   });

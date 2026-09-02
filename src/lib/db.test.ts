@@ -140,6 +140,51 @@ describe("insertVideo", () => {
     );
   });
 
+  it("passes an edits object straight through when given one", async () => {
+    const builder = chain({ data: VIDEO, error: null });
+    from.mockReturnValue(builder);
+
+    const edits = {
+      version: 1 as const,
+      cuts: [],
+      crop: null,
+      zooms: [],
+      overlays: [],
+      markers: [{ t: 2.5 }],
+    };
+    await insertVideo({
+      slug: "abc12345",
+      title: "Demo",
+      drive_file_id: "drive-1",
+      mime: "video/webm",
+      size_bytes: null,
+      duration_ms: null,
+      width: null,
+      height: null,
+      edits,
+    });
+    expect(builder.insert).toHaveBeenCalledWith(expect.objectContaining({ edits }));
+  });
+
+  it("omits edits entirely when none is supplied, so the column default applies", async () => {
+    const builder = chain({ data: VIDEO, error: null });
+    from.mockReturnValue(builder);
+
+    await insertVideo({
+      slug: "abc12345",
+      title: "Demo",
+      drive_file_id: "drive-1",
+      mime: "video/webm",
+      size_bytes: null,
+      duration_ms: null,
+      width: null,
+      height: null,
+    });
+    expect(builder.insert).toHaveBeenCalledWith(
+      expect.not.objectContaining({ edits: expect.anything() }),
+    );
+  });
+
   it("reports a unique violation as a typed error code", async () => {
     from.mockReturnValue(
       chain({ data: null, error: { code: "23505", message: "duplicate key" } }),

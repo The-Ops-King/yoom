@@ -460,3 +460,79 @@ describe("unknown transitions", () => {
     expect(recorderReducer(s, { type: "COUNTDOWN_TICK" })).toBe(s);
   });
 });
+
+describe("markers", () => {
+  const setup = () => run(init(), [{ type: "ACQUIRE" }, ACQUIRED]);
+  const live = (extra: RecorderEvent[] = []) =>
+    run(setup(), [{ type: "START" }, { type: "SKIP_COUNTDOWN" }, ...extra]);
+
+  it("starts with no markers", () => {
+    expect(init().markers).toEqual([]);
+  });
+
+  it("MARK appends the current elapsed time in seconds", () => {
+    const s = run(live(), [
+      { type: "TICK", elapsedMs: 4200 },
+      { type: "MARK" },
+      { type: "TICK", elapsedMs: 9000 },
+      { type: "MARK" },
+    ]);
+    expect(s.markers).toEqual([{ t: 4.2 }, { t: 9 }]);
+  });
+
+  it("MARK only fires while recording", () => {
+    for (const state of [
+      init(),
+      setup(),
+      run(setup(), [{ type: "START" }]), // countdown
+      live([{ type: "PAUSE" }]), // paused
+      live([{ type: "STOP" }]), // stopping
+    ]) {
+      expect(recorderReducer(state, { type: "MARK" })).toBe(state);
+    }
+  });
+
+  it("keeps markers through stopping, review and upload so they get saved", () => {
+    const marked = run(live(), [{ type: "TICK", elapsedMs: 1000 }, { type: "MARK" }]);
+    const reviewing = run(marked, [
+      { type: "STOP" },
+      {
+        type: "BLOB_READY",
+        blob: new Blob(["x"]),
+        durationMs: 1000,
+        width: 100,
+        height: 50,
+      },
+    ]);
+    expect(reviewing.status).toBe("review");
+    expect(reviewing.markers).toEqual([{ t: 1 }]);
+    const uploading = recorderReducer(reviewing, { type: "UPLOAD" });
+    expect(uploading.markers).toEqual([{ t: 1 }]);
+  });
+
+  it("clears markers on every transition that discards the take", () => {
+    const marked = run(live(), [{ type: "TICK", elapsedMs: 1000 }, { type: "MARK" }]);
+    expect(recorderReducer(marked, { type: "RESTART" }).markers).toEqual([]);
+    expect(recorderReducer(marked, { type: "RESTART_NOW" }).markers).toEqual([]);
+    expect(recorderReducer(marked, { type: "CANCEL" }).markers).toEqual([]);
+    expect(recorderReducer(marked, { type: "RESET" }).markers).toEqual([]);
+
+    const reviewing = run(marked, [
+      { type: "STOP" },
+      {
+        type: "BLOB_READY",
+        blob: new Blob(["x"]),
+        durationMs: 1000,
+        width: null,
+        height: null,
+      },
+    ]);
+    expect(recorderReducer(reviewing, { type: "DISCARD" }).markers).toEqual([]);
+  });
+
+  it("a new take starts with a clean marker list", () => {
+    const marked = run(live(), [{ type: "TICK", elapsedMs: 1000 }, { type: "MARK" }]);
+    const back = run(marked, [{ type: "CANCEL" }, { type: "START" }]);
+    expect(back.markers).toEqual([]);
+  });
+});

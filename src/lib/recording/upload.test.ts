@@ -40,7 +40,9 @@ describe("defaultRecordingTitle", () => {
 describe("uploadRecording", () => {
   it("walks the three-step flow and returns the share URL", async () => {
     fetchMock
-      .mockResolvedValueOnce(jsonResponse({ sessionUri: "https://drive/session" }))
+      .mockResolvedValueOnce(
+        jsonResponse({ sessionUri: "https://drive/session", slug: "abc12345" }),
+      )
       .mockResolvedValueOnce(
         jsonResponse({ id: "vid-1", slug: "abc12345", url: "https://jtylerray.com/v/abc12345" }),
       );
@@ -80,6 +82,85 @@ describe("uploadRecording", () => {
       height: 1080,
     });
     expect(JSON.parse(secondInit.body).title).toContain("Recording — ");
+  });
+
+  it("reports the reserved slug before the first chunk PUT and forwards it", async () => {
+    const order: string[] = [];
+    uploadToDrive.mockImplementation(async () => {
+      order.push("put");
+      return { id: "drive-1" };
+    });
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({ sessionUri: "https://drive/session", slug: "abc12345" }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ id: "vid-1", slug: "abc12345", url: "https://jtylerray.com/v/abc12345" }),
+      );
+
+    let copiedUrl = "";
+    const onSlug = vi.fn((url: string) => {
+      copiedUrl = url;
+      order.push("onSlug");
+    });
+
+    await uploadRecording({
+      blob,
+      durationMs: 1,
+      width: null,
+      height: null,
+      thumbnail: null,
+      onProgress: () => {},
+      onSlug,
+      markers: [{ t: 1.5 }],
+    });
+
+    expect(onSlug).toHaveBeenCalledTimes(1);
+    expect(copiedUrl).toMatch(/\/v\/abc12345$/);
+    expect(order).toEqual(["onSlug", "put"]);
+
+    const completeBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(completeBody.slug).toBe("abc12345");
+    expect(completeBody.markers).toEqual([{ t: 1.5 }]);
+  });
+
+  it("uploads fine when /api/upload reserves no slug", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ sessionUri: "s" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "v", slug: "s1", url: "u" }));
+
+    const onSlug = vi.fn();
+    await uploadRecording({
+      blob,
+      durationMs: 1,
+      width: null,
+      height: null,
+      thumbnail: null,
+      onProgress: () => {},
+      onSlug,
+    });
+
+    expect(onSlug).not.toHaveBeenCalled();
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).slug).toBeUndefined();
+  });
+
+  it("does not let an onSlug throw break the upload", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ sessionUri: "s", slug: "abc12345" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "v", slug: "abc12345", url: "u" }));
+
+    const result = await uploadRecording({
+      blob,
+      durationMs: 1,
+      width: null,
+      height: null,
+      thumbnail: null,
+      onProgress: () => {},
+      onSlug: () => {
+        throw new Error("clipboard denied");
+      },
+    });
+    expect(result.id).toBe("v");
   });
 
   it("posts the thumbnail after completing and tolerates its failure", async () => {

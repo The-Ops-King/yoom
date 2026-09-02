@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import fixWebmDuration from "fix-webm-duration";
 import { AudioMixer } from "./audio-mixer";
 import { Compositor } from "./compositor";
@@ -92,6 +93,8 @@ export interface UseRecorderResult {
     restartNow(): void;
     /** Throw the take away and go back to setup. Trash button / ⌘⇧X. */
     cancel(): void;
+    /** Drop a timestamp marker at the current elapsed time. Mark button / ⌘⇧M. */
+    mark(): void;
     discard(): void;
     upload(): void;
     reset(): void;
@@ -133,8 +136,13 @@ export function useRecorder(): UseRecorderResult {
     cameraHeight: 0,
   });
 
+  const router = useRouter();
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
+  // Set inside `onSlug` (see `upload` below): whether the share link actually
+  // made it onto the clipboard, which decides the `?new=1` toast.
+  const copiedRef = useRef(false);
 
   const screenStreamRef = useRef<MediaStream | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
@@ -645,6 +653,8 @@ export function useRecorder(): UseRecorderResult {
     // screen with no capture behind it.
     teardown();
     dispatch({ type: "STREAM_ENDED" });
+    copiedRef.current = false;
+    let reservedSlug = "";
     try {
       const result = await uploadRecording({
         blob,
@@ -652,17 +662,43 @@ export function useRecorder(): UseRecorderResult {
         width: current.width,
         height: current.height,
         thumbnail: thumbnailRef.current,
+        markers: current.markers,
         onProgress: (percent) => dispatch({ type: "UPLOAD_PROGRESS", percent }),
+        // Loom behaviour: the link must be on the clipboard before the page
+        // changes. `navigator.clipboard.writeText` only works inside the
+        // click's transient activation (~5 s), and a real upload takes far
+        // longer than that — so the server reserves the slug up front and we
+        // copy here, one round-trip after the click.
+        onSlug: (url) => {
+          reservedSlug = url.slice(url.lastIndexOf("/") + 1);
+          navigator.clipboard
+            .writeText(url)
+            .then(() => {
+              copiedRef.current = true;
+            })
+            .catch(() => {
+              // Insecure context or denied permission; the detail page still
+              // shows the link.
+            });
+        },
       });
-      // Phase 3 replaces this with router.push('/library/'+id+'?new=1').
+      if (reservedSlug && result.slug !== reservedSlug) {
+        // A slug collision made the server mint a different one, so whatever
+        // is on the clipboard points at the wrong video.
+        console.warn(
+          `Reserved slug ${reservedSlug} was taken; saved as ${result.slug}. The copied link is stale.`,
+        );
+        copiedRef.current = false;
+      }
       dispatch({ type: "UPLOAD_DONE", videoId: result.id, shareUrl: result.url });
+      router.push(`/library/${result.id}${copiedRef.current ? "?new=1" : ""}`);
     } catch (err) {
       dispatch({
         type: "UPLOAD_FAILED",
         error: err instanceof Error ? err.message : "Upload failed. Please try again.",
       });
     }
-  }, [teardown]);
+  }, [router, teardown]);
 
   // ---------- discard / reset ----------
 
@@ -725,7 +761,7 @@ export function useRecorder(): UseRecorderResult {
   // ---------- hotkeys ----------
 
   // Cmd/Ctrl+Shift+L starts and stops (Loom's default). Cmd/Ctrl+Shift+P
-  // pauses and resumes, K restarts immediately, X cancels. `R` is deliberately
+  // pauses and resumes, M drops a marker, K restarts immediately, X cancels. `R` is deliberately
   // avoided: it is Chrome's hard reload, and a missed chord there destroys the
   // recording in progress.
   useEffect(() => {
@@ -745,6 +781,10 @@ export function useRecorder(): UseRecorderResult {
         e.preventDefault();
         if (status === "recording") dispatch({ type: "PAUSE" });
         else if (status === "paused") dispatch({ type: "RESUME" });
+      } else if (key === "m") {
+        if (stateRef.current.status !== "recording") return;
+        e.preventDefault();
+        dispatch({ type: "MARK" });
       } else if (key === "k") {
         if (status !== "countdown" && status !== "recording" && status !== "paused") return;
         e.preventDefault();
@@ -849,6 +889,7 @@ export function useRecorder(): UseRecorderResult {
         discardRecorder();
         dispatch({ type: "CANCEL" });
       },
+      mark: () => dispatch({ type: "MARK" }),
       discard,
       upload: () => void upload(),
       reset,
