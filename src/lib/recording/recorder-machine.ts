@@ -19,7 +19,8 @@ export type RecorderStatus =
   | "recording"
   | "paused"
   | "stopping"
-  | "review"
+  | "staging"
+  | "rendering"
   | "uploading"
   | "done"
   | "error";
@@ -49,7 +50,7 @@ export interface RecorderState {
 
   /**
    * Timestamps the user dropped mid-take (⌘⇧M / the Mark button), in seconds
-   * from the start of the recording. They survive `stopping` and `review` so
+   * from the start of the recording. They survive `stopping` and `staging` so
    * the upload can persist them into `videos.edits.markers`; every transition
    * that throws the take away clears them.
    */
@@ -57,9 +58,14 @@ export interface RecorderState {
 
   // result
   blob: Blob | null;
+  cameraBlob: Blob | null;
+  cameraOffsetMs: number;
   durationMs: number;
   width: number | null;
   height: number | null;
+
+  // render
+  renderProgress: number;
 
   // upload
   uploadProgress: number;
@@ -100,12 +106,17 @@ export type RecorderEvent =
   | {
       type: "BLOB_READY";
       blob: Blob;
+      cameraBlob: Blob | null;
+      cameraOffsetMs: number;
       durationMs: number;
       width: number | null;
       height: number | null;
     }
   | { type: "DISCARD" }
-  | { type: "UPLOAD" }
+  | { type: "RENDER" }
+  | { type: "RENDER_PROGRESS"; percent: number }
+  | { type: "RENDER_DONE" }
+  | { type: "RENDER_FAILED"; error: string }
   | { type: "UPLOAD_PROGRESS"; percent: number }
   | { type: "UPLOAD_DONE"; videoId: string; shareUrl: string }
   | { type: "UPLOAD_FAILED"; error: string }
@@ -136,9 +147,12 @@ export function initialRecorderState(
     elapsedMs: 0,
     markers: [],
     blob: null,
+    cameraBlob: null,
+    cameraOffsetMs: 0,
     durationMs: 0,
     width: null,
     height: null,
+    renderProgress: 0,
     uploadProgress: 0,
     videoId: "",
     shareUrl: "",
@@ -224,6 +238,7 @@ export function recorderReducer(
         status: "error",
         error: event.error,
         blob: null,
+        cameraBlob: null,
         streamsAlive: false,
       };
 
@@ -335,19 +350,25 @@ export function recorderReducer(
       if (state.status !== "stopping") return state;
       return {
         ...state,
-        status: "review",
+        status: "staging",
         blob: event.blob,
+        cameraBlob: event.cameraBlob,
+        cameraOffsetMs: event.cameraOffsetMs,
         durationMs: event.durationMs,
         width: event.width,
         height: event.height,
+        renderProgress: 0,
+        error: "",
       };
 
     case "DISCARD":
-      if (state.status !== "review") return state;
+      if (state.status !== "staging") return state;
       return {
         ...state,
         status: state.streamsAlive ? "setup" : "idle",
         blob: null,
+        cameraBlob: null,
+        cameraOffsetMs: 0,
         durationMs: 0,
         elapsedMs: 0,
         markers: [],
@@ -355,8 +376,20 @@ export function recorderReducer(
         notice: "",
       };
 
-    case "UPLOAD":
-      if (state.status !== "review") return state;
+    case "RENDER":
+      if (state.status !== "staging") return state;
+      return { ...state, status: "rendering", renderProgress: 0, error: "" };
+
+    case "RENDER_PROGRESS":
+      if (state.status !== "rendering") return state;
+      return { ...state, renderProgress: event.percent };
+
+    case "RENDER_FAILED":
+      if (state.status !== "rendering") return state;
+      return { ...state, status: "staging", error: event.error };
+
+    case "RENDER_DONE":
+      if (state.status !== "rendering") return state;
       return { ...state, status: "uploading", uploadProgress: 0, error: "" };
 
     case "UPLOAD_PROGRESS":
@@ -369,6 +402,7 @@ export function recorderReducer(
         ...state,
         status: "done",
         blob: null,
+        cameraBlob: null,
         uploadProgress: 100,
         videoId: event.videoId,
         shareUrl: event.shareUrl,
@@ -376,8 +410,8 @@ export function recorderReducer(
 
     case "UPLOAD_FAILED":
       if (state.status !== "uploading") return state;
-      // Stay on review so the user can retry without losing the recording.
-      return { ...state, status: "review", error: event.error };
+      // Stay on staging so the user can retry without losing the recording.
+      return { ...state, status: "staging", error: event.error };
 
     case "RESET":
       return {

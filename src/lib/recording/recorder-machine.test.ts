@@ -271,23 +271,25 @@ describe("countdown and recording", () => {
     }
   });
 
-  it("CANCEL is a no-op in idle and review", () => {
+  it("CANCEL is a no-op in idle and staging", () => {
     const idle = init();
     expect(recorderReducer(idle, { type: "CANCEL" })).toBe(idle);
-    const review = run(setup(), [
+    const staging = run(setup(), [
       { type: "START" },
       { type: "SKIP_COUNTDOWN" },
       { type: "STOP" },
       {
         type: "BLOB_READY",
         blob: new Blob(["x"]),
+        cameraBlob: null,
+        cameraOffsetMs: 0,
         durationMs: 1000,
         width: 1280,
         height: 720,
       },
     ]);
-    expect(review.status).toBe("review");
-    expect(recorderReducer(review, { type: "CANCEL" })).toBe(review);
+    expect(staging.status).toBe("staging");
+    expect(recorderReducer(staging, { type: "CANCEL" })).toBe(staging);
   });
 });
 
@@ -320,23 +322,26 @@ describe("STREAM_ENDED", () => {
       {
         type: "BLOB_READY",
         blob: new Blob(["x"]),
+        cameraBlob: null,
+        cameraOffsetMs: 0,
         durationMs: 1_000,
         width: 1280,
         height: 720,
       },
-      { type: "UPLOAD" },
+      { type: "RENDER" },
+      { type: "RENDER_DONE" },
       { type: "STREAM_ENDED" },
     ]);
     expect(uploading.status).toBe("uploading");
     expect(uploading.streamsAlive).toBe(false);
 
     const failed = recorderReducer(uploading, { type: "UPLOAD_FAILED", error: "nope" });
-    expect(failed.status).toBe("review");
+    expect(failed.status).toBe("staging");
     expect(recorderReducer(failed, { type: "DISCARD" }).status).toBe("idle");
   });
 });
 
-describe("review, upload and done", () => {
+describe("staging, rendering, upload and done", () => {
   const stopped = () =>
     run(init(), [
       { type: "ACQUIRE" },
@@ -349,44 +354,52 @@ describe("review, upload and done", () => {
 
   const blob = { size: 1234 } as Blob;
 
-  it("BLOB_READY moves to review with the recording metadata", () => {
+  it("BLOB_READY moves to staging with the recording metadata", () => {
     const s = recorderReducer(stopped(), {
       type: "BLOB_READY",
       blob,
+      cameraBlob: null,
+      cameraOffsetMs: 0,
       durationMs: 12_000,
       width: 1920,
       height: 1080,
     });
-    expect(s.status).toBe("review");
+    expect(s.status).toBe("staging");
     expect(s.blob).toBe(blob);
     expect(s.durationMs).toBe(12_000);
     expect(s.width).toBe(1920);
   });
 
   it("DISCARD returns to setup while streams are alive and to idle otherwise", () => {
-    const review = recorderReducer(stopped(), {
+    const staging = recorderReducer(stopped(), {
       type: "BLOB_READY",
       blob,
+      cameraBlob: null,
+      cameraOffsetMs: 0,
       durationMs: 1,
       width: 2,
       height: 3,
     });
-    expect(recorderReducer(review, { type: "DISCARD" }).status).toBe("setup");
-    expect(recorderReducer(review, { type: "DISCARD" }).blob).toBeNull();
+    expect(recorderReducer(staging, { type: "DISCARD" }).status).toBe("setup");
+    expect(recorderReducer(staging, { type: "DISCARD" }).blob).toBeNull();
 
-    const dead = { ...review, streamsAlive: false };
+    const dead = { ...staging, streamsAlive: false };
     expect(recorderReducer(dead, { type: "DISCARD" }).status).toBe("idle");
   });
 
-  it("UPLOAD → UPLOAD_PROGRESS → UPLOAD_DONE", () => {
-    const review = recorderReducer(stopped(), {
+  it("RENDER → RENDER_DONE → UPLOAD_PROGRESS → UPLOAD_DONE", () => {
+    const staging = recorderReducer(stopped(), {
       type: "BLOB_READY",
       blob,
+      cameraBlob: null,
+      cameraOffsetMs: 0,
       durationMs: 1,
       width: 2,
       height: 3,
     });
-    let s = recorderReducer(review, { type: "UPLOAD" });
+    let s = recorderReducer(staging, { type: "RENDER" });
+    expect(s.status).toBe("rendering");
+    s = recorderReducer(s, { type: "RENDER_DONE" });
     expect(s.status).toBe("uploading");
     expect(s.uploadProgress).toBe(0);
     s = recorderReducer(s, { type: "UPLOAD_PROGRESS", percent: 62 });
@@ -401,13 +414,14 @@ describe("review, upload and done", () => {
     expect(s.blob).toBeNull();
   });
 
-  it("UPLOAD_FAILED returns to review with an error so the blob can be retried", () => {
+  it("UPLOAD_FAILED returns to staging with an error so the blob can be retried", () => {
     const uploading = run(stopped(), [
-      { type: "BLOB_READY", blob, durationMs: 1, width: 2, height: 3 },
-      { type: "UPLOAD" },
+      { type: "BLOB_READY", blob, cameraBlob: null, cameraOffsetMs: 0, durationMs: 1, width: 2, height: 3 },
+      { type: "RENDER" },
+      { type: "RENDER_DONE" },
       { type: "UPLOAD_FAILED", error: "network" },
     ]);
-    expect(uploading.status).toBe("review");
+    expect(uploading.status).toBe("staging");
     expect(uploading.error).toBe("network");
     expect(uploading.blob).toBe(blob);
   });
@@ -456,7 +470,7 @@ describe("unknown transitions", () => {
   it("returns the same object reference for a no-op", () => {
     const s = init();
     expect(recorderReducer(s, { type: "PAUSE" })).toBe(s);
-    expect(recorderReducer(s, { type: "UPLOAD" })).toBe(s);
+    expect(recorderReducer(s, { type: "RENDER" })).toBe(s);
     expect(recorderReducer(s, { type: "COUNTDOWN_TICK" })).toBe(s);
   });
 });
@@ -492,21 +506,23 @@ describe("markers", () => {
     }
   });
 
-  it("keeps markers through stopping, review and upload so they get saved", () => {
+  it("keeps markers through stopping, staging, rendering and upload so they get saved", () => {
     const marked = run(live(), [{ type: "TICK", elapsedMs: 1000 }, { type: "MARK" }]);
-    const reviewing = run(marked, [
+    const staging = run(marked, [
       { type: "STOP" },
       {
         type: "BLOB_READY",
         blob: new Blob(["x"]),
+        cameraBlob: null,
+        cameraOffsetMs: 0,
         durationMs: 1000,
         width: 100,
         height: 50,
       },
     ]);
-    expect(reviewing.status).toBe("review");
-    expect(reviewing.markers).toEqual([{ t: 1 }]);
-    const uploading = recorderReducer(reviewing, { type: "UPLOAD" });
+    expect(staging.status).toBe("staging");
+    expect(staging.markers).toEqual([{ t: 1 }]);
+    const uploading = run(staging, [{ type: "RENDER" }, { type: "RENDER_DONE" }]);
     expect(uploading.markers).toEqual([{ t: 1 }]);
   });
 
@@ -517,22 +533,75 @@ describe("markers", () => {
     expect(recorderReducer(marked, { type: "CANCEL" }).markers).toEqual([]);
     expect(recorderReducer(marked, { type: "RESET" }).markers).toEqual([]);
 
-    const reviewing = run(marked, [
+    const staging = run(marked, [
       { type: "STOP" },
       {
         type: "BLOB_READY",
         blob: new Blob(["x"]),
+        cameraBlob: null,
+        cameraOffsetMs: 0,
         durationMs: 1000,
         width: null,
         height: null,
       },
     ]);
-    expect(recorderReducer(reviewing, { type: "DISCARD" }).markers).toEqual([]);
+    expect(recorderReducer(staging, { type: "DISCARD" }).markers).toEqual([]);
   });
 
   it("a new take starts with a clean marker list", () => {
     const marked = run(live(), [{ type: "TICK", elapsedMs: 1000 }, { type: "MARK" }]);
     const back = run(marked, [{ type: "CANCEL" }, { type: "START" }]);
     expect(back.markers).toEqual([]);
+  });
+});
+
+describe("staging and rendering", () => {
+  const blob = new Blob(["x"], { type: "video/webm" });
+  function toStopping() {
+    let s = initialRecorderState();
+    s = recorderReducer(s, { type: "ACQUIRE" });
+    s = recorderReducer(s, { type: "ACQUIRED", surface: "monitor", hasSystemAudio: true, hasCamera: true });
+    s = recorderReducer(s, { type: "START" });
+    s = recorderReducer(s, { type: "SKIP_COUNTDOWN" });
+    s = recorderReducer(s, { type: "STOP" });
+    return s;
+  }
+
+  it("BLOB_READY lands in staging with both blobs and the offset", () => {
+    const s = recorderReducer(toStopping(), {
+      type: "BLOB_READY", blob, cameraBlob: blob, cameraOffsetMs: 40, durationMs: 1000, width: 100, height: 50,
+    });
+    expect(s.status).toBe("staging");
+    expect(s.cameraBlob).toBe(blob);
+    expect(s.cameraOffsetMs).toBe(40);
+  });
+
+  it("RENDER → RENDER_PROGRESS → RENDER_DONE → uploading; RENDER_FAILED returns to staging", () => {
+    let s = recorderReducer(toStopping(), {
+      type: "BLOB_READY", blob, cameraBlob: null, cameraOffsetMs: 0, durationMs: 1000, width: 100, height: 50,
+    });
+    s = recorderReducer(s, { type: "RENDER" });
+    expect(s.status).toBe("rendering");
+    s = recorderReducer(s, { type: "RENDER_PROGRESS", percent: 40 });
+    expect(s.renderProgress).toBe(40);
+    const failed = recorderReducer(s, { type: "RENDER_FAILED", error: "nope" });
+    expect(failed.status).toBe("staging");
+    expect(failed.error).toBe("nope");
+    s = recorderReducer(s, { type: "RENDER_DONE" });
+    expect(s.status).toBe("uploading");
+    expect(s.uploadProgress).toBe(0);
+  });
+
+  it("UPLOAD_FAILED returns to staging and DISCARD clears both blobs", () => {
+    let s = recorderReducer(toStopping(), {
+      type: "BLOB_READY", blob, cameraBlob: blob, cameraOffsetMs: 0, durationMs: 1000, width: 100, height: 50,
+    });
+    s = recorderReducer(s, { type: "RENDER" });
+    s = recorderReducer(s, { type: "RENDER_DONE" });
+    s = recorderReducer(s, { type: "UPLOAD_FAILED", error: "x" });
+    expect(s.status).toBe("staging");
+    s = recorderReducer(s, { type: "DISCARD" });
+    expect(s.blob).toBeNull();
+    expect(s.cameraBlob).toBeNull();
   });
 });

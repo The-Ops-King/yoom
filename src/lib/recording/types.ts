@@ -38,18 +38,13 @@ export interface MediaSourceProvider {
  * Every hotkey the desktop shell forwards. The web app binds the same chords
  * itself (`use-recorder.ts`), but those only fire while the page has focus;
  * the shell registers them globally and replays them through this union.
- *
- * `bubbleToggle` has no global chord — it is the HUD's camera button only.
- * It rides this channel because the HUD's buttons are, semantically, the same
- * remote-control actions the hotkeys already are.
  */
 export type DesktopShortcut =
   | "toggle"
   | "pause"
   | "mark"
   | "restart"
-  | "cancel"
-  | "bubbleToggle";
+  | "cancel";
 
 /**
  * What the floating desktop camera bubble should look like. `visible` is the
@@ -89,7 +84,8 @@ export type HudStatus =
   | "recording"
   | "paused"
   | "stopping"
-  | "review"
+  | "staging"
+  | "rendering"
   | "error"
   | "other";
 
@@ -110,8 +106,6 @@ export interface HudState {
   /** 3…1 while `status === "countdown"`, else 0. */
   countdown: number;
   markers: number;
-  /** The user's camera-bubble toggle, so the HUD button can show its state. */
-  bubbleVisible: boolean;
 }
 
 export interface DesktopBridge {
