@@ -1,5 +1,5 @@
 import { after } from "next/server";
-import { claimAlert, getVideoById, updateViewSession } from "@/lib/db";
+import { claimAlert, getSettings, getVideoById, updateViewSession } from "@/lib/db";
 import { sendSummaryEmail } from "@/lib/alerts";
 import { corsHeaders, preflight } from "@/lib/cors";
 
@@ -38,6 +38,8 @@ export async function POST(request: Request) {
   if (percent >= 100 || ended) {
     after(async () => {
       try {
+        const settings = await getSettings();
+        if (!settings.alert_on_completion) return;
         const claimed = await claimAlert(sessionId, "summary_sent_at");
         if (!claimed) return;
         const video = await getVideoById(session.video_id);

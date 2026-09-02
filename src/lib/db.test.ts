@@ -10,6 +10,7 @@ vi.mock("@/lib/supabase", () => ({
 import {
   claimAlert,
   createViewSession,
+  findRecentViewSession,
   getSettings,
   getVideoById,
   getVideoBySlug,
@@ -32,6 +33,7 @@ function chain(result: AnyRecord) {
     "update",
     "eq",
     "is",
+    "gte",
     "order",
     "limit",
   ]) {
@@ -279,6 +281,31 @@ describe("setVideoThumbnail", () => {
       thumbnail_drive_file_id: "thumb-1",
     });
     expect(builder.eq).toHaveBeenCalledWith("id", VIDEO.id);
+  });
+});
+
+describe("findRecentViewSession", () => {
+  it("returns the most recent session within the window", async () => {
+    const builder = chain({ data: { id: "session-1", video_id: VIDEO.id }, error: null });
+    from.mockReturnValue(builder);
+
+    const row = await findRecentViewSession(VIDEO.id, "hash", 30);
+
+    expect(from).toHaveBeenCalledWith("view_sessions");
+    expect(builder.eq).toHaveBeenCalledWith("video_id", VIDEO.id);
+    expect(builder.eq).toHaveBeenCalledWith("ip_hash", "hash");
+    expect(builder.gte).toHaveBeenCalledWith("started_at", expect.any(String));
+    const [[, gteValue]] = builder.__calls.gte;
+    expect(() => new Date(gteValue as string)).not.toThrow();
+    expect(new Date(gteValue as string).toISOString()).toBe(gteValue);
+    expect(builder.order).toHaveBeenCalledWith("started_at", { ascending: false });
+    expect(builder.limit).toHaveBeenCalledWith(1);
+    expect(row?.id).toBe("session-1");
+  });
+
+  it("returns null when absent", async () => {
+    from.mockReturnValue(chain({ data: null, error: null }));
+    await expect(findRecentViewSession(VIDEO.id, "hash", 30)).resolves.toBeNull();
   });
 });
 

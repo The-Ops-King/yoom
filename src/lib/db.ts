@@ -198,6 +198,24 @@ export async function claimAlert(
   return Array.isArray(result.data) && result.data.length > 0;
 }
 
+/** Most recent session for this viewer+video started within the last `withinMinutes`, or null. */
+export async function findRecentViewSession(
+  videoId: string,
+  ipHash: string,
+  withinMinutes: number,
+): Promise<ViewSession | null> {
+  const result = (await getSupabase()
+    .from("view_sessions")
+    .select("*")
+    .eq("video_id", videoId)
+    .eq("ip_hash", ipHash)
+    .gte("started_at", new Date(Date.now() - withinMinutes * 60_000).toISOString())
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()) as QueryResult<ViewSession | null>;
+  return unwrap(result);
+}
+
 export async function getSettings(): Promise<Settings> {
   const result = (await getSupabase()
     .from("settings")

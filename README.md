@@ -85,6 +85,10 @@ fetches and the `<video src>` on the watch page use the absolute app origin.
 
 ## Environment
 
+**`NEXT_PUBLIC_APP_URL` must be set in the Vercel project** (Production and Preview).
+Without it the production build omits `assetPrefix` and the watch page served from
+jtylerray.com loads no JS or CSS.
+
 | Variable | Purpose |
 |---|---|
 | `UPLOAD_PASSWORD` | Shared password for the recorder |
@@ -114,8 +118,9 @@ npm test        # vitest (unit tests for the pure modules)
    when both are used, and produces one WebM blob.
 2. **Upload** — `POST /api/upload` mints a Drive resumable session URI;
    `src/lib/upload-client.ts` PUTs 8 MiB chunks straight to Google, resuming from the
-   committed offset after an error. `/api/upload/chunk` is a server-side fallback if
-   Drive ever refuses CORS on those PUTs.
+   committed offset after an error. `/api/upload/chunk` is a server-side proxy kept for
+   the case where Drive refuses CORS on browser PUTs; the recorder does not use it by
+   default (switch by passing `{ proxyUrl: "/api/upload/chunk" }` to `uploadToDrive`).
 3. **Save** — `POST /api/upload/complete` verifies the Drive file and inserts a
    `videos` row with a fresh 8-character slug; a JPEG thumbnail follows via
    `/api/upload/thumbnail`.

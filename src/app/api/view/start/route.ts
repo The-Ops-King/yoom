@@ -2,6 +2,8 @@ import { after } from "next/server";
 import {
   claimAlert,
   createViewSession,
+  findRecentViewSession,
+  getSettings,
   getVideoById,
   getViewSession,
 } from "@/lib/db";
@@ -41,6 +43,14 @@ export async function POST(request: Request) {
   const viewer = readViewerContext(request);
   const viewerName = body.viewerName?.trim().slice(0, 80) || null;
 
+  const DEDUPE_MINUTES = 30;
+  if (viewer.ipHash) {
+    const recent = await findRecentViewSession(video.id, viewer.ipHash, DEDUPE_MINUTES);
+    if (recent) {
+      return Response.json({ sessionId: recent.id, reused: true }, { headers: cors });
+    }
+  }
+
   const sessionId = await createViewSession({
     video_id: video.id,
     viewer_name: viewerName,
@@ -52,6 +62,8 @@ export async function POST(request: Request) {
 
   after(async () => {
     try {
+      const settings = await getSettings();
+      if (!settings.alert_on_first_view) return;
       const claimed = await claimAlert(sessionId, "alert_sent_at");
       if (!claimed) return;
       const session = await getViewSession(sessionId);
