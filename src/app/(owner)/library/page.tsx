@@ -4,7 +4,7 @@ import { listVideos, type VideoSort } from "@/lib/db";
 import { appUrl } from "@/lib/env";
 import { PasswordGate } from "@/components/password-gate";
 import { LibraryToolbar } from "@/components/library/library-toolbar";
-import { VideoCard } from "@/components/library/video-card";
+import { LibraryGrid } from "@/app/(owner)/library/library-grid";
 
 export const metadata: Metadata = { title: "Library · Yoom" };
 
@@ -41,20 +41,24 @@ export default async function LibraryPage({ searchParams }: PageProps) {
     <main className="flex flex-col gap-5">
       <h1 className="text-lg font-semibold text-foreground">Library</h1>
 
-      <LibraryToolbar q={q} sort={sort} count={videos.length} />
-
       {videos.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-border px-4 py-12 text-center text-sm text-muted">
-          {q
-            ? `No recordings match “${q}”.`
-            : "No recordings yet. Hit Record to make your first one."}
-        </p>
+        <>
+          <LibraryToolbar q={q} sort={sort} count={videos.length} />
+          <p className="rounded-xl border border-dashed border-border px-4 py-12 text-center text-sm text-muted">
+            {q
+              ? `No recordings match “${q}”.`
+              : "No recordings yet. Hit Record to make your first one."}
+          </p>
+        </>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {videos.map((video) => (
-            <VideoCard key={video.id} video={video} apiBase={base} />
-          ))}
-        </div>
+        // The toolbar is rendered on the server and passed through as a child,
+        // so the client grid can swap it for the selection bar without pulling
+        // it into the client bundle.
+        <LibraryGrid
+          videos={videos}
+          apiBase={base}
+          toolbar={<LibraryToolbar q={q} sort={sort} count={videos.length} />}
+        />
       )}
     </main>
   );

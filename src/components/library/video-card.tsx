@@ -8,12 +8,70 @@ type VideoCardProps = {
   video: VideoListItem;
   /** Absolute app origin, used for the thumbnail URL. */
   apiBase: string;
+  /** Show the selection checkbox and route plain clicks to `onToggle`. */
+  selectable: boolean;
+  selected: boolean;
+  /** True while any card in the grid is selected: pins every checkbox visible. */
+  anySelected: boolean;
+  onToggle(shift: boolean): void;
 };
 
-export function VideoCard({ video, apiBase }: VideoCardProps) {
+export function VideoCard({
+  video,
+  apiBase,
+  selectable,
+  selected,
+  anySelected,
+  onToggle,
+}: VideoCardProps) {
   return (
-    <div className="group flex flex-col overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-accent/40">
-      <Link href={`/library/${video.id}`} className="flex flex-col">
+    <div
+      className={`group relative flex flex-col overflow-hidden rounded-xl border bg-surface transition-colors ${
+        selected
+          ? "border-accent ring-2 ring-accent/40"
+          : "border-border hover:border-accent/40"
+      }`}
+    >
+      {/* Sibling of the <Link>, not a child: a button inside an anchor is
+          invalid HTML and unreachable for screen readers. */}
+      {selectable && (
+        <button
+          type="button"
+          aria-pressed={selected}
+          aria-label={`Select “${video.title}”`}
+          onClick={(event) => onToggle(event.shiftKey)}
+          className={`absolute left-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-md border transition-opacity focus-visible:opacity-100 group-hover:opacity-100 ${
+            selected
+              ? "border-accent bg-accent text-black"
+              : "border-border bg-black/60 text-transparent hover:text-muted"
+          } ${anySelected || selected ? "opacity-100" : "opacity-0"}`}
+        >
+          <svg
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+            className="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 8.5 6.5 12 13 4.5" />
+          </svg>
+        </button>
+      )}
+      <Link
+        href={`/library/${video.id}`}
+        className="flex flex-col"
+        onClick={(event) => {
+          // While a selection is active the card is a selection target, not a
+          // link: clicking it extends or narrows the selection instead.
+          if (selectable && anySelected) {
+            event.preventDefault();
+            onToggle(event.shiftKey);
+          }
+        }}
+      >
         <div className="relative aspect-video w-full bg-black">
           {video.thumbnail_drive_file_id ? (
             // Not next/image: this page shares components with a cross-origin
