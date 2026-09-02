@@ -32,3 +32,14 @@ Tyler went to sleep after Phase 3 merged and the Phase 2.1 recorder patch shippe
 - `viewers-table` shows raw `max_percent` (e.g. 33.33%) vs one-decimal rounding elsewhere.
 - No tests cover the page-level auth boundary (which is how the leak slipped past unit tests); an integration test hitting `/library` without a cookie would catch regressions.
 - Both Phase 2/2.1 reviews' non-blocking items remain listed in `docs/for-later.md`.
+
+## Phase 4 desktop app — morning launch checklist (in the order things are most likely to fail)
+The app was built but never launched overnight (macOS permission prompts are yours). From `desktop/`: `npm run dev` (against `localhost:3000` with `YOOM_DEV=1`) or open the unsigned dmg in `desktop/dist/` (right-click → Open the first time).
+1. **Picker and bubble render** — if either window is blank, check its DevTools console for CSP violations (the `file://` CSP was patched overnight; this is the first thing to confirm).
+2. **Tray icon appears** — if the app dies at startup, the tray image didn't ship (`extraResources`).
+3. **First capture** — macOS asks for Screen Recording; grant, then relaunch. Then Camera, Microphone, and (14.2+) System Audio Recording.
+4. **Picker doesn't self-cancel** — a capture that fails instantly with "Permission denied" means the picker lost focus (blur-cancel); report it.
+5. **System audio is real** — record a full-screen clip with music playing; play it back. If silent, tell me which macOS version you're on.
+6. **Floating bubble** — appears in Screen+Cam setup, follows your drag, and the burned-in bubble in the recording sits where the live one was. ✕ and the shape button on the bubble should change the in-page bubble too.
+7. **Hotkeys work when the app isn't focused** — ⌘⇧L / P / K / X / M.
+8. **Login persists** across quit/relaunch.
