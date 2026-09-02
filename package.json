@@ -4,12 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "predev": "node scripts/copy-mediapipe.mjs",
     "build": "next build",
+    "prebuild": "node scripts/copy-mediapipe.mjs",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "1.0.1",
     "@supabase/supabase-js": "^2.109.0",
     "fix-webm-duration": "^1.0.6",
     "next": "16.2.3",
