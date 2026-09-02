@@ -149,11 +149,17 @@ export function getProvider(): MediaSourceProvider {
   const bridge = getDesktopBridge();
   if (!bridge) return browserProvider;
 
-  const merged: MediaSourceProvider = { ...browserProvider, ...bridge.mediaSources };
+  // A partial bridge shouldn't clobber a working browser method with `undefined`.
+  const bridgeOverrides = Object.fromEntries(
+    Object.entries(bridge.mediaSources ?? {}).filter(([, v]) => v !== undefined),
+  );
+  const merged: MediaSourceProvider = { ...browserProvider, ...bridgeOverrides };
 
   if (bridge.capabilities) {
     const overrides = bridge.capabilities;
-    const base = bridge.mediaSources?.capabilities ?? browserProvider.capabilities;
+    const base =
+      bridge.mediaSources?.capabilities?.bind(bridge.mediaSources) ??
+      browserProvider.capabilities;
     merged.capabilities = () => ({ ...base(), ...overrides });
   }
 

@@ -76,6 +76,7 @@ export type RecorderEvent =
       hasCamera: boolean;
     }
   | { type: "ACQUIRE_FAILED"; error: string }
+  | { type: "RECORD_FAILED"; error: string }
   | { type: "START" }
   | { type: "COUNTDOWN_TICK" }
   | { type: "SKIP_COUNTDOWN" }
@@ -191,12 +192,30 @@ export function recorderReducer(
       };
 
     case "ACQUIRE_FAILED":
+      if (state.status !== "acquiring") return state;
       return {
         ...state,
         status: "error",
         streamsAlive: false,
         surface: null,
         error: event.error,
+      };
+
+    case "RECORD_FAILED":
+      if (
+        state.status !== "countdown" &&
+        state.status !== "recording" &&
+        state.status !== "paused" &&
+        state.status !== "stopping"
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        status: "error",
+        error: event.error,
+        blob: null,
+        streamsAlive: false,
       };
 
     case "START":

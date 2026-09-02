@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   browserCapabilities,
+  browserProvider,
   cameraConstraints,
   displayConstraints,
   getProvider,
@@ -113,17 +114,58 @@ describe("getProvider", () => {
         mediaSources: { getDisplay },
         capabilities: { systemAudio: "full", nativePicker: true },
       },
-      navigator: { userAgent: "Mozilla/5.0 (Macintosh) Chrome/140" },
     });
+    vi.stubGlobal(
+      "navigator",
+      { userAgent: "Mozilla/5.0 (Macintosh) Chrome/140" },
+    );
 
     const p = getProvider();
     await p.getDisplay("monitor");
     expect(getDisplay).toHaveBeenCalledWith("monitor");
     // Bridge capabilities are merged over the browser's, field by field.
+    // The macOS Chrome UA delivers system audio only for tab captures and
+    // supports surface hints — but the bridge overrides systemAudio here.
     expect(p.capabilities()).toEqual({
       systemAudio: "full",
       nativePicker: true,
       surfaceHints: true,
     });
+  });
+
+  it("ignores bridge keys explicitly set to undefined", () => {
+    vi.stubGlobal("window", {
+      __yoomDesktop: {
+        version: 1,
+        isDesktop: true,
+        mediaSources: { getDisplay: undefined },
+      },
+    });
+
+    const p = getProvider();
+    expect(p.getDisplay).toBe(browserProvider.getDisplay);
+  });
+
+  it("binds a bridge-supplied capabilities function to its own mediaSources", async () => {
+    const mediaSources = {
+      marker: "bridge-media-sources",
+      capabilities(this: { marker: string }): ReturnType<typeof browserCapabilities> {
+        // Only readable when called with `mediaSources` as `this`.
+        const marker = this.marker;
+        return { systemAudio: marker ? "none" : "full", nativePicker: false, surfaceHints: false };
+      },
+    };
+    vi.stubGlobal("window", {
+      __yoomDesktop: {
+        version: 1,
+        isDesktop: true,
+        mediaSources,
+        capabilities: { nativePicker: true },
+      },
+    });
+
+    const p = getProvider();
+    const caps = p.capabilities();
+    expect(caps).toEqual({ systemAudio: "none", nativePicker: true, surfaceHints: false });
   });
 });

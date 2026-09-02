@@ -38,7 +38,9 @@ export function DeviceSelector({
     const md = typeof navigator !== "undefined" ? navigator.mediaDevices : null;
     const onChangeDevices = () => {
       void provider.enumerateDevices(kind).then((d) => {
-        if (!cancelled) setDevices(d);
+        if (cancelled) return;
+        setDevices(d);
+        if (value && !d.some((device) => device.deviceId === value)) onChange("");
       });
     };
     md?.addEventListener?.("devicechange", onChangeDevices);

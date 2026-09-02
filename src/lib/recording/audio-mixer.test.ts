@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AudioMixer } from "./audio-mixer";
 
 class FakeParam {
@@ -98,6 +98,10 @@ beforeEach(() => {
   mixer = new AudioMixer(ctx as unknown as AudioContext);
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("AudioMixer", () => {
   it("exposes an output track before any source is added", () => {
     expect(mixer.outputTrack).toBeTruthy();
@@ -137,9 +141,8 @@ describe("AudioMixer", () => {
     mixer.setEnabled("mic", false);
     expect(gain.gain.calls.some(([k, v]) => k === "ramp" && v === 0)).toBe(true);
     expect(gain.disconnectCount).toBe(0);
-    vi.advanceTimersByTime(40);
+    vi.advanceTimersByTime(70);
     expect(gain.disconnectCount).toBe(1);
-    vi.useRealTimers();
   });
 
   it("reconnects and ramps back up on enable", () => {
@@ -147,11 +150,10 @@ describe("AudioMixer", () => {
     mixer.addSource("mic", fakeStream());
     const gain = ctx.gains[0];
     mixer.setEnabled("mic", false);
-    vi.advanceTimersByTime(40);
+    vi.advanceTimersByTime(70);
     mixer.setEnabled("mic", true);
     expect(gain.connected.filter((n) => n === ctx.destination).length).toBe(2);
     expect(gain.gain.calls.at(-1)?.[1]).toBe(1);
-    vi.useRealTimers();
   });
 
   it("is idempotent when toggling to the current value", () => {

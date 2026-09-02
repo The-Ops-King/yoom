@@ -84,7 +84,11 @@ function sanitizeBackground(
   const src = persistableSrc(typeof r.src === "string" ? r.src : undefined);
   if ((kind === "image" || kind === "video") && !src) return { kind: "none" };
   const out: BackgroundConfig = { kind };
-  if (typeof r.color === "string") out.color = r.color;
+  if (typeof r.color === "string") {
+    out.color = r.color;
+  } else if (kind === "color") {
+    out.color = fallback.color ?? "#1a1a1e";
+  }
   if (src) out.src = src;
   if (typeof r.presetId === "string") out.presetId = r.presetId;
   return out;
@@ -126,6 +130,7 @@ function sanitize(raw: unknown): RecorderSettings {
 }
 
 export function loadSettings(): RecorderSettings {
+  if (typeof window === "undefined") return DEFAULT_SETTINGS;
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return DEFAULT_SETTINGS;
@@ -136,6 +141,7 @@ export function loadSettings(): RecorderSettings {
 }
 
 export function saveSettings(settings: RecorderSettings): void {
+  if (typeof window === "undefined") return;
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(sanitize(settings)));
   } catch {

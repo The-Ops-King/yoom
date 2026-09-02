@@ -135,16 +135,25 @@ export function computeFrameLayout(
   srcH: number,
   frame: FrameConfig,
 ): FrameLayout {
-  const passthrough: FrameLayout = {
-    canvasW: srcW,
-    canvasH: srcH,
-    dest: { x: 0, y: 0, w: srcW, h: srcH },
-    radius: 0,
-  };
-  if (!frame.enabled || srcW <= 0 || srcH <= 0) return passthrough;
+  const even = (n: number) => (n % 2 === 0 ? n : n + 1);
+
+  if (!frame.enabled || srcW <= 0 || srcH <= 0) {
+    const canvasW = even(srcW);
+    const canvasH = even(srcH);
+    return {
+      canvasW,
+      canvasH,
+      dest: {
+        x: Math.round((canvasW - srcW) / 2),
+        y: Math.round((canvasH - srcH) / 2),
+        w: srcW,
+        h: srcH,
+      },
+      radius: 0,
+    };
+  }
 
   const pad = Math.round(srcW * clampRange(frame.padding, 0, 0.2));
-  const even = (n: number) => (n % 2 === 0 ? n : n + 1);
   const canvasW = even(srcW + pad * 2);
   const canvasH = even(srcH + pad * 2);
 

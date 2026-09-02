@@ -379,6 +379,7 @@ export function useRecorder(): UseRecorderResult {
     };
     recorder.onerror = (e) => {
       console.error("[Yoom] MediaRecorder error", e);
+      dispatch({ type: "RECORD_FAILED", error: "Recording failed. Please try again." });
     };
     recorder.onstop = () => {
       void finishRecording();
@@ -480,6 +481,15 @@ export function useRecorder(): UseRecorderResult {
       thumbnailTimerRef.current = null;
     }
     if (!thumbnailRef.current) thumbnailRef.current = await captureThumbnail();
+
+    if (chunksRef.current.length === 0) {
+      recorderRef.current = null;
+      dispatch({
+        type: "RECORD_FAILED",
+        error: "Recording captured no data. Please try again.",
+      });
+      return;
+    }
 
     const durationMs = Math.max(
       0,

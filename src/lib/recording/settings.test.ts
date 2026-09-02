@@ -20,6 +20,7 @@ let storage: ReturnType<typeof makeStorage>;
 
 beforeEach(() => {
   storage = makeStorage();
+  vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", storage);
 });
 
@@ -111,6 +112,14 @@ describe("saveSettings", () => {
       src: "/backgrounds/ocean.svg",
       presetId: "ocean",
     });
+  });
+
+  it("falls back to the default colour when a stored color background has none", () => {
+    saveSettings({
+      ...DEFAULT_SETTINGS,
+      background: { kind: "color" } as unknown as (typeof DEFAULT_SETTINGS)["background"],
+    });
+    expect(loadSettings().background.color).toBe(DEFAULT_SETTINGS.background.color ?? "#1a1a1e");
   });
 
   it("never throws when storage is unavailable", () => {

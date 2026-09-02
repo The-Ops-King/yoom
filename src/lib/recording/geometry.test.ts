@@ -146,6 +146,12 @@ describe("computeFrameLayout", () => {
   it("is a pass-through for degenerate sources", () => {
     expect(computeFrameLayout(0, 0, { ...DEFAULT_FRAME, enabled: true }).canvasW).toBe(0);
   });
+
+  it("rounds odd passthrough dimensions up to even, centring the source", () => {
+    const l = computeFrameLayout(1919, 1079, { ...DEFAULT_FRAME, enabled: false });
+    expect(l.canvasW).toBe(1920);
+    expect(l.canvasH).toBe(1080);
+  });
 });
 
 describe("pointerToNormalized", () => {

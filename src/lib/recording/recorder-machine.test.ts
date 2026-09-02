@@ -65,6 +65,33 @@ describe("acquisition", () => {
     const s = init();
     expect(recorderReducer(s, ACQUIRED)).toBe(s);
   });
+
+  it("ignores ACQUIRE_FAILED outside of acquiring", () => {
+    const s = run(init(), [{ type: "SELECT_MODE", mode: "screen" }]);
+    expect(recorderReducer(s, { type: "ACQUIRE_FAILED", error: "denied" })).toBe(s);
+  });
+});
+
+describe("RECORD_FAILED", () => {
+  it("exits stopping to error, clearing the blob and streams", () => {
+    const s = run(init(), [
+      { type: "ACQUIRE" },
+      ACQUIRED,
+      { type: "START" },
+      { type: "SKIP_COUNTDOWN" },
+      { type: "STOP" },
+      { type: "RECORD_FAILED", error: "no data" },
+    ]);
+    expect(s.status).toBe("error");
+    expect(s.error).toBe("no data");
+    expect(s.blob).toBeNull();
+    expect(s.streamsAlive).toBe(false);
+  });
+
+  it("is a no-op from idle", () => {
+    const s = init();
+    expect(recorderReducer(s, { type: "RECORD_FAILED", error: "x" })).toBe(s);
+  });
 });
 
 describe("mode and surface selection", () => {

@@ -1,7 +1,7 @@
 export type AudioSourceId = "mic" | "system";
 
 const RAMP_SECONDS = 0.02;
-const DISCONNECT_DELAY_MS = 30;
+const DISCONNECT_DELAY_MS = 60;
 
 interface MixerSource {
   stream: MediaStream;
@@ -70,7 +70,7 @@ export class AudioMixer {
       node,
       gain,
       analyser,
-      buffer: new Uint8Array(analyser.frequencyBinCount),
+      buffer: new Uint8Array(analyser.fftSize),
       enabled,
       connected: enabled,
       disconnectTimer: null,
@@ -105,7 +105,7 @@ export class AudioMixer {
         src.connected = true;
       }
       src.gain.gain.cancelScheduledValues(now);
-      src.gain.gain.setValueAtTime(0, now);
+      src.gain.gain.setValueAtTime(src.gain.gain.value, now);
       src.gain.gain.linearRampToValueAtTime(1, now + RAMP_SECONDS);
     } else {
       src.gain.gain.cancelScheduledValues(now);
