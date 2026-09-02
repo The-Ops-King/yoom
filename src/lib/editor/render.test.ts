@@ -108,6 +108,16 @@ describe("drawFrame", () => {
     expect(ctx.calls.some((c) => c[0] === "scale" && (c[1] as number[])[0] === -1)).toBe(true);
     expect(ctx.calls.some((c) => c[0] === "stroke")).toBe(false);
   });
+  it("does not mirror a camera-only frame whose track says mirror: false", () => {
+    const ctx = fakeCtx();
+    const track: CameraTrack = {
+      shape: "circle", mirror: false,
+      keyframes: [{ t: 0, mode: "full", rect: { x: 0, y: 0, w: 1, h: 1 } }],
+    };
+    drawFrame(ctx, inputs({ ...base, camera: track }, "camera"), 1, 1920, 1080);
+    expect(ctx.calls.filter((c) => c[0] === "drawImage")).toHaveLength(1);
+    expect(ctx.calls.some((c) => c[0] === "scale" && (c[1] as number[])[0] === -1)).toBe(false);
+  });
   it("covers rather than letterboxes a zoomed camera-only frame", () => {
     const ctx = fakeCtx();
     const e = { ...base, camera: null, zooms: [{ start: 0, end: 10, rect: { x: 0, y: 0, w: 0.5, h: 1 }, ramp: 0 }] };

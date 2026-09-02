@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { parseEdits, type Overlay, type VideoEdits } from "@/lib/edits";
+import { parseEdits, type CameraTrack, type Overlay, type VideoEdits } from "@/lib/edits";
 import { defaultCameraTrack } from "@/lib/editor/camera-track";
 import * as ops from "@/lib/editor/edit-ops";
 import { canRedo, canUndo, createHistory, push, redo, undo, type History } from "@/lib/editor/undo";
@@ -61,13 +61,23 @@ function initialEdits(p: StagingProps, screenAspect: number): VideoEdits {
   base.cameraOffsetMs = p.cameraOffsetMs;
   base.frame = p.defaults.frame;
   // `defaultCameraTrack` hardcodes `mirror: true`; the pre-record checkbox wins.
-  base.camera =
-    p.mode === "screen+camera"
-      ? {
-          ...defaultCameraTrack(p.defaults.bubble.shape, p.defaults.bubble.size, screenAspect),
-          mirror: p.defaults.bubble.mirror,
-        }
-      : null;
+  if (p.mode === "screen+camera") {
+    base.camera = {
+      ...defaultCameraTrack(p.defaults.bubble.shape, p.defaults.bubble.size, screenAspect),
+      mirror: p.defaults.bubble.mirror,
+    };
+  } else if (p.mode === "camera") {
+    // Camera-only has no bubble (the rail hides the Camera section), but the
+    // track still has to exist to carry `mirror` into the render — otherwise
+    // the export falls back to mirroring unconditionally.
+    base.camera = {
+      shape: "circle",
+      mirror: p.defaults.bubble.mirror,
+      keyframes: [{ t: 0, mode: "full", rect: { x: 0, y: 0, w: 1, h: 1 } }],
+    } satisfies CameraTrack;
+  } else {
+    base.camera = null;
+  }
   return base;
 }
 
@@ -105,7 +115,9 @@ export function Staging(props: StagingProps) {
     setAspectSeen(aspect);
     setHistory((h) => {
       const cam = h.present.camera;
-      if (!cam || cam.keyframes.length !== 1) return h;
+      // Only the screen+camera bubble is aspect-dependent. Camera-only's track
+      // is a full-frame mirror carrier — rebuilding it would make it a bubble.
+      if (props.mode !== "screen+camera" || !cam || cam.keyframes.length !== 1) return h;
       // Carry `mirror` over: it came from the pre-record checkbox and
       // `defaultCameraTrack` would reset it to `true`.
       const rebuilt = { ...defaultCameraTrack(cam.shape, defaultBubbleSize, aspect), mirror: cam.mirror };

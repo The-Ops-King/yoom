@@ -10,7 +10,9 @@ import type { BubbleConfig, FrameConfig, RecordingMode } from "@/lib/recording/t
  */
 export interface StagingProps {
   mode: RecordingMode;
+  /** The screen take; null in camera-only mode, where the take is the camera. */
   screenUrl: string | null;
+  /** The camera take; in camera-only mode this is the single recorded file. */
   cameraUrl: string | null;
   durationMs: number;
   cameraOffsetMs: number;

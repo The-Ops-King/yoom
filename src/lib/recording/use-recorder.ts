@@ -568,23 +568,28 @@ export function useRecorder(): UseRecorderResult {
 
   // ---------- staging object URLs ----------
 
-  // Keyed on the blobs alone, never on the status: staging → rendering →
+  // Keyed on the blobs and the mode, never on the status: staging → rendering →
   // uploading → staging (a failed upload) must not revoke and re-mint the URLs
   // out from under the preview's <video> elements. The export does not read
   // them — it mints its own from the same blobs.
+  //
+  // Same convention as `finish()`'s `RenderSources`: in camera-only mode the
+  // single recorded file IS the camera, so it is published as `cameraUrl` with
+  // `screenUrl` null — the staging player picks its primary source by mode.
   useEffect(() => {
     if (!state.blob) {
       setStaging(null);
       return;
     }
-    const screenUrl = URL.createObjectURL(state.blob);
+    const url = URL.createObjectURL(state.blob);
     const cameraUrl = state.cameraBlob ? URL.createObjectURL(state.cameraBlob) : null;
-    setStaging({ screenUrl, cameraUrl });
+    const camOnly = state.mode === "camera";
+    setStaging({ screenUrl: camOnly ? null : url, cameraUrl: camOnly ? url : cameraUrl });
     return () => {
-      URL.revokeObjectURL(screenUrl);
+      URL.revokeObjectURL(url);
       if (cameraUrl) URL.revokeObjectURL(cameraUrl);
     };
-  }, [state.blob, state.cameraBlob]);
+  }, [state.blob, state.cameraBlob, state.mode]);
 
   // ---------- render + upload ----------
 
