@@ -16,6 +16,7 @@ export type Video = {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  edits: Record<string, unknown>;
 };
 
 export type ViewSession = {
@@ -231,4 +232,84 @@ export async function getSettings(): Promise<Settings> {
       updated_at: null,
     }
   );
+}
+
+export type VideoSort = "newest" | "oldest" | "views" | "title";
+
+export type VideoStatsRow = {
+  video_id: string;
+  view_count: number;
+  unique_viewers: number;
+  avg_max_percent: number | string;
+  last_viewed_at: string | null;
+};
+
+export type VideoListItem = Video & {
+  views: number;
+  uniqueViewers: number;
+  avgMaxPercent: number;
+  lastViewedAt: string | null;
+};
+
+/**
+ * PostgREST's `or=` filter is comma/parenthesis delimited, so those characters
+ * cannot appear inside a value. Strip them rather than escape them: the search
+ * box is a convenience, not a query language.
+ */
+function sanitizeSearch(term: string): string {
+  return term.replace(/[,()*\\]/g, "").trim();
+}
+
+/**
+ * Live videos with their aggregates. `video_stats` is a view, so PostgREST
+ * cannot embed it from `videos`; two queries are merged in JS instead.
+ */
+export async function listVideos(options: {
+  q?: string;
+  sort: VideoSort;
+}): Promise<VideoListItem[]> {
+  const { q, sort } = options;
+
+  let query = getSupabase().from("videos").select("*").is("deleted_at", null);
+
+  const term = q ? sanitizeSearch(q) : "";
+  if (term) {
+    query = query.or(
+      `title.ilike.%${term}%,description.ilike.%${term}%,slug.ilike.%${term}%`,
+    );
+  }
+
+  if (sort === "oldest") query = query.order("created_at", { ascending: true });
+  else if (sort === "title") query = query.order("title", { ascending: true });
+  else query = query.order("created_at", { ascending: false });
+
+  const videos = unwrap((await query) as QueryResult<Video[] | null>) ?? [];
+  if (videos.length === 0) return [];
+
+  const statsResult = (await getSupabase()
+    .from("video_stats")
+    .select("*")
+    .in(
+      "video_id",
+      videos.map((video) => video.id),
+    )) as QueryResult<VideoStatsRow[] | null>;
+  const stats = unwrap(statsResult) ?? [];
+  const byId = new Map(stats.map((row) => [row.video_id, row]));
+
+  const merged: VideoListItem[] = videos.map((video) => {
+    const row = byId.get(video.id);
+    return {
+      ...video,
+      views: row?.view_count ?? 0,
+      uniqueViewers: row?.unique_viewers ?? 0,
+      avgMaxPercent: row ? Number(row.avg_max_percent) || 0 : 0,
+      lastViewedAt: row?.last_viewed_at ?? null,
+    };
+  });
+
+  // view_count lives in the view, so this ordering cannot be pushed into SQL
+  // without a join PostgREST will not infer. Personal-scale row counts.
+  if (sort === "views") merged.sort((a, b) => b.views - a.views);
+
+  return merged;
 }
