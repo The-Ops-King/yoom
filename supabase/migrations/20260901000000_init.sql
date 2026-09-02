@@ -27,7 +27,7 @@ create index if not exists videos_created_at_idx
 
 alter table public.videos enable row level security;
 
-create or replace function public.set_updated_at()
+create or replace function public.yoom_set_updated_at()
 returns trigger language plpgsql as $$
 begin
   new.updated_at = now();
@@ -38,7 +38,7 @@ $$;
 drop trigger if exists videos_set_updated_at on public.videos;
 create trigger videos_set_updated_at
   before update on public.videos
-  for each row execute function public.set_updated_at();
+  for each row execute function public.yoom_set_updated_at();
 
 -- slug_history ---------------------------------------------------------------
 create table if not exists public.slug_history (
