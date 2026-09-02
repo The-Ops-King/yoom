@@ -313,3 +313,65 @@ export async function listVideos(options: {
 
   return merged;
 }
+
+export type VideoMetaPatch = { title?: string; description?: string | null };
+
+export async function updateVideoMeta(
+  id: string,
+  patch: VideoMetaPatch,
+): Promise<Video> {
+  const update: Record<string, unknown> = {};
+  if (patch.title !== undefined) update.title = patch.title.trim();
+  if (patch.description !== undefined) {
+    const trimmed = (patch.description ?? "").trim();
+    update.description = trimmed === "" ? null : trimmed;
+  }
+
+  const table = getSupabase().from("videos");
+  const query =
+    Object.keys(update).length === 0
+      ? table.select("*").eq("id", id).single()
+      : table.update(update).eq("id", id).select("*").single();
+
+  return unwrap((await query) as QueryResult<Video>);
+}
+
+/**
+ * True when `slug` is already in use by another video, either as its current
+ * slug or as one of its historical slugs (which still 308-redirect).
+ */
+export async function isSlugTaken(
+  slug: string,
+  excludeId?: string,
+): Promise<boolean> {
+  const videoResult = (await getSupabase()
+    .from("videos")
+    .select("id")
+    .eq("slug", slug)
+    .maybeSingle()) as QueryResult<{ id: string } | null>;
+  const video = unwrap(videoResult);
+  if (video && video.id !== excludeId) return true;
+
+  const historyResult = (await getSupabase()
+    .from("slug_history")
+    .select("video_id")
+    .eq("old_slug", slug)
+    .maybeSingle()) as QueryResult<{ video_id: string } | null>;
+  const history = unwrap(historyResult);
+  if (history && history.video_id !== excludeId) return true;
+
+  return false;
+}
+
+/** One transaction: record the old slug in slug_history and swap the new one in. */
+export async function changeSlug(
+  id: string,
+  newSlug: string,
+): Promise<Video | null> {
+  const result = (await getSupabase().rpc("change_video_slug", {
+    p_video_id: id,
+    p_new_slug: newSlug,
+  })) as QueryResult<Video | null>;
+  const row = unwrap(result);
+  return row && row.id ? row : null;
+}

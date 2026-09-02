@@ -7,7 +7,7 @@ vi.mock("@/lib/supabase", () => ({
   getSupabase: () => ({ from, rpc }),
 }));
 
-import { listVideos } from "@/lib/db";
+import { changeSlug, isSlugTaken, listVideos, updateVideoMeta } from "@/lib/db";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -168,5 +168,92 @@ describe("listVideos", () => {
   it("throws on a database error", async () => {
     from.mockReturnValue(chain({ data: null, error: { message: "boom" } }));
     await expect(listVideos({ sort: "newest" })).rejects.toThrow("boom");
+  });
+});
+
+describe("updateVideoMeta", () => {
+  it("writes only the provided fields and returns the row", async () => {
+    const builder = chain({ data: { ...ROW_A, title: "New" }, error: null });
+    from.mockReturnValue(builder);
+
+    const row = await updateVideoMeta(ROW_A.id, { title: "New" });
+
+    expect(from).toHaveBeenCalledWith("videos");
+    expect(builder.update).toHaveBeenCalledWith({ title: "New" });
+    expect(builder.eq).toHaveBeenCalledWith("id", ROW_A.id);
+    expect(row.title).toBe("New");
+  });
+
+  it("normalises an empty description to null", async () => {
+    const builder = chain({ data: ROW_A, error: null });
+    from.mockReturnValue(builder);
+    await updateVideoMeta(ROW_A.id, { description: "   " });
+    expect(builder.update).toHaveBeenCalledWith({ description: null });
+  });
+
+  it("is a no-op read when nothing changed", async () => {
+    const builder = chain({ data: ROW_A, error: null });
+    from.mockReturnValue(builder);
+    await updateVideoMeta(ROW_A.id, {});
+    expect(builder.update).not.toHaveBeenCalled();
+    expect(builder.select).toHaveBeenCalled();
+  });
+});
+
+describe("isSlugTaken", () => {
+  it("is true when a live video already owns the slug", async () => {
+    const videos = chain({ data: { id: ROW_B.id }, error: null });
+    from.mockImplementation((table: string) =>
+      table === "videos" ? videos : chain({ data: null, error: null }),
+    );
+    await expect(isSlugTaken("alpha")).resolves.toBe(true);
+  });
+
+  it("ignores the excluded video's own slug", async () => {
+    const videos = chain({ data: { id: ROW_A.id }, error: null });
+    from.mockImplementation((table: string) =>
+      table === "videos" ? videos : chain({ data: null, error: null }),
+    );
+    await expect(isSlugTaken("alpha", ROW_A.id)).resolves.toBe(false);
+  });
+
+  it("is true when slug_history points at another video", async () => {
+    from.mockImplementation((table: string) =>
+      table === "videos"
+        ? chain({ data: null, error: null })
+        : chain({ data: { video_id: ROW_B.id }, error: null }),
+    );
+    await expect(isSlugTaken("alpha", ROW_A.id)).resolves.toBe(true);
+  });
+
+  it("lets a video reclaim its own old slug", async () => {
+    from.mockImplementation((table: string) =>
+      table === "videos"
+        ? chain({ data: null, error: null })
+        : chain({ data: { video_id: ROW_A.id }, error: null }),
+    );
+    await expect(isSlugTaken("alpha", ROW_A.id)).resolves.toBe(false);
+  });
+});
+
+describe("changeSlug", () => {
+  it("calls the change_video_slug RPC", async () => {
+    rpc.mockResolvedValue({ data: { ...ROW_A, slug: "my-demo" }, error: null });
+    const row = await changeSlug(ROW_A.id, "my-demo");
+    expect(rpc).toHaveBeenCalledWith("change_video_slug", {
+      p_video_id: ROW_A.id,
+      p_new_slug: "my-demo",
+    });
+    expect(row?.slug).toBe("my-demo");
+  });
+
+  it("returns null when the video does not exist", async () => {
+    rpc.mockResolvedValue({ data: null, error: null });
+    await expect(changeSlug(ROW_A.id, "my-demo")).resolves.toBeNull();
+  });
+
+  it("throws on a database error", async () => {
+    rpc.mockResolvedValue({ data: null, error: { message: "nope" } });
+    await expect(changeSlug(ROW_A.id, "my-demo")).rejects.toThrow("nope");
   });
 });
