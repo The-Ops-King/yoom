@@ -61,3 +61,13 @@ The app was built but never launched overnight (macOS permission prompts are you
 6. **Floating bubble** — appears in Screen+Cam setup, follows your drag, and the burned-in bubble in the recording sits where the live one was. ✕ and the shape button on the bubble should change the in-page bubble too.
 7. **Hotkeys work when the app isn't focused** — ⌘⇧L / P / K / X / M.
 8. **Login persists** across quit/relaunch.
+
+## Phase 4.1 — what to test
+The HUD, the disappearing recorder window and the launch-time permission prompts are all built but never launched (that is your first run). Full matrix: `docs/superpowers/plans/2026-09-02-phase4.1-recording-hud.md` § Task 16.
+- **A. Permissions (the reported bug)** — launching should now raise the mic and camera prompts by itself, a missing Screen Recording grant gets a dialog with the deep link, and the microphone picker should finally list real devices.
+- **B. The disappearing act** — pressing Start hides the recorder window and the pill counts 3-2-1; Stop or Discard brings the window back, focused, on review or setup.
+- **C. HUD controls** — pause/resume, mark ×3, camera toggle, dragging the pill, and it surviving a Space switch and a native full-screen app.
+- **D. Content protection / auto-hide** — the pill IS in a full-screen recording on macOS 14+ (documented); `YOOM_HUD_HIDE_WHILE_RECORDING=1` hides it 1 s after you stop touching it and flashes it back on a hotkey.
+- **E. Camera hygiene** — the green indicator goes out within ~2 s of reaching review, and immediately on quit; the packaged build attributes the camera to "Yoom", not Terminal.
+- **F. Regressions** — system audio still lands, bubble drag still drives the burned-in bubble with the window hidden, the picker still opens on the right tab, the beforeunload guard still challenges a close mid-take, and plain Chrome is unchanged.
+- **G. Dev ergonomics** — tray → Developer → Developer tools (detached) and Reload recorder.
