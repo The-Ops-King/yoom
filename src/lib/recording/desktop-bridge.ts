@@ -1,4 +1,9 @@
-import type { BubbleAppearance, DesktopBridge, DesktopShortcut } from "./types";
+import type {
+  BubbleAppearance,
+  DesktopBridge,
+  DesktopShortcut,
+  HudState,
+} from "./types";
 
 declare global {
   interface Window {
@@ -75,4 +80,13 @@ export function setDesktopRecordingActive(active: boolean): void {
 /** Tell the floating bubble which camera to open. No-op in the browser. */
 export function setDesktopCameraDevice(deviceId: string | null): void {
   getDesktopBridge()?.setCameraDevice?.(deviceId);
+}
+
+/**
+ * Push the HUD's view of the current take. No-op in the browser, and no-op
+ * against a Phase-4 shell that predates the HUD — the optional call is the
+ * whole forward-compatibility story.
+ */
+export function setDesktopHudState(state: HudState): void {
+  getDesktopBridge()?.setHudState?.(state);
 }

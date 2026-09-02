@@ -9,6 +9,7 @@ import {
   setDesktopBubbleAppearance,
   setDesktopBubbleVisible,
   setDesktopCameraDevice,
+  setDesktopHudState,
   setDesktopRecordingActive,
 } from "./desktop-bridge";
 
@@ -177,5 +178,52 @@ describe("desktop-bridge", () => {
     setDesktopRecordingActive(true);
     setDesktopRecordingActive(false);
     expect(calls).toEqual([true, false]);
+  });
+});
+
+describe("setDesktopHudState", () => {
+  // This suite's env is `node` (see vitest.config.mts), so there is no ambient
+  // `window` to assign to — the bridge is stubbed the same way the suite above
+  // stubs it rather than mutating a jsdom global.
+  it("is a no-op with no bridge", () => {
+    vi.stubGlobal("window", {});
+    expect(() =>
+      setDesktopHudState({
+        status: "recording",
+        elapsedMs: 1000,
+        countdown: 0,
+        markers: 0,
+        bubbleVisible: true,
+      }),
+    ).not.toThrow();
+  });
+
+  it("forwards the state to a version-1 bridge", () => {
+    const setHudState = vi.fn();
+    vi.stubGlobal("window", {
+      __yoomDesktop: { version: 1, isDesktop: true, setHudState },
+    });
+    const state = {
+      status: "paused" as const,
+      elapsedMs: 4200,
+      countdown: 0,
+      markers: 2,
+      bubbleVisible: false,
+    };
+    setDesktopHudState(state);
+    expect(setHudState).toHaveBeenCalledWith(state);
+  });
+
+  it("ignores a bridge that does not implement it", () => {
+    vi.stubGlobal("window", { __yoomDesktop: { version: 1, isDesktop: true } });
+    expect(() =>
+      setDesktopHudState({
+        status: "idle",
+        elapsedMs: 0,
+        countdown: 0,
+        markers: 0,
+        bubbleVisible: true,
+      }),
+    ).not.toThrow();
   });
 });

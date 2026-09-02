@@ -38,8 +38,18 @@ export interface MediaSourceProvider {
  * Every hotkey the desktop shell forwards. The web app binds the same chords
  * itself (`use-recorder.ts`), but those only fire while the page has focus;
  * the shell registers them globally and replays them through this union.
+ *
+ * `bubbleToggle` has no global chord — it is the HUD's camera button only.
+ * It rides this channel because the HUD's buttons are, semantically, the same
+ * remote-control actions the hotkeys already are.
  */
-export type DesktopShortcut = "toggle" | "pause" | "mark" | "restart" | "cancel";
+export type DesktopShortcut =
+  | "toggle"
+  | "pause"
+  | "mark"
+  | "restart"
+  | "cancel"
+  | "bubbleToggle";
 
 /**
  * What the floating desktop camera bubble should look like. `visible` is the
@@ -68,6 +78,42 @@ export interface BubbleAppearance {
   cameraAspect?: number;
 }
 
+/**
+ * The subset of `RecorderStatus` the HUD needs. Anything the HUD does not
+ * distinguish (`acquiring`, `setup`, `uploading`, `done`) collapses to
+ * `"other"`, so the shell never has to track the web app's full state machine.
+ */
+export type HudStatus =
+  | "idle"
+  | "countdown"
+  | "recording"
+  | "paused"
+  | "stopping"
+  | "review"
+  | "error"
+  | "other";
+
+/**
+ * What the recording HUD renders. Pushed from the page at ~4 Hz while a take
+ * is live, and once on every status change.
+ *
+ * `markers` is a COUNT, not the array: the HUD only shows how many were
+ * dropped, and structured-cloning a growing array four times a second across
+ * the contextBridge for no reason would be silly.
+ *
+ * MUST stay identical to `HudState` in `desktop/src/shared/ipc.ts`.
+ */
+export interface HudState {
+  status: HudStatus;
+  /** Milliseconds of recorded material, excluding paused time. */
+  elapsedMs: number;
+  /** 3…1 while `status === "countdown"`, else 0. */
+  countdown: number;
+  markers: number;
+  /** The user's camera-bubble toggle, so the HUD button can show its state. */
+  bubbleVisible: boolean;
+}
+
 export interface DesktopBridge {
   version: 1;
   isDesktop?: boolean;
@@ -94,6 +140,12 @@ export interface DesktopBridge {
    * shell's auto-hide of the live bubble window for window and framed captures.
    */
   setRecordingActive?(active: boolean): void;
+  /**
+   * Push the HUD's view of the take. Throttled by the caller; the shell
+   * forwards it to the HUD window verbatim and uses the status transitions to
+   * hide and re-show the recorder window.
+   */
+  setHudState?(state: HudState): void;
   /** Which camera the floating bubble should open (`null` = default device). */
   setCameraDevice?(deviceId: string | null): void;
 }
