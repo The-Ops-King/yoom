@@ -19,6 +19,13 @@ export interface BubbleAppearance {
   size: BubbleSize;
   mirror: boolean;
   visible: boolean;
+  /**
+   * True when the web app's framed capture is on. Framed capture insets the
+   * screen inside a larger canvas, so the composited bubble and the live
+   * bubble window no longer occupy the same pixels and self-occlusion stops
+   * working — `bubble.ts#shouldShow` hides the live window while recording.
+   */
+  framed: boolean;
 }
 
 export interface SourceInfo {

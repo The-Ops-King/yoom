@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC, type BubbleAppearance } from "../shared/ipc";
+import type { BubbleAppearance } from "../shared/ipc";
+import { IPC } from "./bubble.channels";
 
 contextBridge.exposeInMainWorld("__yoomBubble", {
   onApply(cb: (appearance: BubbleAppearance) => void): void {

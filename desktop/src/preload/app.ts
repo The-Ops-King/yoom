@@ -1,10 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
-import {
-  IPC,
-  type BubbleAppearance,
-  type DesktopShortcut,
-  type SurfacePref,
-} from "../shared/ipc";
+// Types only — a *value* import of `../shared/ipc` would make Rollup emit a
+// shared chunk that a sandboxed preload cannot require. See `app.channels.ts`.
+import type { BubbleAppearance, DesktopShortcut, SurfacePref } from "../shared/ipc";
+import { IPC } from "./app.channels";
 
 /**
  * MUST match `DesktopBridge` in the web app's `src/lib/recording/types.ts`.
@@ -18,7 +16,7 @@ import {
  * announce the surface preference first, so the native picker opens on the
  * right tab.
  */
-const bridge = {
+export const bridge = {
   version: 1 as const,
   isDesktop: true,
 
@@ -45,6 +43,17 @@ const bridge = {
     const handler = (_e: unknown, pos: { x: number; y: number }) => cb(pos);
     ipcRenderer.on(IPC.bubbleMoved, handler);
     return () => ipcRenderer.removeListener(IPC.bubbleMoved, handler);
+  },
+
+  /**
+   * The bubble's own control strip (hide, cycle shape) changes the appearance
+   * from the desktop side; main echoes the new appearance back on the same
+   * channel the web app writes to, so the web state stays authoritative.
+   */
+  onBubbleAppearance(cb: (appearance: BubbleAppearance) => void): () => void {
+    const handler = (_e: unknown, appearance: BubbleAppearance) => cb(appearance);
+    ipcRenderer.on(IPC.setBubbleAppearance, handler);
+    return () => ipcRenderer.removeListener(IPC.setBubbleAppearance, handler);
   },
 
   setBubbleAppearance(appearance: BubbleAppearance): void {

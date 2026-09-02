@@ -82,9 +82,14 @@ export function bubbleWindowSize(
 ): { width: number; height: number } {
   const fraction = SIZE_FRACTION[size];
   const aspect = BUBBLE_ASPECT[shape];
-  const rawW = Math.round(displayWidthDip * fraction);
-  const width = Math.max(MIN_BUBBLE_PX, rawW);
-  const height = Math.max(MIN_BUBBLE_PX, Math.round(width / aspect));
+  // A non-finite display width (a display that has gone away mid-drag) is
+  // treated as 0 so the minimum takes over, instead of producing NaN bounds.
+  const dip = Number.isFinite(displayWidthDip) ? displayWidthDip : 0;
+  // The minimum is applied to the WIDTH ONLY, then the height is derived from
+  // it. Clamping both independently would silently break the aspect ratio at
+  // small sizes, and the live window would stop matching the composited bubble.
+  const width = Math.max(MIN_BUBBLE_PX, Math.round(dip * fraction));
+  const height = Math.max(1, Math.round(width / aspect));
   return { width, height };
 }
 
@@ -96,7 +101,9 @@ export function shapeToCss(
   const borderRadius =
     shape === "circle"
       ? "50%"
-      : shape === "square"
+      // `square` and `full` are both hard-edged: `full` is camera-only mode,
+      // which fills its container and never gets a rounded corner.
+      : shape === "square" || shape === "full"
         ? "0px"
         : `${Math.round(BUBBLE_RADIUS_FRACTION * 100)}%`;
   return { borderRadius, transform: mirror ? "scaleX(-1)" : "none" };

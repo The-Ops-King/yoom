@@ -22,6 +22,7 @@ let appearance: BubbleAppearance = {
   size: "medium",
   mirror: true,
   visible: true,
+  framed: false,
 };
 /** Status-driven: true while the recorder is in setup/countdown/recording/paused. */
 let shellVisible = false;
@@ -178,7 +179,15 @@ function shouldShow(): boolean {
   // Amendment 1: hide while the encoder runs when self-occlusion cannot work —
   // either because the operator forced it, or because a window capture cannot
   // be occluded by a bubble composited at display-normalized coordinates.
-  if (recordingActive && (HIDE_WHILE_RECORDING || captureKind === "window")) return false;
+  // Framed capture enlarges the canvas and insets the screen inside it, so the
+  // composited bubble lands somewhere the live window is not — same failure
+  // mode as a window capture.
+  if (
+    recordingActive &&
+    (HIDE_WHILE_RECORDING || captureKind === "window" || appearance.framed)
+  ) {
+    return false;
+  }
   return true;
 }
 

@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { BubbleAppearance } from "./types";
 import {
   getDesktopBridge,
   isDesktop,
+  onDesktopBubbleAppearance,
   onDesktopBubbleMove,
   onDesktopShortcut,
   setDesktopBubbleAppearance,
   setDesktopBubbleVisible,
   setDesktopCameraDevice,
+  setDesktopRecordingActive,
 } from "./desktop-bridge";
 
 afterEach(() => {
@@ -92,9 +95,12 @@ describe("desktop-bridge", () => {
         size: "medium",
         mirror: true,
         visible: true,
+        framed: false,
       }),
     ).not.toThrow();
     expect(() => setDesktopCameraDevice(null)).not.toThrow();
+    expect(() => setDesktopRecordingActive(true)).not.toThrow();
+    expect(onDesktopBubbleAppearance(() => {})).toBeTypeOf("function");
   });
 
   it("bubble setters reach a version-1 bridge", () => {
@@ -113,15 +119,60 @@ describe("desktop-bridge", () => {
       size: "large",
       mirror: false,
       visible: true,
+      framed: true,
     });
     setDesktopCameraDevice("cam-1");
     expect(calls).toEqual([
       ["visible", false],
       [
         "appearance",
-        { shape: "rounded", size: "large", mirror: false, visible: true },
+        {
+          shape: "rounded",
+          size: "large",
+          mirror: false,
+          visible: true,
+          framed: true,
+        },
       ],
       ["camera", "cam-1"],
     ]);
+  });
+
+  it("forwards appearance changes made by the desktop bubble itself", () => {
+    const seen: BubbleAppearance[] = [];
+    let emit: ((a: BubbleAppearance) => void) | null = null;
+    vi.stubGlobal("window", {
+      __yoomDesktop: {
+        version: 1,
+        onBubbleAppearance: (cb: (a: BubbleAppearance) => void) => {
+          emit = cb;
+          return () => {};
+        },
+      },
+    });
+    const off = onDesktopBubbleAppearance((a) => seen.push(a));
+    const next: BubbleAppearance = {
+      shape: "square",
+      size: "small",
+      mirror: false,
+      visible: false,
+      framed: false,
+    };
+    emit!(next);
+    expect(seen).toEqual([next]);
+    expect(off).toBeTypeOf("function");
+  });
+
+  it("reports recording-active to a version-1 bridge", () => {
+    const calls: boolean[] = [];
+    vi.stubGlobal("window", {
+      __yoomDesktop: {
+        version: 1,
+        setRecordingActive: (a: boolean) => calls.push(a),
+      },
+    });
+    setDesktopRecordingActive(true);
+    setDesktopRecordingActive(false);
+    expect(calls).toEqual([true, false]);
   });
 });

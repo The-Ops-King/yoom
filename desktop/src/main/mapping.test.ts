@@ -79,10 +79,35 @@ describe("bubbleWindowSize", () => {
     });
   });
 
-  it("never returns a window smaller than the minimum usable size", () => {
+  it("never returns a window narrower than the minimum usable size", () => {
     const { width, height } = bubbleWindowSize("circle", "small", 200);
-    expect(width).toBeGreaterThanOrEqual(120);
-    expect(height).toBeGreaterThanOrEqual(120);
+    expect(width).toBe(120);
+    expect(height).toBe(120);
+  });
+
+  it("clamps the width first so the minimum keeps the aspect ratio", () => {
+    // 200 * 0.15 = 30 → clamped to the 120px minimum, and the height follows
+    // from the aspect rather than being clamped independently (which would
+    // turn a 16:9 bubble into a square and break self-occlusion).
+    expect(bubbleWindowSize("rounded", "small", 200)).toEqual({
+      width: 120,
+      height: 68,
+    });
+    expect(bubbleWindowSize("portrait", "small", 200)).toEqual({
+      width: 120,
+      height: 213,
+    });
+  });
+
+  it("treats a non-finite display width as zero", () => {
+    expect(bubbleWindowSize("circle", "medium", Number.NaN)).toEqual({
+      width: 120,
+      height: 120,
+    });
+    expect(bubbleWindowSize("circle", "medium", Number.POSITIVE_INFINITY)).toEqual({
+      width: 120,
+      height: 120,
+    });
   });
 
   it("knows every shape's aspect ratio", () => {
@@ -107,6 +132,10 @@ describe("shapeToCss", () => {
       borderRadius: "0px",
       transform: "none",
     });
+  });
+
+  it("squares off `full` too — camera-only mode fills its container", () => {
+    expect(shapeToCss("full", false).borderRadius).toBe("0px");
   });
 
   it("uses the shared 14% corner fraction for rounded and portrait", () => {

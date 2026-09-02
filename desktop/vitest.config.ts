@@ -5,6 +5,6 @@ export default defineConfig({
     environment: "node",
     // Only the pure main-process maths is unit-tested. Everything that touches
     // Electron, media or TCC lives in the manual verification matrix.
-    include: ["src/main/**/*.test.ts"],
+    include: ["src/main/**/*.test.ts", "src/preload/**/*.test.ts"],
   },
 });

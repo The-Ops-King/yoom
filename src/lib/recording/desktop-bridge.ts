@@ -39,6 +39,19 @@ export function onDesktopBubbleMove(
   return bridge.onBubbleMove(cb);
 }
 
+/**
+ * Subscribe to appearance changes the desktop bubble makes on its own — its
+ * hover strip can hide the bubble and cycle its shape, and main echoes the new
+ * appearance back so the web state stays authoritative.
+ */
+export function onDesktopBubbleAppearance(
+  cb: (appearance: BubbleAppearance) => void,
+): () => void {
+  const bridge = getDesktopBridge();
+  if (!bridge?.onBubbleAppearance) return () => {};
+  return bridge.onBubbleAppearance(cb);
+}
+
 /** Show/hide the floating bubble window. No-op in the browser. */
 export function setDesktopBubbleVisible(visible: boolean): void {
   getDesktopBridge()?.setBubbleVisible?.(visible);
@@ -47,6 +60,16 @@ export function setDesktopBubbleVisible(visible: boolean): void {
 /** Push shape/size/mirror/visibility to the floating bubble. No-op in the browser. */
 export function setDesktopBubbleAppearance(appearance: BubbleAppearance): void {
   getDesktopBridge()?.setBubbleAppearance?.(appearance);
+}
+
+/**
+ * Tell the shell whether the encoder is running. It uses this to hide the live
+ * bubble window for the captures where self-occlusion cannot work (window
+ * captures, framed capture, or the YOOM_BUBBLE_HIDE_WHILE_RECORDING escape
+ * hatch). No-op in the browser.
+ */
+export function setDesktopRecordingActive(active: boolean): void {
+  getDesktopBridge()?.setRecordingActive?.(active);
 }
 
 /** Tell the floating bubble which camera to open. No-op in the browser. */

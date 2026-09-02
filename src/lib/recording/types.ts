@@ -52,6 +52,13 @@ export interface BubbleAppearance {
   size: BubbleSize;
   mirror: boolean;
   visible: boolean;
+  /**
+   * True when framed capture is on. The shell uses it to hide the live bubble
+   * window while recording: framing insets the screen inside a larger canvas,
+   * so the burned-in bubble no longer covers the captured pixels of the live
+   * one and both would appear in the frame.
+   */
+  framed: boolean;
 }
 
 export interface DesktopBridge {
@@ -71,8 +78,15 @@ export interface DesktopBridge {
   onBubbleMove?(cb: (pos: { x: number; y: number }) => void): () => void;
   /** Shape / size / mirror / user-visibility of the floating bubble. */
   setBubbleAppearance?(appearance: BubbleAppearance): void;
+  /** The desktop bubble's own control strip changed shape or visibility. */
+  onBubbleAppearance?(cb: (appearance: BubbleAppearance) => void): () => void;
   /** Status-driven show/hide of the floating bubble window. */
   setBubbleVisible?(visible: boolean): void;
+  /**
+   * True while the encoder is running (`recording` or `paused`). Drives the
+   * shell's auto-hide of the live bubble window for window and framed captures.
+   */
+  setRecordingActive?(active: boolean): void;
   /** Which camera the floating bubble should open (`null` = default device). */
   setCameraDevice?(deviceId: string | null): void;
 }

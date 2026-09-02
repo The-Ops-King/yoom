@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC, type PickerPayload } from "../shared/ipc";
+import type { PickerPayload } from "../shared/ipc";
+import { IPC } from "./picker.channels";
 
 contextBridge.exposeInMainWorld("__yoomPicker", {
   onSources(cb: (payload: PickerPayload) => void): void {
