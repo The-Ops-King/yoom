@@ -31,3 +31,14 @@ If #2/#3 land, persist the event stream as a JSON sidecar next to the video in D
 
 ## Sequencing note
 Build #1 in Phase 2 (pure compositor work, browser-only). Build #2–#4 as a Phase 5 "desktop polish" after the Electron shell exists, since all three depend on OS-level cursor data. Phase 2 should still add the overlay-layer seam so Phase 5 doesn't have to refactor the draw loop.
+
+## Phase 1 follow-ups (non-blocking, from the final review, 2026-09-01)
+
+- `src/app/layout.tsx`: Next auto-injects a relative `<link rel="icon" href="/favicon.ico?...">` from `src/app/favicon.ico`, which resolves to the wrong host on `jtylerray.com/v/*`. Move the icon to `public/` and keep only the absolute `metadata.icons` entry.
+- `src/components/video-player.tsx` is currently unused; Phase 3's detail page should either reuse it or delete it.
+- `/api/stream` `ETag` exposes `drive_file_id`; hash it (cheap) if that ever matters.
+- HEAD with a Range on `/api/stream` is RFC-consistent now; rangeless GET on files > 32 MiB returns 206 by design (Chrome/Safari fine; watch Firefox).
+- `use-view-tracker`: bfcache restores after `pagehide` never re-close a session (documented).
+- `db.test.ts` is mostly mock plumbing; add a real integration test against a Supabase branch before Phase 3 grows the query surface.
+- Phase 2 must add the overlay-layer seam in the compositor (see "For later" above) and Safari `video/mp4` codec fallback.
+- Verification artefact: video `bc040bca-a0fd-44aa-a8f3-f5843685eeb5` (slug `uunrv7zm`, 700 KB of random bytes named `yoom-verify.webm`) exists in Drive + DB; delete it from the Phase 3 dashboard once that exists, or via SQL + Drive trash.
