@@ -17,8 +17,14 @@ export function Preview({ ctx }: { ctx: StagingContext }) {
         output size; the aspect box above lays the element out in CSS pixels.
       */}
       <canvas ref={canvasRef} width={size.width} height={size.height} className="h-full w-full" />
-      <CameraLayer ctx={ctx} />
+      {/*
+        Order matters: the overlay layer (z-10) sits under the camera layer
+        (z-20) so the bubble stays draggable in select mode, while an armed
+        drawing tool still gets the whole frame — the camera layer takes
+        pointer events only on the bubble's own box.
+      */}
       <OverlayLayer ctx={ctx} />
+      <CameraLayer ctx={ctx} />
       <button
         type="button"
         onClick={toggle}
