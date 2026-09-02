@@ -1,6 +1,8 @@
 import { app } from "electron";
 import { installCaptureIpc, installDisplayMediaHandler } from "./capture";
 import { destroyBubble, installBubbleIpc } from "./bubble";
+import { destroyHud, installHudIpc, onHudStatusChange } from "./hud";
+import { warmPermissionsAtLaunch } from "./permissions";
 import { installPickerIpc } from "./picker";
 import { registerShortcuts, unregisterShortcuts } from "./shortcuts";
 import { createTray, destroyTray, refreshTrayMenu } from "./tray";
@@ -40,11 +42,20 @@ if (!app.requestSingleInstanceLock()) {
     installPickerIpc();
     installBubbleIpc();
     installDisplayMediaHandler(yoomSession());
+    installHudIpc();
+    // The tray menu mirrors the HUD's transport controls, so it has to
+    // re-render whenever the take's status moves.
+    onHudStatusChange(() => refreshTrayMenu());
 
     createTray();
     createRecorderWindow();
     registerShortcuts();
     refreshTrayMenu();
+
+    // Fire-and-forget: the prompts are modal to the user, not to the app, and
+    // nothing below depends on the answer. Camera and microphone are asked for
+    // here so the web app's device pickers are not empty on first launch.
+    void warmPermissionsAtLaunch();
   });
 
   // With no dock icon there is no dock click to reopen from, but the tray's
@@ -56,6 +67,7 @@ if (!app.requestSingleInstanceLock()) {
   // Closing the recorder window must NOT quit: the shell lives in the menu bar.
   app.on("window-all-closed", () => {
     destroyBubble();
+    destroyHud();
     refreshTrayMenu();
   });
 
@@ -64,11 +76,13 @@ if (!app.requestSingleInstanceLock()) {
   // makes the macOS camera indicator go out at quit rather than at process exit.
   app.on("before-quit", () => {
     destroyBubble();
+    destroyHud();
   });
 
   app.on("will-quit", () => {
     unregisterShortcuts();
     destroyBubble();
+    destroyHud();
     destroyTray();
   });
 }
