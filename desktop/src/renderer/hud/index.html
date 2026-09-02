@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      `loadFile` gives the document an opaque origin, so `'self'` alone matches
+      nothing and both the stylesheet and the module script are blocked — the
+      window renders blank in the packaged app. `file:` is what actually
+      matches; ws:/localhost keep electron-vite's HMR client working in dev,
+      which also needs inline styles.
+    -->
+    <meta http-equiv="content-security-policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data:; connect-src 'self' ws: http://localhost:*" />
+    <title>Yoom recording</title>
+    <link rel="stylesheet" href="./hud.css" />
+  </head>
+  <body>
+    <!-- The pill is the drag region; every button opts out. -->
+    <div id="pill">
+      <div id="status">
+        <span id="dot" aria-hidden="true"></span>
+        <span id="time">00:00</span>
+        <span id="markers" hidden></span>
+      </div>
+
+      <div id="countdown" hidden aria-live="assertive">3</div>
+
+      <div id="controls">
+        <button id="pause" type="button" title="Pause (⌘⇧P)" aria-label="Pause">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1"/><rect x="9" y="3" width="3" height="10" rx="1"/></svg>
+        </button>
+        <button id="stop" type="button" class="primary" title="Stop (⌘⇧L)" aria-label="Stop recording">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>
+        </button>
+        <button id="mark" type="button" title="Drop a marker (⌘⇧M)" aria-label="Drop a marker">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2h8v12l-4-3-4 3z"/></svg>
+        </button>
+        <button id="camera" type="button" title="Hide camera bubble" aria-label="Toggle camera bubble" aria-pressed="true">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4.5"/><circle cx="8" cy="8" r="2" fill="#0d0d0d"/></svg>
+        </button>
+        <button id="cancel" type="button" title="Discard recording (⌘⇧X)" aria-label="Discard recording">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M6.5 4V2.5h3V4M4.5 4l.6 9h5.8l.6-9"/></svg>
+        </button>
+      </div>
+    </div>
+    <script type="module" src="./hud.ts"></script>
+  </body>
+</html>
