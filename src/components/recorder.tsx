@@ -16,6 +16,7 @@ export function Recorder() {
   const {
     state,
     capabilities,
+    desktop,
     canvasRef,
     screenVideoRef,
     reviewUrl,
@@ -164,6 +165,13 @@ export function Recorder() {
             <div className="flex justify-center">
               <YoomLogo size="sm" />
             </div>
+          )}
+
+          {configuring && desktop && capabilities.systemAudio === "full" && (
+            <p className="flex items-center justify-center gap-1.5 text-[11px] text-muted-dim">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              Desktop app · System audio: on
+            </p>
           )}
 
           {configuring && (

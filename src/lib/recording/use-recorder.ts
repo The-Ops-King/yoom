@@ -5,7 +5,17 @@ import { useRouter } from "next/navigation";
 import fixWebmDuration from "fix-webm-duration";
 import { AudioMixer } from "./audio-mixer";
 import { Compositor } from "./compositor";
-import { onDesktopShortcut } from "./desktop-bridge";
+import {
+  isDesktop,
+  onDesktopBubbleAppearance,
+  onDesktopBubbleMove,
+  onDesktopShortcut,
+  setDesktopBubbleAppearance,
+  setDesktopBubbleVisible,
+  setDesktopCameraDevice,
+  setDesktopRecordingActive,
+} from "./desktop-bridge";
+import { computeFrameLayout, displayPosToCanvasPos } from "./geometry";
 import { getProvider } from "./media-sources";
 import { createFpsOverlay, createNoopOverlay, debugOverlaysEnabled } from "./overlays";
 import {
@@ -56,6 +66,8 @@ function revokeBlob(src: string | undefined): void {
 export interface UseRecorderResult {
   state: RecorderState;
   capabilities: Capabilities;
+  /** True when running inside the Electron shell (Phase 4). */
+  desktop: boolean;
   /** Canvas the compositor paints into (camera and screen+camera modes). */
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   /** <video> element used to preview screen-only recordings. */
@@ -124,6 +136,9 @@ export function useRecorder(): UseRecorderResult {
     nativePicker: false,
     surfaceHints: true,
   });
+  // `window.__yoomDesktop` does not exist during SSR, so this has to be set
+  // from the boot effect rather than a lazy initializer.
+  const [desktop, setDesktop] = useState(false);
   const [reviewUrl, setReviewUrl] = useState<string | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   // Bumped by `restartNow`: a recording → recording restart does not change
@@ -181,6 +196,7 @@ export function useRecorder(): UseRecorderResult {
     dispatch({ type: "SET_BUBBLE", patch: settings.bubble });
     dispatch({ type: "SET_FRAME", patch: settings.frame });
     setCapabilities(getProvider().capabilities());
+    setDesktop(isDesktop());
     prevFrameSrcRef.current = settings.frame.background.src;
     hydratedRef.current = true;
   }, []);
@@ -810,6 +826,9 @@ export function useRecorder(): UseRecorderResult {
   }, [acquire, discardRecorder]);
 
   // Desktop shell forwards the same shortcuts even when the tab is unfocused.
+  // The five actions mirror the in-page chords exactly (⌘⇧L/P/M/K/X); the
+  // status guards are duplicated rather than shared because the in-page
+  // listener also has to call `preventDefault` on the raw event.
   useEffect(() => {
     return onDesktopShortcut((action) => {
       const status = stateRef.current.status;
@@ -820,9 +839,109 @@ export function useRecorder(): UseRecorderResult {
       } else if (action === "pause") {
         if (status === "recording") dispatch({ type: "PAUSE" });
         else if (status === "paused") dispatch({ type: "RESUME" });
+      } else if (action === "mark") {
+        if (status === "recording") dispatch({ type: "MARK" });
+      } else if (action === "restart") {
+        if (status !== "countdown" && status !== "recording" && status !== "paused") return;
+        discardRecorder();
+        dispatch({ type: "RESTART_NOW" });
+        setRestartToken((n) => n + 1);
+      } else if (action === "cancel") {
+        if (
+          status !== "countdown" &&
+          status !== "recording" &&
+          status !== "paused" &&
+          status !== "stopping"
+        ) {
+          return;
+        }
+        discardRecorder();
+        dispatch({ type: "CANCEL" });
       }
     });
-  }, [acquire]);
+  }, [acquire, discardRecorder]);
+
+  // ---------- floating desktop bubble ----------
+
+  // The shell's bubble window only makes sense over a screen capture with a
+  // camera. Camera-only mode fills the canvas, and screen-only has no camera.
+  const desktopBubbleActive =
+    state.mode === "screen+camera" &&
+    (state.status === "setup" ||
+      state.status === "countdown" ||
+      state.status === "recording" ||
+      state.status === "paused");
+
+  useEffect(() => {
+    setDesktopBubbleVisible(desktopBubbleActive);
+    return () => setDesktopBubbleVisible(false);
+  }, [desktopBubbleActive]);
+
+  // The shell hides the live bubble window while the encoder runs whenever
+  // self-occlusion cannot work (window captures, framed capture, or the
+  // YOOM_BUBBLE_HIDE_WHILE_RECORDING escape hatch).
+  useEffect(() => {
+    setDesktopRecordingActive(state.status === "recording" || state.status === "paused");
+  }, [state.status]);
+
+  useEffect(() => {
+    setDesktopBubbleAppearance({
+      shape: state.bubble.shape,
+      size: state.bubble.size,
+      mirror: state.bubble.mirror,
+      visible: state.bubble.visible,
+      framed: state.frame.enabled,
+    });
+  }, [
+    state.bubble.shape,
+    state.bubble.size,
+    state.bubble.mirror,
+    state.bubble.visible,
+    state.frame.enabled,
+  ]);
+
+  useEffect(() => {
+    setDesktopCameraDevice(state.cameraId || null);
+  }, [state.cameraId]);
+
+  // The bubble's own hover strip can hide it and cycle its shape; the shell
+  // echoes the new appearance back so the web state stays authoritative and
+  // the change is persisted with the rest of the bubble config.
+  useEffect(() => {
+    return onDesktopBubbleAppearance(({ shape, size, mirror, visible }) => {
+      dispatch({ type: "SET_BUBBLE", patch: { shape, size, mirror, visible } });
+    });
+  }, []);
+
+  // The shell reports a centre normalized to the captured DISPLAY. With framed
+  // capture on, the canvas is bigger than the screen and the screen sits inset,
+  // so the position has to be re-based before it reaches the bubble config.
+  // `immediate: true` skips the compositor's 300 ms tween: the burned-in bubble
+  // must not lag the window the user is physically dragging, or the live
+  // window's captured pixels peek out from behind it.
+  useEffect(() => {
+    return onDesktopBubbleMove((pos) => {
+      const track = screenStreamRef.current?.getVideoTracks()[0];
+      const settings = track?.getSettings();
+      const srcW = settings?.width ?? 0;
+      const srcH = settings?.height ?? 0;
+      const mapped =
+        srcW > 0 && srcH > 0
+          ? displayPosToCanvasPos(
+              pos,
+              computeFrameLayout(srcW, srcH, stateRef.current.frame),
+            )
+          : pos;
+
+      if (compositorRef.current) {
+        compositorRef.current.setBubble(
+          { ...stateRef.current.bubble, pos: mapped },
+          { immediate: true },
+        );
+      }
+      dispatch({ type: "SET_BUBBLE", patch: { pos: mapped } });
+    });
+  }, []);
 
   // Polled rather than pushed so the draw loop stays free of React.
   useEffect(() => {
@@ -917,6 +1036,7 @@ export function useRecorder(): UseRecorderResult {
   return {
     state,
     capabilities,
+    desktop,
     canvasRef,
     screenVideoRef,
     reviewUrl,
