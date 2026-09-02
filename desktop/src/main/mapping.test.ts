@@ -110,6 +110,17 @@ describe("bubbleWindowSize", () => {
     });
   });
 
+  it("falls back to medium/circle for an unknown size or shape", () => {
+    // Untrusted IPC payloads reach this function; NaN bounds would take the
+    // window down. `bubble.ts` validates first, this is the second defence.
+    expect(
+      bubbleWindowSize("circle", "huge" as unknown as "medium", 1920),
+    ).toEqual(bubbleWindowSize("circle", "medium", 1920));
+    expect(
+      bubbleWindowSize("blob" as unknown as "circle", "medium", 1920),
+    ).toEqual(bubbleWindowSize("circle", "medium", 1920));
+  });
+
   it("knows every shape's aspect ratio", () => {
     expect(BUBBLE_ASPECT.circle).toBe(1);
     expect(BUBBLE_ASPECT.square).toBe(1);

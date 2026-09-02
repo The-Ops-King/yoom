@@ -4,12 +4,14 @@ import {
   IPC,
   type BubbleAppearance,
   type BubbleShape,
+  type BubbleSize,
 } from "../shared/ipc";
 import { bubbleCentreToNormalized, bubbleWindowSize, cycleShape } from "./mapping";
 import {
   registerShellWebContents,
   sendToRecorder,
   unregisterShellWebContents,
+  yoomSession,
 } from "./windows";
 
 const HIDE_WHILE_RECORDING = process.env.YOOM_BUBBLE_HIDE_WHILE_RECORDING === "1";
@@ -87,7 +89,11 @@ function applySize(): void {
     width,
     height,
   });
-  applyingBounds = false;
+  // macOS emits `moved`/`resized` asynchronously after setBounds, so clearing
+  // the flag synchronously would let our own resize echo back as a user drag.
+  setTimeout(() => {
+    applyingBounds = false;
+  }, 0);
   // The centre is unchanged by a resize, but the clamped normalized value can
   // move when the window grows past a display edge, so resync.
   reportPosition();
@@ -127,6 +133,10 @@ function createBubbleWindow(): BrowserWindow {
     // focusable and simply never takes keyboard input.
     acceptFirstMouse: true,
     webPreferences: {
+      // Same session the permission handlers are installed on, otherwise the
+      // shell-origin branch of installPermissionHandlers never runs and this
+      // window's getUserMedia is only allowed by default-session accident.
+      session: yoomSession(),
       preload: join(__dirname, "../preload/bubble.js"),
       contextIsolation: true,
       sandbox: true,
@@ -256,10 +266,35 @@ export function destroyBubble(): void {
   bubbleWindow = null;
 }
 
+const SHAPES: readonly BubbleShape[] = ["circle", "rounded", "square", "portrait", "full"];
+const SIZES: readonly BubbleSize[] = ["small", "medium", "large"];
+
+/**
+ * IPC payloads come from a renderer, so they are untrusted input. An unknown
+ * shape or size would index the mapping tables to `undefined` and produce NaN
+ * window bounds; a malformed message is dropped instead.
+ */
+function parseAppearance(value: unknown): BubbleAppearance | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const shape = raw.shape as BubbleShape;
+  const size = raw.size as BubbleSize;
+  if (!SHAPES.includes(shape)) return null;
+  if (!SIZES.includes(size)) return null;
+  return {
+    shape,
+    size,
+    mirror: !!raw.mirror,
+    visible: !!raw.visible,
+    framed: !!raw.framed,
+  };
+}
+
 export function installBubbleIpc(): void {
-  ipcMain.on(IPC.setBubbleAppearance, (_e, next: BubbleAppearance) => {
-    if (!next || typeof next !== "object") return;
-    setBubbleAppearance(next);
+  ipcMain.on(IPC.setBubbleAppearance, (_e, next: unknown) => {
+    const parsed = parseAppearance(next);
+    if (!parsed) return;
+    setBubbleAppearance(parsed);
   });
   ipcMain.on(IPC.setBubbleVisible, (_e, visible: boolean) => {
     setBubbleVisible(!!visible);

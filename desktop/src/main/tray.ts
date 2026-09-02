@@ -22,7 +22,13 @@ function iconPath(): string {
 export function createTray(): Tray {
   if (tray) return tray;
 
-  const image = nativeImage.createFromPath(iconPath());
+  let image = nativeImage.createFromPath(iconPath());
+  if (image.isEmpty()) {
+    // `new Tray(emptyImage)` throws and takes the whole app down. A packaged
+    // build with a missing extraResource, or a dev run before `npm run icons`,
+    // should still get a (blank) menu-bar item and a working menu.
+    image = nativeImage.createEmpty().resize({ width: 16, height: 16 });
+  }
   // A template image is recoloured by macOS for light and dark menu bars.
   image.setTemplateImage(true);
   tray = new Tray(image);

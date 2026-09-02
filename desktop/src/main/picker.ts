@@ -5,6 +5,7 @@ import {
   getRecorderWindow,
   registerShellWebContents,
   unregisterShellWebContents,
+  yoomSession,
 } from "./windows";
 
 let pickerWindow: BrowserWindow | null = null;
@@ -81,6 +82,10 @@ export function openPicker(payload: PickerPayload): Promise<string | null> {
       modal: false,
       alwaysOnTop: true,
       webPreferences: {
+        // Must be the same session the permission handlers are installed on —
+        // on defaultSession the shell-origin branch of installPermissionHandlers
+        // never runs.
+        session: yoomSession(),
         preload: join(__dirname, "../preload/picker.js"),
         contextIsolation: true,
         sandbox: true,
@@ -97,7 +102,16 @@ export function openPicker(payload: PickerPayload): Promise<string | null> {
       win.webContents.send(IPC.pickerSources, payload);
     });
     // Clicking away is a cancel — the web app already handles NotAllowedError.
-    win.on("blur", () => settle(null));
+    // Armed only after the window has actually been focused once: a `blur`
+    // that arrives before first focus (which macOS does emit while the window
+    // is still coming up) would cancel the picker the moment it opened.
+    let everFocused = false;
+    win.on("focus", () => {
+      everFocused = true;
+    });
+    win.on("blur", () => {
+      if (everFocused) settle(null);
+    });
     win.on("closed", () => {
       unregisterShellWebContents(wcId);
       settle(null);

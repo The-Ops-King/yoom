@@ -2,10 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta
-      http-equiv="content-security-policy"
-      content="default-src 'none'; media-src blob: mediastream:; style-src 'self'; script-src 'self'"
-    />
+    <!--
+      `loadFile` gives the document an opaque origin, so `'self'` alone matches
+      nothing and both the stylesheet and the module script are blocked — the
+      window renders blank in the packaged app. `file:` is what actually
+      matches; ws:/localhost keep electron-vite's HMR client working in dev,
+      which also needs inline styles.
+    -->
+    <meta http-equiv="content-security-policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data:; media-src 'self' file: mediastream: blob:; connect-src 'self' ws: http://localhost:*" />
     <title>Yoom camera</title>
     <link rel="stylesheet" href="./bubble.css" />
   </head>

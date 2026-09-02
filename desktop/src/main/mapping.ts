@@ -80,8 +80,11 @@ export function bubbleWindowSize(
   size: BubbleSize,
   displayWidthDip: number,
 ): { width: number; height: number } {
-  const fraction = SIZE_FRACTION[size];
-  const aspect = BUBBLE_ASPECT[shape];
+  // Defensive fallbacks: an unknown size or shape would otherwise multiply by
+  // `undefined` and yield NaN bounds. `bubble.ts` validates IPC payloads too;
+  // this is the second line of defence.
+  const fraction = SIZE_FRACTION[size] ?? SIZE_FRACTION.medium;
+  const aspect = BUBBLE_ASPECT[shape] ?? BUBBLE_ASPECT.circle;
   // A non-finite display width (a display that has gone away mid-drag) is
   // treated as 0 so the minimum takes over, instead of producing NaN bounds.
   const dip = Number.isFinite(displayWidthDip) ? displayWidthDip : 0;
