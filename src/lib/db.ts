@@ -1,4 +1,5 @@
 import { cache } from "react";
+import type { VideoEdits } from "@/lib/edits";
 import { getSupabase } from "@/lib/supabase";
 
 export type Video = {
@@ -374,4 +375,43 @@ export async function changeSlug(
   })) as QueryResult<Video | null>;
   const row = unwrap(result);
   return row && row.id ? row : null;
+}
+
+/**
+ * Soft delete. Returns the row (so the caller can trash the Drive files) or
+ * null when it was already deleted — which makes the action idempotent.
+ */
+export async function softDeleteVideo(id: string): Promise<Video | null> {
+  const result = (await getSupabase()
+    .from("videos")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id)
+    .is("deleted_at", null)
+    .select("*")
+    .maybeSingle()) as QueryResult<Video | null>;
+  return unwrap(result);
+}
+
+/** Persist the non-destructive edit decision list (Phase 5 writes it; Phase 3 plumbs it). */
+export async function setVideoEdits(id: string, edits: VideoEdits): Promise<void> {
+  const result = (await getSupabase()
+    .from("videos")
+    .update({ edits })
+    .eq("id", id)) as QueryResult<unknown>;
+  unwrap(result);
+}
+
+export type SettingsPatch = {
+  alert_on_first_view?: boolean;
+  alert_on_completion?: boolean;
+};
+
+export async function updateSettings(patch: SettingsPatch): Promise<Settings> {
+  const result = (await getSupabase()
+    .from("settings")
+    .update(patch)
+    .eq("id", 1)
+    .select("*")
+    .single()) as QueryResult<Settings>;
+  return unwrap(result);
 }

@@ -7,7 +7,15 @@ vi.mock("@/lib/supabase", () => ({
   getSupabase: () => ({ from, rpc }),
 }));
 
-import { changeSlug, isSlugTaken, listVideos, updateVideoMeta } from "@/lib/db";
+import {
+  changeSlug,
+  isSlugTaken,
+  listVideos,
+  setVideoEdits,
+  softDeleteVideo,
+  updateSettings,
+  updateVideoMeta,
+} from "@/lib/db";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -255,5 +263,79 @@ describe("changeSlug", () => {
   it("throws on a database error", async () => {
     rpc.mockResolvedValue({ data: null, error: { message: "nope" } });
     await expect(changeSlug(ROW_A.id, "my-demo")).rejects.toThrow("nope");
+  });
+});
+
+describe("softDeleteVideo", () => {
+  it("stamps deleted_at and returns the row for Drive cleanup", async () => {
+    const builder = chain({
+      data: { ...ROW_A, deleted_at: "2026-09-02T00:00:00Z" },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const row = await softDeleteVideo(ROW_A.id);
+
+    expect(builder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ deleted_at: expect.any(String) }),
+    );
+    expect(builder.eq).toHaveBeenCalledWith("id", ROW_A.id);
+    expect(builder.is).toHaveBeenCalledWith("deleted_at", null);
+    expect(row?.drive_file_id).toBe("drive-a");
+  });
+
+  it("returns null when the video was already deleted", async () => {
+    from.mockReturnValue(chain({ data: null, error: null }));
+    await expect(softDeleteVideo(ROW_A.id)).resolves.toBeNull();
+  });
+});
+
+describe("setVideoEdits", () => {
+  it("writes the edit list as jsonb", async () => {
+    const builder = chain({ data: null, error: null });
+    from.mockReturnValue(builder);
+
+    await setVideoEdits(ROW_A.id, {
+      version: 1,
+      cuts: [],
+      crop: null,
+      zooms: [],
+      overlays: [],
+      markers: [],
+    });
+
+    expect(builder.update).toHaveBeenCalledWith({
+      edits: { version: 1, cuts: [], crop: null, zooms: [], overlays: [], markers: [] },
+    });
+    expect(builder.eq).toHaveBeenCalledWith("id", ROW_A.id);
+  });
+});
+
+describe("updateSettings", () => {
+  it("patches the single settings row and returns it", async () => {
+    const builder = chain({
+      data: {
+        id: 1,
+        alert_on_first_view: false,
+        alert_on_completion: true,
+        updated_at: "2026-09-02T00:00:00Z",
+      },
+      error: null,
+    });
+    from.mockReturnValue(builder);
+
+    const settings = await updateSettings({ alert_on_first_view: false });
+
+    expect(from).toHaveBeenCalledWith("settings");
+    expect(builder.update).toHaveBeenCalledWith({ alert_on_first_view: false });
+    expect(builder.eq).toHaveBeenCalledWith("id", 1);
+    expect(settings.alert_on_first_view).toBe(false);
+  });
+
+  it("throws on a database error", async () => {
+    from.mockReturnValue(chain({ data: null, error: { message: "nope" } }));
+    await expect(updateSettings({ alert_on_completion: true })).rejects.toThrow(
+      "nope",
+    );
   });
 });
