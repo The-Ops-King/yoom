@@ -33,7 +33,8 @@ const STATUSES: readonly HudStatus[] = [
   "recording",
   "paused",
   "stopping",
-  "review",
+  "staging",
+  "rendering",
   "error",
   "other",
 ];
@@ -53,7 +54,6 @@ const INITIAL: HudState = {
   elapsedMs: 0,
   countdown: 0,
   markers: 0,
-  bubbleVisible: true,
 };
 
 let hudWindow: BrowserWindow | null = null;
@@ -245,7 +245,6 @@ function parseHudState(value: unknown): HudState | null {
     elapsedMs: Math.min(num(raw.elapsedMs), 30 * 60 * 1000),
     countdown: Math.min(num(raw.countdown), 10),
     markers: Math.round(num(raw.markers)),
-    bubbleVisible: !!raw.bubbleVisible,
   };
 }
 
@@ -286,7 +285,6 @@ const ACTIONS: readonly DesktopShortcut[] = [
   "mark",
   "restart",
   "cancel",
-  "bubbleToggle",
 ];
 
 export function installHudIpc(): void {

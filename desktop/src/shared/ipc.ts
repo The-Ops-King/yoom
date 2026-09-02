@@ -12,18 +12,12 @@
 export type SurfacePref = "monitor" | "window" | "browser";
 export type BubbleShape = "circle" | "rounded" | "square" | "portrait" | "full";
 export type BubbleSize = "small" | "medium" | "large";
-/**
- * `bubbleToggle` has no global accelerator — it is the HUD's camera button
- * only. It rides the same channel because it is the same kind of thing: a
- * remote-control action forwarded to the recorder renderer.
- */
 export type DesktopShortcut =
   | "toggle"
   | "pause"
   | "mark"
   | "restart"
-  | "cancel"
-  | "bubbleToggle";
+  | "cancel";
 
 /**
  * The subset of the web app's `RecorderStatus` the HUD needs. Everything the
@@ -38,7 +32,8 @@ export type HudStatus =
   | "recording"
   | "paused"
   | "stopping"
-  | "review"
+  | "staging"
+  | "rendering"
   | "error"
   | "other";
 
@@ -49,7 +44,6 @@ export interface HudState {
   countdown: number;
   /** A COUNT, not the marker array — this rides a ~4 Hz push. */
   markers: number;
-  bubbleVisible: boolean;
 }
 
 export interface BubbleAppearance {

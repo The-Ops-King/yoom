@@ -178,8 +178,17 @@ const HIDDEN_DURING: ReadonlySet<HudStatus> = new Set([
   "stopping",
 ]);
 
-/** Statuses that end a take and must bring the recorder window back. */
-const RESTORES: ReadonlySet<HudStatus> = new Set(["review", "error", "idle"]);
+/**
+ * Statuses that end a take and must bring the recorder window back.
+ * `rendering` is treated exactly like `staging` — both show the recorder
+ * window.
+ */
+const RESTORES: ReadonlySet<HudStatus> = new Set([
+  "staging",
+  "rendering",
+  "error",
+  "idle",
+]);
 
 export type RecorderVisibility = "hide" | "show" | "none";
 
@@ -188,7 +197,7 @@ export type RecorderVisibility = "hide" | "show" | "none";
  *
  * Loom-style "the app disappears": entering `countdown` hides it, and only a
  * transition OUT of a hidden status INTO a resolving one brings it back. The
- * `prev` guard is what stops an `idle → review` transition (which never hid
+ * `prev` guard is what stops an `idle → staging` transition (which never hid
  * anything) from yanking a window the user had deliberately hidden themselves.
  */
 export function recorderWindowVisibility(

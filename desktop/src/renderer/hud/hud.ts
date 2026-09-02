@@ -19,7 +19,6 @@ const time = document.getElementById("time") as HTMLSpanElement;
 const markers = document.getElementById("markers") as HTMLSpanElement;
 const countdown = document.getElementById("countdown") as HTMLDivElement;
 const pause = document.getElementById("pause") as HTMLButtonElement;
-const camera = document.getElementById("camera") as HTMLButtonElement;
 
 const PAUSE_ICON =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1"/><rect x="9" y="3" width="3" height="10" rx="1"/></svg>';
@@ -45,9 +44,6 @@ function apply(state: HudState): void {
   pause.innerHTML = paused ? PLAY_ICON : PAUSE_ICON;
   pause.title = paused ? "Resume (⌘⇧P)" : "Pause (⌘⇧P)";
   pause.setAttribute("aria-label", paused ? "Resume" : "Pause");
-
-  camera.setAttribute("aria-pressed", state.bubbleVisible ? "true" : "false");
-  camera.title = state.bubbleVisible ? "Hide camera bubble" : "Show camera bubble";
 }
 
 // `toggle` is "stop" here: the recorder is always mid-take when the HUD is up,
@@ -57,7 +53,6 @@ const ACTIONS = [
   ["pause", "pause"],
   ["mark", "mark"],
   ["cancel", "cancel"],
-  ["camera", "bubbleToggle"],
 ] as const;
 
 for (const [id, action] of ACTIONS) {
