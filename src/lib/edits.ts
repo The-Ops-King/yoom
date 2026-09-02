@@ -8,7 +8,7 @@
  * normalised to the video frame (0..1) so they survive any display size.
  */
 
-import { sanitizeFrame } from "@/lib/recording/settings";
+import { pick, sanitizeFrame, SHAPES } from "@/lib/recording/settings";
 import type { BubbleShape, FrameConfig } from "@/lib/recording/types";
 
 export type Rect = { x: number; y: number; w: number; h: number };
@@ -90,8 +90,13 @@ export const MAX_CUTS = 64;
 export const MAX_KEYFRAMES = 64;
 export const MAX_ZOOMS = 32;
 export const MAX_MARKERS = 200;
+/** Seconds the zoom's ease-in/ease-out ramp may span. */
+const MAX_RAMP_S = 2;
+/** Milliseconds the camera track may be shifted from the screen track, either direction. */
+export const MAX_CAMERA_OFFSET_MS = 5000;
+/** Smallest a normalised rect's width/height may shrink to when clamped into the frame. */
+const MIN_RECT_SIZE = 0.001;
 const OVERLAY_TYPES: OverlayType[] = ["blur", "callout", "underline", "highlight", "click"];
-const SHAPES: BubbleShape[] = ["circle", "rounded", "square", "portrait", "full"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -112,20 +117,29 @@ function parseRect(value: unknown): Rect | null {
   return { x, y, w, h };
 }
 
-const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+function clamp(v: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, v));
+}
 
+/** Clamp a normalised rect fully inside the 0..1 frame: origin first, then size against what's left. */
 function clampRect(r: Rect): Rect {
-  const x = clamp01(r.x);
-  const y = clamp01(r.y);
-  return { x, y, w: Math.max(0.001, Math.min(1 - x, r.w)), h: Math.max(0.001, Math.min(1 - y, r.h)) };
+  const x = clamp(r.x, 0, 1 - MIN_RECT_SIZE);
+  const y = clamp(r.y, 0, 1 - MIN_RECT_SIZE);
+  return {
+    x,
+    y,
+    w: clamp(r.w, MIN_RECT_SIZE, 1 - x),
+    h: clamp(r.h, MIN_RECT_SIZE, 1 - y),
+  };
 }
 
 function parseCamera(value: unknown): CameraTrack | null | undefined {
   if (value === null) return null;
   if (!isRecord(value)) return undefined;
-  const shape = SHAPES.includes(value.shape as BubbleShape) ? (value.shape as BubbleShape) : "circle";
+  const shape = pick(value.shape, SHAPES, "circle");
   const keyframes: CameraKeyframe[] = [];
   for (const raw of asArray(value.keyframes)) {
+    if (keyframes.length >= MAX_KEYFRAMES) break;
     if (!isRecord(raw)) continue;
     const t = num(raw.t);
     const rect = parseRect(raw.rect);
@@ -136,7 +150,7 @@ function parseCamera(value: unknown): CameraTrack | null | undefined {
   keyframes.sort((a, b) => a.t - b.t);
   if (keyframes.length === 0) return undefined;
   keyframes[0] = { ...keyframes[0], t: 0 };
-  return { shape, mirror: value.mirror === true, keyframes: keyframes.slice(0, MAX_KEYFRAMES) };
+  return { shape, mirror: value.mirror === true, keyframes };
 }
 
 function parseSpan(value: unknown): { start: number; end: number } | null {
@@ -172,24 +186,26 @@ export function parseEdits(input: unknown): VideoEdits {
 
   const cuts: Cut[] = [];
   for (const raw of asArray(input.cuts)) {
+    if (cuts.length >= MAX_CUTS) break;
     const span = parseSpan(raw);
     if (span) cuts.push(span);
   }
 
   const zooms: Zoom[] = [];
   for (const raw of asArray(input.zooms)) {
+    if (zooms.length >= MAX_ZOOMS) break;
     const span = parseSpan(raw);
     const rect = isRecord(raw) ? parseRect(raw.rect) : null;
     if (!span || !rect) continue;
     const zoom: Zoom = { ...span, rect: clampRect(rect) };
     const ramp = isRecord(raw) ? num(raw.ramp) : null;
-    if (ramp !== null) zoom.ramp = Math.max(0, Math.min(2, ramp));
+    if (ramp !== null) zoom.ramp = clamp(ramp, 0, MAX_RAMP_S);
     zooms.push(zoom);
   }
-  zooms.splice(MAX_ZOOMS);
 
   const overlays: Overlay[] = [];
   for (const raw of asArray(input.overlays)) {
+    if (overlays.length >= MAX_OVERLAYS) break;
     if (!isRecord(raw)) continue;
     const type = raw.type;
     if (typeof type !== "string") continue;
@@ -203,16 +219,14 @@ export function parseEdits(input: unknown): VideoEdits {
     if (typeof raw.color === "string") overlay.color = raw.color;
     overlays.push(overlay);
   }
-  overlays.splice(MAX_OVERLAYS);
-  cuts.splice(MAX_CUTS);
 
   const markers: Marker[] = [];
   for (const raw of asArray(input.markers)) {
+    if (markers.length >= MAX_MARKERS) break;
     const marker = parseMarker(raw);
     if (marker) markers.push(marker);
   }
   markers.sort((a, b) => a.t - b.t);
-  markers.splice(MAX_MARKERS);
 
   const out: VideoEdits = { version: 1, cuts, crop: parseRect(input.crop), zooms, overlays, markers };
   const trim = parseSpan(input.trim);
@@ -221,7 +235,7 @@ export function parseEdits(input: unknown): VideoEdits {
   const camera = parseCamera(input.camera);
   if (camera !== undefined) out.camera = camera;
   const offset = num(input.cameraOffsetMs);
-  if (offset !== null) out.cameraOffsetMs = Math.max(-5000, Math.min(5000, offset));
+  if (offset !== null) out.cameraOffsetMs = clamp(offset, -MAX_CAMERA_OFFSET_MS, MAX_CAMERA_OFFSET_MS);
   return out;
 }
 
@@ -240,6 +254,11 @@ export function isEmptyEdits(edits: VideoEdits): boolean {
  * canvas overlay. Markers render as a separate tick bar, not on the canvas,
  * so a markers-only list is excluded — `edit-player.tsx` uses this (rather
  * than `isEmptyEdits`) to decide whether to run its rAF draw loop.
+ *
+ * Deliberately ignores `trim`/`frame`/`camera`: those are burned into the
+ * pixels by the staging export, so the *uploaded* file already reflects
+ * them — `edit-player.tsx` must not re-apply them on top of an already
+ * rendered video.
  */
 export function hasDrawableEdits(edits: VideoEdits): boolean {
   return (

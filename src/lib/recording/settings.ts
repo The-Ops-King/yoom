@@ -49,11 +49,11 @@ export const DEFAULT_SETTINGS: RecorderSettings = {
 
 const MODES: RecordingMode[] = ["screen", "camera", "screen+camera"];
 const SURFACES: SurfacePref[] = ["monitor", "window", "browser"];
-const SHAPES: BubbleShape[] = ["circle", "rounded", "square", "portrait", "full"];
+export const SHAPES: BubbleShape[] = ["circle", "rounded", "square", "portrait", "full"];
 const SIZES: BubbleSize[] = ["small", "medium", "large"];
 const KINDS: BackgroundKind[] = ["none", "blur", "color", "image", "video"];
 
-function pick<T extends string>(value: unknown, allowed: T[], fallback: T): T {
+export function pick<T extends string>(value: unknown, allowed: T[], fallback: T): T {
   return typeof value === "string" && (allowed as string[]).includes(value)
     ? (value as T)
     : fallback;

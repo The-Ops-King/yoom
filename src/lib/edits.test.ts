@@ -246,4 +246,75 @@ describe("parseEdits staging fields", () => {
     expect(parsed.frame).toBeUndefined();
     expect(parsed.camera).toBeUndefined();
   });
+
+  it("treats an empty keyframe list as no camera track", () => {
+    const parsed = parseEdits({ ...base, camera: { shape: "circle", mirror: true, keyframes: [] } });
+    expect(parsed.camera).toBeUndefined();
+  });
+
+  it("accepts an explicit null camera", () => {
+    const parsed = parseEdits({ ...base, camera: null });
+    expect(parsed.camera).toBeNull();
+  });
+
+  it("falls back to circle for an invalid shape and false for a non-boolean mirror", () => {
+    const parsed = parseEdits({
+      ...base,
+      camera: {
+        shape: "hexagon",
+        mirror: "yes",
+        keyframes: [{ t: 0, mode: "bubble", rect: { x: 0, y: 0, w: 0.2, h: 0.2 } }],
+      },
+    });
+    expect(parsed.camera?.shape).toBe("circle");
+    expect(parsed.camera?.mirror).toBe(false);
+  });
+
+  it("truncates camera keyframes to 64", () => {
+    const keyframes = Array.from({ length: 70 }, (_, i) => ({
+      t: i,
+      mode: "bubble",
+      rect: { x: 0.1, y: 0.1, w: 0.1, h: 0.1 },
+    }));
+    const parsed = parseEdits({ ...base, camera: { shape: "circle", mirror: false, keyframes } });
+    expect(parsed.camera?.keyframes).toHaveLength(64);
+  });
+
+  it("clamps zoom ramp to the 0..2 range", () => {
+    const parsed = parseEdits({
+      ...base,
+      zooms: [{ start: 0, end: 1, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, ramp: 9 }],
+    });
+    expect(parsed.zooms[0].ramp).toBe(2);
+  });
+
+  it("drops a blob: frame background src", () => {
+    const parsed = parseEdits({
+      ...base,
+      frame: {
+        enabled: true,
+        padding: 0.1,
+        radius: 0.02,
+        shadow: true,
+        background: { kind: "image", src: "blob:http://x/1" },
+      },
+    });
+    expect(parsed.frame?.background).toEqual({ kind: "none" });
+  });
+
+  it("drops a keyframe whose rect contains NaN", () => {
+    const parsed = parseEdits({
+      ...base,
+      camera: {
+        shape: "circle",
+        mirror: false,
+        keyframes: [
+          { t: 0, mode: "bubble", rect: { x: NaN, y: 0, w: 0.2, h: 0.2 } },
+          { t: 1, mode: "bubble", rect: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } },
+        ],
+      },
+    });
+    expect(parsed.camera?.keyframes).toHaveLength(1);
+    expect(parsed.camera?.keyframes[0].t).toBe(0);
+  });
 });
