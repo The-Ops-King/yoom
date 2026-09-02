@@ -65,6 +65,13 @@ export interface UseRecorderResult {
   reviewUrl: string | null;
   /** Object URL for the captured thumbnail while on the review screen. */
   thumbnailUrl: string | null;
+  /** Live canvas and camera dimensions, polled for the drag overlay. */
+  dimensions: {
+    canvasWidth: number;
+    canvasHeight: number;
+    cameraWidth: number;
+    cameraHeight: number;
+  };
   getLevel: (id: "mic" | "system") => number;
   actions: {
     selectMode(mode: RecordingMode): void;
@@ -105,6 +112,12 @@ export function useRecorder(): UseRecorderResult {
   });
   const [reviewUrl, setReviewUrl] = useState<string | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const [dimensions, setDimensions] = useState({
+    canvasWidth: 0,
+    canvasHeight: 0,
+    cameraWidth: 0,
+    cameraHeight: 0,
+  });
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -717,6 +730,36 @@ export function useRecorder(): UseRecorderResult {
     });
   }, [acquire]);
 
+  // Polled rather than pushed so the draw loop stays free of React.
+  useEffect(() => {
+    const active =
+      state.status === "setup" ||
+      state.status === "countdown" ||
+      state.status === "recording" ||
+      state.status === "paused";
+    if (!active) return;
+    const id = window.setInterval(() => {
+      const canvas = canvasRef.current;
+      const camTrack = cameraStreamRef.current?.getVideoTracks()[0];
+      const camSettings = camTrack?.getSettings();
+      setDimensions((prev) => {
+        const next = {
+          canvasWidth: canvas?.width ?? 0,
+          canvasHeight: canvas?.height ?? 0,
+          cameraWidth: camSettings?.width ?? 0,
+          cameraHeight: camSettings?.height ?? 0,
+        };
+        return prev.canvasWidth === next.canvasWidth &&
+          prev.canvasHeight === next.canvasHeight &&
+          prev.cameraWidth === next.cameraWidth &&
+          prev.cameraHeight === next.cameraHeight
+          ? prev
+          : next;
+      });
+    }, 400);
+    return () => window.clearInterval(id);
+  }, [state.status]);
+
   const getLevel = useCallback(
     (id: "mic" | "system") => mixerRef.current?.getLevel(id) ?? 0,
     [],
@@ -764,6 +807,7 @@ export function useRecorder(): UseRecorderResult {
     screenVideoRef,
     reviewUrl,
     thumbnailUrl,
+    dimensions,
     getLevel,
     actions,
   };
