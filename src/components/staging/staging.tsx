@@ -6,6 +6,7 @@ import { defaultCameraTrack } from "@/lib/editor/camera-track";
 import * as ops from "@/lib/editor/edit-ops";
 import { canRedo, canUndo, createHistory, push, redo, undo, type History } from "@/lib/editor/undo";
 import { useStagingPlayer } from "@/lib/editor/use-staging-player";
+import { DEFAULT_RAMP_S } from "@/lib/editor/zoom";
 import { defaultRecordingTitle } from "@/lib/recording/upload";
 import { Preview } from "./preview";
 import { Timeline } from "./timeline";
@@ -245,6 +246,12 @@ export function Staging(props: StagingProps) {
       // it by its (disjoint, therefore unique) start rather than by position.
       const at = next.zooms.findIndex((z) => z.start === start);
       setSelected(at >= 0 ? { kind: "zoom", index: at } : null);
+      if (at >= 0) {
+        // Land past the ease-in, like the rail's Go button, so the drawn
+        // region is actually shown zoomed instead of mid-ramp.
+        const z = next.zooms[at];
+        playerRef.current.seek(Math.min(z.end, z.start + (z.ramp ?? DEFAULT_RAMP_S)));
+      }
       setTool("select");
     },
     [apply, edits, spanForNew],
@@ -313,6 +320,7 @@ export function Staging(props: StagingProps) {
       setTool,
       selected,
       setSelected,
+      openSection: setSection,
       inPoint,
       outPoint,
       setInPoint,

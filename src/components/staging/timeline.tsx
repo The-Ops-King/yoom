@@ -149,20 +149,40 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
 
   const laneClip = "absolute inset-y-0 rounded-sm border";
   const handle = "absolute inset-y-0 w-1.5 cursor-ew-resize";
+  /** One lane per item, kept short so a dozen of them still fit under the track. */
+  const laneRow = "relative h-[18px] shrink-0 rounded-sm border bg-surface";
+  const laneLabel =
+    "pointer-events-none absolute left-0.5 top-1/2 z-20 -translate-y-1/2 rounded-sm bg-surface/85 px-1 text-[9px] leading-none text-muted-dim";
+
+  /** "Blur" when it is the only one, "Callout 2" when it is not. */
+  const overlayLabel = (i: number) => {
+    const { type } = edits.overlays[i];
+    const name = type.charAt(0).toUpperCase() + type.slice(1);
+    const total = edits.overlays.reduce((n, o) => n + (o.type === type ? 1 : 0), 0);
+    if (total < 2) return name;
+    const nth = edits.overlays.slice(0, i + 1).reduce((n, o) => n + (o.type === type ? 1 : 0), 0);
+    return `${name} ${nth}`;
+  };
+
+  const camera = edits.camera;
+  const laneCount = edits.zooms.length + edits.overlays.length + (camera ? 1 : 0);
 
   return (
     <div className="space-y-1">
-      <div
-        ref={trackRef}
-        className="relative touch-none select-none"
-        onPointerDown={(e) => {
-          measure();
-          player.seek(timeAt(e.clientX));
-          setDrag({ kind: "scrub" });
-        }}
-      >
-        {/* Source-time track: trim shading, cuts, markers. */}
-        <div className="relative h-12 overflow-hidden rounded-md border border-border bg-surface">
+      <div ref={trackRef} className="relative touch-none select-none">
+        {/*
+          Seeking lives on the main track alone: a pointer-down on a clip, a
+          handle, a keyframe or a cut must edit that thing, never drag the
+          playhead out from under it (`begin` and the cut button stop the event).
+        */}
+        <div
+          className="relative h-12 overflow-hidden rounded-md border border-border bg-surface"
+          onPointerDown={(e) => {
+            measure();
+            player.seek(timeAt(e.clientX));
+            setDrag({ kind: "scrub" });
+          }}
+        >
           <div className="absolute inset-y-0 left-0 bg-black/50" style={{ width: pct(trim.start) }} />
           <div className="absolute inset-y-0 right-0 bg-black/50" style={{ left: pct(trim.end) }} />
           {edits.cuts.map((c, i) => (
@@ -213,106 +233,118 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
           />
         </div>
 
-        {/* Zoom clips. */}
-        <div className="relative mt-1 h-4 rounded-sm border border-border bg-surface">
+        {/*
+          One lane per zoom and per overlay so each can be grabbed on its own,
+          plus the single camera-keyframe lane. Past eight lanes the stack
+          scrolls rather than pushing the rest of the screen down.
+        */}
+        <div className={`mt-1 space-y-1 ${laneCount > 8 ? "max-h-[172px] overflow-y-auto" : ""}`}>
           {edits.zooms.map((z, i) => (
-            <div
-              key={`zoom-${i}`}
-              className={`${laneClip} cursor-grab ${
-                isSel("zoom", i) ? "border-sky-300 bg-sky-500/50" : "border-sky-500/50 bg-sky-500/25"
-              }`}
-              style={{ left: pct(z.start), width: pct(z.end - z.start) }}
-              onPointerDown={(e) => {
-                ctx.setSelected({ kind: "zoom", index: i });
-                begin(e, {
-                  kind: "zoom",
-                  index: i,
-                  edge: "body",
-                  grabT: timeAt(e.clientX),
-                  start: z.start,
-                  end: z.end,
-                  from: edits,
-                });
-              }}
-            >
+            <div key={`zoom-lane-${i}`} className={`${laneRow} ${isSel("zoom", i) ? "border-accent" : "border-border"}`}>
+              <span className={laneLabel}>Zoom {i + 1}</span>
               <div
-                className={`${handle} left-0`}
-                onPointerDown={(e) =>
-                  begin(e, { kind: "zoom", index: i, edge: "start", grabT: 0, start: z.start, end: z.end, from: edits })
-                }
-              />
-              <div
-                className={`${handle} right-0`}
-                onPointerDown={(e) =>
-                  begin(e, { kind: "zoom", index: i, edge: "end", grabT: 0, start: z.start, end: z.end, from: edits })
-                }
-              />
+                className={`${laneClip} z-30 cursor-grab ${
+                  isSel("zoom", i) ? "border-sky-300 bg-sky-500/50" : "border-sky-500/50 bg-sky-500/25"
+                }`}
+                style={{ left: pct(z.start), width: pct(z.end - z.start) }}
+                onPointerDown={(e) => {
+                  ctx.setSelected({ kind: "zoom", index: i });
+                  ctx.openSection?.("zoom");
+                  begin(e, {
+                    kind: "zoom",
+                    index: i,
+                    edge: "body",
+                    grabT: timeAt(e.clientX),
+                    start: z.start,
+                    end: z.end,
+                    from: edits,
+                  });
+                }}
+              >
+                <div
+                  className={`${handle} left-0`}
+                  onPointerDown={(e) =>
+                    begin(e, { kind: "zoom", index: i, edge: "start", grabT: 0, start: z.start, end: z.end, from: edits })
+                  }
+                />
+                <div
+                  className={`${handle} right-0`}
+                  onPointerDown={(e) =>
+                    begin(e, { kind: "zoom", index: i, edge: "end", grabT: 0, start: z.start, end: z.end, from: edits })
+                  }
+                />
+              </div>
             </div>
           ))}
-        </div>
 
-        {/* Camera keyframes. */}
-        <div className="relative mt-1 h-4 rounded-sm border border-border bg-surface">
-          {(edits.camera?.keyframes ?? []).map((k, i) => (
-            <div
-              key={`kf-${i}`}
-              title={`Camera keyframe ${k.t.toFixed(2)}s`}
-              className={`absolute top-1 h-2 w-2 -translate-x-1/2 rotate-45 border ${
-                i === 0 ? "cursor-default" : "cursor-ew-resize"
-              } ${isSel("keyframe", i) ? "border-violet-200 bg-violet-300" : "border-violet-400 bg-violet-500"}`}
-              style={{ left: pct(k.t) }}
-              onPointerDown={(e) => {
-                ctx.setSelected({ kind: "keyframe", index: i, t: k.t });
-                if (i === 0) {
-                  e.stopPropagation();
-                  return;
-                }
-                begin(e, { kind: "keyframe", index: i, from: edits });
-              }}
-            />
-          ))}
-        </div>
+          {camera && (
+            <div className={`${laneRow} ${selected?.kind === "keyframe" ? "border-accent" : "border-border"}`}>
+              <span className={laneLabel}>Camera</span>
+              {camera.keyframes.map((k, i) => (
+                <div
+                  key={`kf-${i}`}
+                  title={`Camera keyframe ${k.t.toFixed(2)}s`}
+                  className={`absolute top-1/2 z-30 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border ${
+                    i === 0 ? "cursor-default" : "cursor-ew-resize"
+                  } ${isSel("keyframe", i) ? "border-violet-200 bg-violet-300" : "border-violet-400 bg-violet-500"}`}
+                  style={{ left: pct(k.t) }}
+                  onPointerDown={(e) => {
+                    ctx.setSelected({ kind: "keyframe", index: i, t: k.t });
+                    if (i === 0) {
+                      // Anchored at 0: nothing to drag, but the event still
+                      // must not reach anything that would move the playhead.
+                      e.stopPropagation();
+                      return;
+                    }
+                    begin(e, { kind: "keyframe", index: i, from: edits });
+                  }}
+                />
+              ))}
+            </div>
+          )}
 
-        {/* Overlay clips. */}
-        <div className="relative mt-1 h-4 rounded-sm border border-border bg-surface">
           {edits.overlays.map((o, i) => (
-            <div
-              key={`ov-${i}`}
-              title={o.type}
-              className={`${laneClip} cursor-grab ${
-                isSel("overlay", i) ? "border-emerald-200 bg-emerald-500/50" : "border-emerald-500/50 bg-emerald-500/25"
-              }`}
-              style={{ left: pct(o.start), width: pct(o.end - o.start) }}
-              onPointerDown={(e) => {
-                ctx.setSelected({ kind: "overlay", index: i });
-                begin(e, {
-                  kind: "overlay",
-                  index: i,
-                  edge: "body",
-                  grabT: timeAt(e.clientX),
-                  start: o.start,
-                  end: o.end,
-                  from: edits,
-                });
-              }}
-            >
+            <div key={`ov-lane-${i}`} className={`${laneRow} ${isSel("overlay", i) ? "border-accent" : "border-border"}`}>
+              <span className={laneLabel}>{overlayLabel(i)}</span>
               <div
-                className={`${handle} left-0`}
-                onPointerDown={(e) =>
-                  begin(e, { kind: "overlay", index: i, edge: "start", grabT: 0, start: o.start, end: o.end, from: edits })
-                }
-              />
-              <div
-                className={`${handle} right-0`}
-                onPointerDown={(e) =>
-                  begin(e, { kind: "overlay", index: i, edge: "end", grabT: 0, start: o.start, end: o.end, from: edits })
-                }
-              />
+                title={o.type}
+                className={`${laneClip} z-30 cursor-grab ${
+                  isSel("overlay", i) ? "border-emerald-200 bg-emerald-500/50" : "border-emerald-500/50 bg-emerald-500/25"
+                }`}
+                style={{ left: pct(o.start), width: pct(o.end - o.start) }}
+                onPointerDown={(e) => {
+                  ctx.setSelected({ kind: "overlay", index: i });
+                  ctx.openSection?.("overlays");
+                  begin(e, {
+                    kind: "overlay",
+                    index: i,
+                    edge: "body",
+                    grabT: timeAt(e.clientX),
+                    start: o.start,
+                    end: o.end,
+                    from: edits,
+                  });
+                }}
+              >
+                <div
+                  className={`${handle} left-0`}
+                  onPointerDown={(e) =>
+                    begin(e, { kind: "overlay", index: i, edge: "start", grabT: 0, start: o.start, end: o.end, from: edits })
+                  }
+                />
+                <div
+                  className={`${handle} right-0`}
+                  onPointerDown={(e) =>
+                    begin(e, { kind: "overlay", index: i, edge: "end", grabT: 0, start: o.start, end: o.end, from: edits })
+                  }
+                />
+              </div>
             </div>
           ))}
         </div>
 
-        <div ref={headRef} className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-red-500" />
+        {/* Above the lane clips (z-30), which would otherwise paint over it. */}
+        <div ref={headRef} className="pointer-events-none absolute inset-y-0 z-40 w-0.5 -translate-x-1/2 bg-red-500" />
       </div>
 
       <div className="flex items-center justify-between text-[11px] text-muted-dim">

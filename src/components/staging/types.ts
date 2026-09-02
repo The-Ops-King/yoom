@@ -2,6 +2,7 @@ import type { Marker, Overlay, VideoEdits } from "@/lib/edits";
 import type { StagingPlayer } from "@/lib/editor/use-staging-player";
 import type { FinishInput } from "@/lib/recording/use-recorder";
 import type { BubbleConfig, FrameConfig, RecordingMode } from "@/lib/recording/types";
+import type { RailSection } from "./rail";
 
 /**
  * Everything the staging screen needs from the recorder. It owns no capture
@@ -67,6 +68,12 @@ export interface StagingContext {
   setTool(t: Tool): void;
   selected: Selection;
   setSelected(s: Selection): void;
+  /**
+   * Reveal a rail section. The timeline calls it alongside `setSelected` so
+   * clicking a clip lands on the panel that edits it. Optional: the rail's
+   * open section is `Staging`'s state, and nothing else has to care.
+   */
+  openSection?(id: RailSection): void;
   inPoint: number | null;
   outPoint: number | null;
   setInPoint(t: number | null): void;
