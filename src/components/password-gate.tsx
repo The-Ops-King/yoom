@@ -1,13 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { YoomLogo } from "./logo";
 
-interface PasswordGateProps {
-  onAuthenticated: (password: string) => void;
-}
-
-export function PasswordGate({ onAuthenticated }: PasswordGateProps) {
+export function PasswordGate() {
+  const router = useRouter();
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -24,7 +22,7 @@ export function PasswordGate({ onAuthenticated }: PasswordGateProps) {
     });
 
     if (res.ok) {
-      onAuthenticated(password);
+      router.refresh();
     } else {
       setError("Invalid password");
       setLoading(false);
