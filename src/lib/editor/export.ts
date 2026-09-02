@@ -30,6 +30,9 @@ const RESYNC_S = 0.08;
 /** How long a seek, or the playhead, may stall before we give up. */
 const STALL_MS = 4000;
 
+/** How long a decoder may take to report metadata before we call it dead. */
+const DECODE_TIMEOUT_MS = 15_000;
+
 function abortError(): DOMException {
   return new DOMException("Aborted", "AbortError");
 }
@@ -70,6 +73,17 @@ export function isStalled(watch: StallWatch, now: number, limitMs = STALL_MS): b
 }
 
 /**
+ * Has the render loop reached the end of the kept range it is playing?
+ *
+ * Ranges are half-open — `[start, end)`, the same convention `keptRanges` and
+ * `zoomAt` use — so the frame AT `end` is already cut material and must not be
+ * drawn, let alone encoded.
+ */
+export function rangeDone(t: number, end: number, ended: boolean): boolean {
+  return t >= end || ended;
+}
+
+/**
  * Chromium only advances a `<video>`'s frame pipeline for elements the
  * compositor can see. A detached element (or a `display:none` one) falls back
  * to "background rendering" — roughly one frame every 250 ms — and
@@ -87,6 +101,11 @@ export function mountOffscreen(el: HTMLElement): void {
     "style",
     "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1",
   );
+  // It is a decoder, not content: keep it out of the accessibility tree and out
+  // of the tab order, or a screen reader announces a stray media element and
+  // Tab lands on an invisible 1×1 target.
+  el.setAttribute("aria-hidden", "true");
+  el.tabIndex = -1;
   document.body?.appendChild(el);
 }
 
@@ -104,8 +123,27 @@ function makeVideo(blob: Blob, muted: boolean): Promise<HTMLVideoElement> {
     el.src = url;
     el.muted = muted; el.playsInline = true; el.preload = "auto";
     mountOffscreen(el);
-    el.onloadedmetadata = () => resolve(el);
-    el.onerror = () => { URL.revokeObjectURL(url); el.remove(); reject(new Error("Could not decode the recording.")); };
+    // A decoder that reports neither metadata nor an error would leave the
+    // whole export awaiting this promise forever, so cap the wait. Nothing
+    // downstream holds a reference yet — this path owns the cleanup.
+    const fail = () => {
+      clearTimeout(timer);
+      el.onloadedmetadata = null;
+      el.onerror = null;
+      URL.revokeObjectURL(url);
+      el.remove();
+      reject(new Error("Could not decode the recording."));
+    };
+    const timer = setTimeout(fail, DECODE_TIMEOUT_MS);
+    el.onloadedmetadata = () => {
+      clearTimeout(timer);
+      // Past this point the caller owns the element; a late `error` must not
+      // revoke its URL out from under a live render. The stall watchdog is
+      // what notices a decoder that dies mid-render.
+      el.onerror = null;
+      resolve(el);
+    };
+    el.onerror = fail;
   });
 }
 
@@ -270,21 +308,31 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
         const onEnded = () => { off(); resolve(); };
         const onAbort = () => { off(); reject(abortError()); };
         const tick = () => {
-          if (opts.signal.aborted) return onAbort();
-          const t = primary.currentTime;
-          const now = performance.now();
-          watch = tickStall(watch, t, now);
-          if (isStalled(watch, now, STALL_MS)) { off(); return reject(stallError()); }
-          if (camera && Math.abs(camera.currentTime - (t + offset)) > RESYNC_S) {
-            camera.currentTime = Math.max(0, t + offset);
+          // A throw anywhere below would otherwise escape into the interval's
+          // own task, leaving this promise pending forever with the recorder
+          // still running and the UI stuck on "Rendering".
+          try {
+            if (opts.signal.aborted) return onAbort();
+            const t = primary.currentTime;
+            const now = performance.now();
+            watch = tickStall(watch, t, now);
+            if (isStalled(watch, now, STALL_MS)) { off(); return reject(stallError()); }
+            // Checked BEFORE the draw: a frame past the range end belongs to
+            // the material this cut removes, and the recorder is still live.
+            if (rangeDone(t, r.end, primary.ended)) { off(); return resolve(); }
+            if (camera && Math.abs(camera.currentTime - (t + offset)) > RESYNC_S) {
+              camera.currentTime = Math.max(0, t + offset);
+            }
+            drawFrame(ctx, inputs, t, width, height);
+            if (!thumbRequested && t >= thumbSource) {
+              thumbRequested = true;
+              canvas.toBlob((b) => { thumbnail = b; }, "image/jpeg", 0.8);
+            }
+            report(Math.min(99, Math.round(((done + (t - r.start)) / total) * 100)));
+          } catch (err) {
+            off();
+            reject(err);
           }
-          drawFrame(ctx, inputs, t, width, height);
-          if (!thumbRequested && t >= thumbSource) {
-            thumbRequested = true;
-            canvas.toBlob((b) => { thumbnail = b; }, "image/jpeg", 0.8);
-          }
-          report(Math.min(99, Math.round(((done + (t - r.start)) / total) * 100)));
-          if (t >= r.end || primary.ended) { off(); return resolve(); }
         };
         primary.addEventListener("ended", onEnded, { once: true });
         opts.signal.addEventListener("abort", onAbort, { once: true });

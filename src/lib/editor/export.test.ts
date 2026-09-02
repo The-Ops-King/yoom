@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frameIntervalMs, isStalled, tickStall, type StallWatch } from "./export";
+import { frameIntervalMs, isStalled, rangeDone, tickStall, type StallWatch } from "./export";
 
 describe("frameIntervalMs", () => {
   it("turns a capture rate into a timer period", () => {
@@ -20,6 +20,32 @@ describe("frameIntervalMs", () => {
 
   it("never returns an interval so long the export drops below 1 fps", () => {
     expect(frameIntervalMs(0.01)).toBeLessThanOrEqual(1000);
+  });
+});
+
+describe("rangeDone", () => {
+  it("keeps drawing inside the range", () => {
+    expect(rangeDone(0, 5, false)).toBe(false);
+    expect(rangeDone(4.999, 5, false)).toBe(false);
+  });
+
+  /**
+   * Ranges are half-open, so the frame AT `end` is already cut material. The
+   * check runs before `drawFrame`, so a true here means that frame is never
+   * encoded.
+   */
+  it("stops AT the range end, not after it", () => {
+    expect(rangeDone(5, 5, false)).toBe(true);
+    expect(rangeDone(5.001, 5, false)).toBe(true);
+  });
+
+  it("stops when the element reports it ended, wherever the playhead is", () => {
+    expect(rangeDone(1, 5, true)).toBe(true);
+    expect(rangeDone(0, Number.POSITIVE_INFINITY, true)).toBe(true);
+  });
+
+  it("treats a zero-length range as immediately done", () => {
+    expect(rangeDone(2, 2, false)).toBe(true);
   });
 });
 
