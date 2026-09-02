@@ -3269,14 +3269,31 @@ All four sit under `/api/upload/*` and are therefore already authenticated by `p
 ### Task 18: Wire the recorder to Drive and make `page.tsx` a server component
 
 **Files:**
+- Create: `src/lib/auth.ts`
 - Modify: `src/components/recorder.tsx` (lines 1-35 imports/props/refs, lines 292-340 `handleRecordingComplete`)
 - Modify: `src/app/page.tsx` (whole file)
 
+MediaRecorder writes WebM with no duration in the EBML header, so `<video>` shows no seek bar and `video.duration` is `Infinity`. `fix-webm-duration` patches the header in the browser before upload; it is a ~4 KB dependency-free package. Check its exact export shape in `node_modules/fix-webm-duration/` (recent versions export `fixWebmDuration(blob, durationMs, options?) => Promise<Blob>` as the default export; older ones take a callback) and adapt the one call site below if needed.
+
+- [ ] Install: `npm i fix-webm-duration`
+- [ ] Create `src/lib/auth.ts` (server-only helper shared by `/` now and `/library` in Phase 3):
+  ```ts
+  import "server-only";
+  import { cookies } from "next/headers";
+  import { SESSION_COOKIE, verifySession } from "@/lib/session";
+
+  /** True when the request carries a valid owner session cookie. */
+  export async function isOwner(): Promise<boolean> {
+    const cookieStore = await cookies();
+    return verifySession(cookieStore.get(SESSION_COOKIE)?.value);
+  }
+  ```
 - [ ] In `src/components/recorder.tsx`, replace the import block and props (lines 1-23) with:
   ```tsx
   "use client";
 
   import { useState, useRef, useCallback } from "react";
+  import fixWebmDuration from "fix-webm-duration";
   import { DeviceSelector } from "./device-selector";
   import { RecordingPreview } from "./recording-preview";
   import { YoomLogo } from "./logo";
@@ -3315,28 +3332,57 @@ All four sit under `/api/upload/*` and are therefore already authenticated by `p
   ```tsx
   recordEndedAtRef.current = performance.now();
   ```
-- [ ] Add these two helpers directly above `handleRecordingComplete`:
+- [ ] Add these two helpers directly above `handleRecordingComplete`. Note that `screenVideoElRef`/`cameraVideoElRef` are only populated in screen+camera mode (the compositor creates them); in screen-only and camera-only modes the preview lives inside `RecordingPreview`, so the thumbnail is taken from the live stream through a throwaway `<video>`:
   ```tsx
+  function frameToJpeg(source: CanvasImageSource, width: number, height: number): Promise<Blob | null> {
+    const scratch = document.createElement("canvas");
+    scratch.width = width;
+    scratch.height = height;
+    const ctx = scratch.getContext("2d");
+    if (!ctx) return Promise.resolve(null);
+    ctx.drawImage(source, 0, 0, width, height);
+    return new Promise((resolve) =>
+      scratch.toBlob((blob) => resolve(blob), "image/jpeg", 0.8),
+    );
+  }
+
   async function captureThumbnail(): Promise<Blob | null> {
+    // Screen+camera: the composited canvas is the exact recorded frame.
     const canvas = canvasRef.current;
-    if (canvas) {
+    if (canvas && canvas.width > 0) {
       return new Promise((resolve) =>
         canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.8),
       );
     }
 
-    const video = screenVideoElRef.current ?? cameraVideoElRef.current;
-    if (!video || !video.videoWidth) return null;
+    // Screen-only / camera-only: read one frame from the live stream.
+    const stream = screenStreamRef.current ?? cameraStreamRef.current;
+    const track = stream?.getVideoTracks()[0];
+    if (!track || track.readyState !== "live") return null;
 
-    const scratch = document.createElement("canvas");
-    scratch.width = video.videoWidth;
-    scratch.height = video.videoHeight;
-    const ctx = scratch.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(video, 0, 0, scratch.width, scratch.height);
-    return new Promise((resolve) =>
-      scratch.toBlob((blob) => resolve(blob), "image/jpeg", 0.8),
-    );
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = new MediaStream([track]);
+
+    const ready = new Promise<boolean>((resolve) => {
+      const timer = window.setTimeout(() => resolve(false), 2000);
+      video.onloadeddata = () => {
+        window.clearTimeout(timer);
+        resolve(true);
+      };
+    });
+
+    try {
+      await video.play();
+      if (!(await ready) || !video.videoWidth) return null;
+      return await frameToJpeg(video, video.videoWidth, video.videoHeight);
+    } catch {
+      return null;
+    } finally {
+      video.pause();
+      video.srcObject = null;
+    }
   }
 
   function readTrackDimensions(): { width: number | null; height: number | null } {
@@ -3365,12 +3411,21 @@ All four sit under `/api/upload/*` and are therefore already authenticated by `p
 
     stopAllStreams();
 
-    const blob = new Blob(chunksRef.current, { type: "video/webm" });
+    const rawBlob = new Blob(chunksRef.current, { type: "video/webm" });
 
-    if (blob.size === 0) {
+    if (rawBlob.size === 0) {
       setError("Recording captured no data. Please try again.");
       setState("idle");
       return;
+    }
+
+    // Patch the EBML duration header so players get a real seek bar and
+    // `video.duration` is finite. If patching fails, upload the raw blob.
+    let blob = rawBlob;
+    try {
+      blob = await fixWebmDuration(rawBlob, durationMs, { logger: false });
+    } catch (patchError) {
+      console.warn("[Yoom] could not patch WebM duration", patchError);
     }
 
     try {
@@ -3433,15 +3488,12 @@ All four sit under `/api/upload/*` and are therefore already authenticated by `p
 - [ ] In `reset()`, add `thumbnailRef.current = null;` alongside `chunksRef.current = [];`.
 - [ ] Replace `src/app/page.tsx` entirely with the server component:
   ```tsx
-  import { headers } from "next/headers";
+  import { isOwner } from "@/lib/auth";
   import { PasswordGate } from "@/components/password-gate";
   import { Recorder } from "@/components/recorder";
 
   export default async function Home() {
-    const requestHeaders = await headers();
-    const authed = requestHeaders.get("x-yoom-auth") === "1";
-
-    if (!authed) {
+    if (!(await isOwner())) {
       return <PasswordGate />;
     }
 
