@@ -206,30 +206,6 @@ export interface FrameLayout {
   radius: number;
 }
 
-/** Handed to every overlay layer once per composited frame. */
-export interface FrameInfo {
-  width: number;
-  height: number;
-  /** `performance.now()` at the top of this frame. */
-  nowMs: number;
-  /** Milliseconds since the previous composited frame. */
-  deltaMs: number;
-  frameIndex: number;
-  /** Where the screen was drawn, or null in camera-only layout. */
-  screenRect: { x: number; y: number; w: number; h: number } | null;
-  /** Where the bubble was drawn, or null when hidden / absent. */
-  bubbleRect: Rect | null;
-}
-
-/**
- * The compositor's plug-in seam. Phase 5 (eased cursor, click ripples,
- * annotations) registers layers here instead of editing the draw loop.
- */
-export interface OverlayLayer {
-  id: string;
-  draw(ctx: CanvasRenderingContext2D, frame: FrameInfo): void;
-}
-
 // ---------- settings ----------
 
 export interface RecorderSettings {

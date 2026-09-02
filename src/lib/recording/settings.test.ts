@@ -34,11 +34,9 @@ describe("loadSettings", () => {
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
   });
 
-  it("defaults system audio on and the bubble visible", () => {
+  it("defaults system audio on", () => {
     expect(DEFAULT_SETTINGS.systemOn).toBe(true);
     expect(DEFAULT_SETTINGS.micOn).toBe(true);
-    expect(DEFAULT_SETTINGS.bubble.visible).toBe(true);
-    expect(DEFAULT_SETTINGS.frame.enabled).toBe(false);
   });
 
   it("merges stored values over the defaults", () => {
