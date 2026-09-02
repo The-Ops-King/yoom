@@ -1,4 +1,4 @@
-import type { DesktopBridge } from "./types";
+import type { BubbleAppearance, DesktopBridge, DesktopShortcut } from "./types";
 
 declare global {
   interface Window {
@@ -24,10 +24,32 @@ export function isDesktop(): boolean {
 }
 
 /** Subscribe to a global hotkey forwarded by the desktop shell. */
-export function onDesktopShortcut(
-  cb: (action: "toggle" | "pause") => void,
-): () => void {
+export function onDesktopShortcut(cb: (action: DesktopShortcut) => void): () => void {
   const bridge = getDesktopBridge();
   if (!bridge?.onShortcut) return () => {};
   return bridge.onShortcut(cb);
+}
+
+/** Subscribe to drags of the floating desktop camera bubble. */
+export function onDesktopBubbleMove(
+  cb: (pos: { x: number; y: number }) => void,
+): () => void {
+  const bridge = getDesktopBridge();
+  if (!bridge?.onBubbleMove) return () => {};
+  return bridge.onBubbleMove(cb);
+}
+
+/** Show/hide the floating bubble window. No-op in the browser. */
+export function setDesktopBubbleVisible(visible: boolean): void {
+  getDesktopBridge()?.setBubbleVisible?.(visible);
+}
+
+/** Push shape/size/mirror/visibility to the floating bubble. No-op in the browser. */
+export function setDesktopBubbleAppearance(appearance: BubbleAppearance): void {
+  getDesktopBridge()?.setBubbleAppearance?.(appearance);
+}
+
+/** Tell the floating bubble which camera to open. No-op in the browser. */
+export function setDesktopCameraDevice(deviceId: string | null): void {
+  getDesktopBridge()?.setCameraDevice?.(deviceId);
 }

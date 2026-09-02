@@ -34,12 +34,47 @@ export interface MediaSourceProvider {
 
 // ---------- desktop bridge ----------
 
+/**
+ * Every hotkey the desktop shell forwards. The web app binds the same chords
+ * itself (`use-recorder.ts`), but those only fire while the page has focus;
+ * the shell registers them globally and replays them through this union.
+ */
+export type DesktopShortcut = "toggle" | "pause" | "mark" | "restart" | "cancel";
+
+/**
+ * What the floating desktop camera bubble should look like. `visible` is the
+ * user's own bubble toggle; the shell ALSO gates the window on
+ * `setBubbleVisible`, which follows the recorder's status. The window is shown
+ * only when both are true.
+ */
+export interface BubbleAppearance {
+  shape: BubbleShape;
+  size: BubbleSize;
+  mirror: boolean;
+  visible: boolean;
+}
+
 export interface DesktopBridge {
   version: 1;
   isDesktop?: boolean;
   mediaSources?: Partial<MediaSourceProvider>;
   capabilities?: Partial<Capabilities>;
-  onShortcut?(cb: (action: "toggle" | "pause") => void): () => void;
+  onShortcut?(cb: (action: DesktopShortcut) => void): () => void;
+  /**
+   * Announce the surface preference before `getDisplayMedia` runs so the native
+   * picker opens on the right tab. Fire-and-forget: the stream itself is still
+   * created by the page, because `contextBridge` cannot carry a `MediaStream`
+   * across worlds.
+   */
+  setSurfacePref?(pref: SurfacePref): void;
+  /** The user dragged the floating bubble; `pos` is normalized to the captured display. */
+  onBubbleMove?(cb: (pos: { x: number; y: number }) => void): () => void;
+  /** Shape / size / mirror / user-visibility of the floating bubble. */
+  setBubbleAppearance?(appearance: BubbleAppearance): void;
+  /** Status-driven show/hide of the floating bubble window. */
+  setBubbleVisible?(visible: boolean): void;
+  /** Which camera the floating bubble should open (`null` = default device). */
+  setCameraDevice?(deviceId: string | null): void;
 }
 
 // ---------- compositor ----------

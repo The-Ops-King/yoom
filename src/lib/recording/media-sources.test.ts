@@ -169,3 +169,51 @@ describe("getProvider", () => {
     expect(caps).toEqual({ systemAudio: "none", nativePicker: true, surfaceHints: false });
   });
 });
+
+describe("getProvider surface pref", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("announces the surface pref to the shell before delegating to the page", async () => {
+    const order: string[] = [];
+    const stream = {
+      getVideoTracks: () => [{ getSettings: () => ({ displaySurface: "monitor" }) }],
+      getAudioTracks: () => [{}],
+    };
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (Macintosh) Chrome/140",
+      mediaDevices: {
+        getDisplayMedia: async () => {
+          order.push("getDisplayMedia");
+          return stream;
+        },
+      },
+    });
+    vi.stubGlobal("window", {
+      __yoomDesktop: {
+        version: 1,
+        isDesktop: true,
+        setSurfacePref: (pref: string) => order.push(`pref:${pref}`),
+        capabilities: { systemAudio: "full", nativePicker: true, surfaceHints: false },
+      },
+    });
+
+    const provider = getProvider();
+    const result = await provider.getDisplay("window");
+
+    expect(order).toEqual(["pref:window", "getDisplayMedia"]);
+    expect(result.surface).toBe("monitor");
+    expect(result.hasSystemAudio).toBe(true);
+    expect(provider.capabilities()).toMatchObject({
+      systemAudio: "full",
+      nativePicker: true,
+      surfaceHints: false,
+    });
+  });
+
+  it("leaves getDisplay untouched when the shell has no setSurfacePref", async () => {
+    vi.stubGlobal("window", { __yoomDesktop: { version: 1, isDesktop: true } });
+    expect(getProvider().getDisplay).toBe(browserProvider.getDisplay);
+  });
+});

@@ -9,11 +9,12 @@ import {
   coverCrop,
   easeInOutCubic,
   lerpRect,
+  displayPosToCanvasPos,
   pointerToNormalized,
   shapeRadius,
   SIZE_FRACTION,
 } from "./geometry";
-import type { BubbleConfig } from "./types";
+import type { BubbleConfig, FrameConfig } from "./types";
 
 const bubble = (patch: Partial<BubbleConfig> = {}): BubbleConfig => ({
   ...DEFAULT_BUBBLE,
@@ -329,5 +330,59 @@ describe("shapeRadius", () => {
   it("never returns a negative radius for a degenerate rect", () => {
     expect(shapeRadius("circle", 0, 0)).toBe(0);
     expect(shapeRadius("rounded", -10, 50)).toBe(0);
+  });
+});
+
+describe("displayPosToCanvasPos", () => {
+  const noFrame: FrameConfig = {
+    enabled: false,
+    padding: 0,
+    radius: 0,
+    shadow: false,
+    background: { kind: "none" },
+  };
+  const framed: FrameConfig = { ...noFrame, enabled: true, padding: 0.1 };
+
+  it("is the identity when the screen fills the canvas", () => {
+    const layout = computeFrameLayout(1920, 1080, noFrame);
+    expect(displayPosToCanvasPos({ x: 0.25, y: 0.75 }, layout)).toEqual({
+      x: 0.25,
+      y: 0.75,
+    });
+  });
+
+  it("maps into the inset screen rect when framing is on", () => {
+    // pad = round(1920 * 0.1) = 192 → canvas 2304×1464, dest at (192, 192).
+    const layout = computeFrameLayout(1920, 1080, framed);
+    expect(layout.canvasW).toBe(2304);
+    expect(layout.canvasH).toBe(1464);
+    expect(displayPosToCanvasPos({ x: 0.5, y: 0.5 }, layout)).toEqual({
+      x: 0.5,
+      y: 0.5,
+    });
+    const topLeft = displayPosToCanvasPos({ x: 0, y: 0 }, layout);
+    expect(topLeft.x).toBeCloseTo(192 / 2304, 6);
+    expect(topLeft.y).toBeCloseTo(192 / 1464, 6);
+    const bottomRight = displayPosToCanvasPos({ x: 1, y: 1 }, layout);
+    expect(bottomRight.x).toBeCloseTo((192 + 1920) / 2304, 6);
+    expect(bottomRight.y).toBeCloseTo((192 + 1080) / 1464, 6);
+  });
+
+  it("clamps out-of-range and non-finite input", () => {
+    const layout = computeFrameLayout(1920, 1080, noFrame);
+    expect(displayPosToCanvasPos({ x: -3, y: 4 }, layout)).toEqual({ x: 0, y: 1 });
+    expect(displayPosToCanvasPos({ x: NaN, y: NaN }, layout)).toEqual({
+      x: 0.5,
+      y: 0.5,
+    });
+  });
+
+  it("falls back to the centre for a degenerate layout", () => {
+    expect(
+      displayPosToCanvasPos(
+        { x: 0.2, y: 0.2 },
+        { canvasW: 0, canvasH: 0, dest: { x: 0, y: 0, w: 0, h: 0 }, radius: 0 },
+      ),
+    ).toEqual({ x: 0.5, y: 0.5 });
   });
 });

@@ -155,6 +155,24 @@ export function getProvider(): MediaSourceProvider {
   );
   const merged: MediaSourceProvider = { ...browserProvider, ...bridgeOverrides };
 
+  // `contextBridge` cannot carry a `MediaStream` across worlds, so the shell
+  // never implements `getDisplay` itself. It only needs to know which tab the
+  // native picker should open on, which this announcement provides. The page
+  // still creates the stream; Electron's `setDisplayMediaRequestHandler`
+  // intercepts it in the main process.
+  if (bridge.setSurfacePref && !bridgeOverrides.getDisplay) {
+    const announce = bridge.setSurfacePref.bind(bridge);
+    const inner = merged.getDisplay;
+    merged.getDisplay = (pref: SurfacePref) => {
+      try {
+        announce(pref);
+      } catch {
+        // A dead IPC channel must never block the capture.
+      }
+      return inner(pref);
+    };
+  }
+
   if (bridge.capabilities) {
     const overrides = bridge.capabilities;
     const base =

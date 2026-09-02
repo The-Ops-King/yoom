@@ -220,6 +220,27 @@ export function computeFrameLayout(
 }
 
 /**
+ * Phase 4: the floating desktop bubble reports a centre normalized to the
+ * *captured display*, but `computeBubbleRect` works in *canvas* space. With
+ * framed capture on, the canvas is larger than the screen and the screen sits
+ * inset at `layout.dest`, so the two spaces differ. Pure so the mapping can be
+ * asserted without a canvas or an Electron runtime.
+ */
+export function displayPosToCanvasPos(
+  pos: { x: number; y: number },
+  layout: FrameLayout,
+): { x: number; y: number } {
+  if (layout.canvasW <= 0 || layout.canvasH <= 0) return { x: 0.5, y: 0.5 };
+  if (layout.dest.w <= 0 || layout.dest.h <= 0) return { x: 0.5, y: 0.5 };
+  const x = clampNormalized(pos.x);
+  const y = clampNormalized(pos.y);
+  return {
+    x: clampNormalized((layout.dest.x + x * layout.dest.w) / layout.canvasW),
+    y: clampNormalized((layout.dest.y + y * layout.dest.h) / layout.canvasH),
+  };
+}
+
+/**
  * The rendered content box of a canvas shown with `object-contain` inside a
  * DOM element. Letterbox bars appear on the sides or top/bottom when the
  * canvas aspect ratio doesn't match the element's aspect ratio; this returns
