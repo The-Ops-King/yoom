@@ -3589,11 +3589,17 @@ Nothing imports `src/lib/r2.ts` except `src/app/watch/[key]/page.tsx`, which is 
     }
 
     const size = video.size_bytes ?? 0;
-    const requested = clampRange(
+    let requested = clampRange(
       request.headers.get("range"),
       size,
       RANGE_WINDOW_BYTES,
     );
+    // No Range, or one we don't parse (e.g. multi-range): never stream a whole
+    // multi-GB file from one invocation. Serve the first window as a 206 and
+    // let the player ask for the rest.
+    if (requested === null && size > RANGE_WINDOW_BYTES) {
+      requested = { start: 0, end: RANGE_WINDOW_BYTES - 1 };
+    }
 
     const headers = new Headers(cors);
     headers.set("Accept-Ranges", "bytes");
