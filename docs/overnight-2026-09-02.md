@@ -21,7 +21,7 @@ Tyler went to sleep after Phase 3 merged and the Phase 2.1 recorder patch shippe
 - **Phase 2.1 re-test** you started: drag ghost gone, mode switching in setup, ⌘⇧K restart-now, ⌘⇧X cancel, animated bubble transitions.
 
 ## Decisions made without you
-_(appended below)_
+- Your Mac went to sleep at ~02:30 and killed a running planner. I started `caffeinate -dims -t 28800` (keeps the Mac awake for 8 h, then expires on its own) so the overnight build could continue. Kill it early with `pkill caffeinate` if you want.
 
 ## Follow-ups / known rough edges
 - Library card thumbnails load through `/api/thumb/<id>` (Drive proxy, ~400 KB JPEG each) so the grid shows black boxes for a beat before they paint; the detail page poster is fine. Cheap win later: cache thumbs on Vercel (`Cache-Control: public` is already set) or generate smaller ones at upload.
