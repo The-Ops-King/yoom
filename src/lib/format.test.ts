@@ -31,6 +31,10 @@ describe("fmtBytes", () => {
   it("renders an em dash for unknown sizes", () => {
     expect(fmtBytes(null)).toBe("—");
   });
+
+  it("rounds up into the next unit rather than printing 1024 B", () => {
+    expect(fmtBytes(1023.6)).toBe("1.0 KB");
+  });
 });
 
 describe("fmtRelative", () => {
@@ -52,10 +56,21 @@ describe("fmtRelative", () => {
 });
 
 describe("deviceFromUserAgent", () => {
-  it("is re-exported from alerts so there is one implementation", () => {
+  it("recognises a Mac desktop", () => {
     expect(deviceFromUserAgent("Mozilla/5.0 (Macintosh) Chrome/120")).toBe(
       "Mac · Chrome",
     );
+  });
+
+  it("recognises an iPhone", () => {
+    expect(
+      deviceFromUserAgent(
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605 Version/17.0 Mobile/15E148 Safari/604.1",
+      ),
+    ).toBe("iPhone · Safari");
+  });
+
+  it("falls back to Unknown device", () => {
     expect(deviceFromUserAgent(null)).toBe("Unknown device");
   });
 });

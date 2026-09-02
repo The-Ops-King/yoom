@@ -1,8 +1,30 @@
 /** Display formatters shared by the owner dashboard. */
 
-// One implementation of UA parsing lives in alerts.ts (it is used by the emails);
-// re-export rather than duplicate it.
-export { deviceFromUserAgent } from "@/lib/alerts";
+// This module must stay importable from Client Components, so it cannot pull
+// in anything that transitively reaches `server-only` (e.g. alerts.ts -> db.ts
+// -> supabase.ts). deviceFromUserAgent is pure string parsing, so it lives
+// here; alerts.ts imports it from here (and re-exports it for compatibility).
+export function deviceFromUserAgent(userAgent: string | null): string {
+  if (!userAgent) return "Unknown device";
+
+  let platform = "Unknown device";
+  if (/iPhone/i.test(userAgent)) platform = "iPhone";
+  else if (/iPad/i.test(userAgent)) platform = "iPad";
+  else if (/Android/i.test(userAgent)) platform = "Android";
+  else if (/Macintosh|Mac OS X/i.test(userAgent)) platform = "Mac";
+  else if (/Windows/i.test(userAgent)) platform = "Windows";
+  else if (/Linux/i.test(userAgent)) platform = "Linux";
+
+  let browser = "";
+  if (/Edg\//i.test(userAgent)) browser = "Edge";
+  else if (/OPR\//i.test(userAgent)) browser = "Opera";
+  else if (/Chrome\//i.test(userAgent)) browser = "Chrome";
+  else if (/Firefox\//i.test(userAgent)) browser = "Firefox";
+  else if (/Safari\//i.test(userAgent)) browser = "Safari";
+
+  if (platform === "Unknown device") return "Unknown device";
+  return browser ? `${platform} · ${browser}` : platform;
+}
 
 const DASH = "—";
 
@@ -21,8 +43,11 @@ const UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 
 export function fmtBytes(bytes: number | null | undefined): string {
   if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return DASH;
-  if (bytes < 1024) return `${Math.round(bytes)} B`;
-  let value = bytes;
+  // Round to whole bytes first so a value like 1023.6 crosses into the next
+  // unit before we compare against 1024, rather than printing "1024 B".
+  const rounded = Math.round(bytes);
+  if (rounded < 1024) return `${rounded} B`;
+  let value = rounded;
   let unit = 0;
   while (value >= 1024 && unit < UNITS.length - 1) {
     value /= 1024;

@@ -39,14 +39,35 @@ export type VideoEdits = {
   markers: Marker[];
 };
 
-export const EMPTY_EDITS: VideoEdits = {
+function deepFreezeEmptyEdits(edits: VideoEdits): VideoEdits {
+  Object.freeze(edits.cuts);
+  Object.freeze(edits.zooms);
+  Object.freeze(edits.overlays);
+  Object.freeze(edits.markers);
+  return Object.freeze(edits);
+}
+
+/** Frozen shared default — never mutate; use `emptyEdits()` for a fresh, mutable copy. */
+export const EMPTY_EDITS: VideoEdits = deepFreezeEmptyEdits({
   version: 1,
   cuts: [],
   crop: null,
   zooms: [],
   overlays: [],
   markers: [],
-};
+});
+
+/** A fresh, mutable "no edits" object — never share `EMPTY_EDITS` with a caller that may mutate it. */
+function emptyEdits(): VideoEdits {
+  return {
+    version: 1,
+    cuts: [],
+    crop: null,
+    zooms: [],
+    overlays: [],
+    markers: [],
+  };
+}
 
 const OVERLAY_TYPES: OverlayType[] = ["blur", "callout", "underline", "highlight"];
 
@@ -97,8 +118,8 @@ function asArray(value: unknown): unknown[] {
  * jsonb blob degrades to "no edits" rather than breaking playback.
  */
 export function parseEdits(input: unknown): VideoEdits {
-  if (!isRecord(input)) return EMPTY_EDITS;
-  if (input.version !== 1) return EMPTY_EDITS;
+  if (!isRecord(input)) return emptyEdits();
+  if (input.version !== 1) return emptyEdits();
 
   const cuts: Cut[] = [];
   for (const raw of asArray(input.cuts)) {

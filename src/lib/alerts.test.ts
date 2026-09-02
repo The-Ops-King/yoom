@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Video, ViewSession } from "@/lib/db";
 import {
-  deviceFromUserAgent,
   locationLabel,
   renderFirstPlayEmail,
   renderSummaryEmail,
   sendFirstPlayEmail,
   sendSummaryEmail,
 } from "@/lib/alerts";
+
+// deviceFromUserAgent is implemented and tested in format.test.ts; alerts.ts
+// only re-exports it for backwards compatibility.
 
 const sendMock = vi.hoisted(() => vi.fn());
 const getSettingsMock = vi.hoisted(() => vi.fn());
@@ -79,24 +81,6 @@ afterEach(() => {
   delete process.env.RESEND_API_KEY;
   delete process.env.ALERT_FROM_EMAIL;
   delete process.env.ALERT_TO_EMAIL;
-});
-
-describe("deviceFromUserAgent", () => {
-  it("recognises a Mac desktop", () => {
-    expect(deviceFromUserAgent(session.user_agent)).toBe("Mac · Chrome");
-  });
-
-  it("recognises an iPhone", () => {
-    expect(
-      deviceFromUserAgent(
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605 Version/17.0 Mobile/15E148 Safari/604.1",
-      ),
-    ).toBe("iPhone · Safari");
-  });
-
-  it("falls back to Unknown device", () => {
-    expect(deviceFromUserAgent(null)).toBe("Unknown device");
-  });
 });
 
 describe("locationLabel", () => {

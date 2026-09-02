@@ -254,11 +254,16 @@ export type VideoListItem = Video & {
 
 /**
  * PostgREST's `or=` filter is comma/parenthesis delimited, so those characters
- * cannot appear inside a value. Strip them rather than escape them: the search
- * box is a convenience, not a query language.
+ * cannot appear inside a value. `%` and `_` are `ilike` wildcards. Strip all of
+ * them rather than escape them: the search box is a convenience, not a query
+ * language.
  */
 function sanitizeSearch(term: string): string {
-  return term.replace(/[,()*\\]/g, "").trim();
+  return term.replace(/[,()*\\%_]/g, "").trim();
+}
+
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
 }
 
 /**
@@ -303,7 +308,7 @@ export async function listVideos(options: {
       ...video,
       views: row?.view_count ?? 0,
       uniqueViewers: row?.unique_viewers ?? 0,
-      avgMaxPercent: row ? Number(row.avg_max_percent) || 0 : 0,
+      avgMaxPercent: row ? round1(Number(row.avg_max_percent) || 0) : 0,
       lastViewedAt: row?.last_viewed_at ?? null,
     };
   });
@@ -317,10 +322,11 @@ export async function listVideos(options: {
 
 export type VideoMetaPatch = { title?: string; description?: string | null };
 
+/** Returns null when the video is missing or soft-deleted, rather than throwing. */
 export async function updateVideoMeta(
   id: string,
   patch: VideoMetaPatch,
-): Promise<Video> {
+): Promise<Video | null> {
   const update: Record<string, unknown> = {};
   if (patch.title !== undefined) update.title = patch.title.trim();
   if (patch.description !== undefined) {
@@ -331,10 +337,15 @@ export async function updateVideoMeta(
   const table = getSupabase().from("videos");
   const query =
     Object.keys(update).length === 0
-      ? table.select("*").eq("id", id).single()
-      : table.update(update).eq("id", id).select("*").single();
+      ? table.select("*").eq("id", id).is("deleted_at", null).maybeSingle()
+      : table
+          .update(update)
+          .eq("id", id)
+          .is("deleted_at", null)
+          .select("*")
+          .maybeSingle();
 
-  return unwrap((await query) as QueryResult<Video>);
+  return unwrap((await query) as QueryResult<Video | null>);
 }
 
 /**
@@ -466,7 +477,7 @@ export async function getVideoStats(videoId: string): Promise<VideoStats> {
   return {
     views: rows.length,
     unique: viewers.size,
-    avgMaxPercent: rows.length === 0 ? 0 : Math.round(total / rows.length),
+    avgMaxPercent: rows.length === 0 ? 0 : round1(total / rows.length),
     buckets,
   };
 }

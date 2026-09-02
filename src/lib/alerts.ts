@@ -1,7 +1,13 @@
 import { Resend } from "resend";
 import { env, optionalEnv } from "@/lib/env";
 import { getSettings, type Video, type ViewSession } from "@/lib/db";
+import { deviceFromUserAgent } from "@/lib/format";
 import { shareUrl } from "@/lib/share";
+
+// Kept for backwards compatibility; the implementation lives in format.ts so
+// that module can stay free of the server-only chain (format.ts -> alerts.ts
+// -> db.ts -> supabase.ts) that would break Client Component imports.
+export { deviceFromUserAgent } from "@/lib/format";
 
 export type RenderedEmail = {
   subject: string;
@@ -16,28 +22,6 @@ export function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-export function deviceFromUserAgent(userAgent: string | null): string {
-  if (!userAgent) return "Unknown device";
-
-  let platform = "Unknown device";
-  if (/iPhone/i.test(userAgent)) platform = "iPhone";
-  else if (/iPad/i.test(userAgent)) platform = "iPad";
-  else if (/Android/i.test(userAgent)) platform = "Android";
-  else if (/Macintosh|Mac OS X/i.test(userAgent)) platform = "Mac";
-  else if (/Windows/i.test(userAgent)) platform = "Windows";
-  else if (/Linux/i.test(userAgent)) platform = "Linux";
-
-  let browser = "";
-  if (/Edg\//i.test(userAgent)) browser = "Edge";
-  else if (/OPR\//i.test(userAgent)) browser = "Opera";
-  else if (/Chrome\//i.test(userAgent)) browser = "Chrome";
-  else if (/Firefox\//i.test(userAgent)) browser = "Firefox";
-  else if (/Safari\//i.test(userAgent)) browser = "Safari";
-
-  if (platform === "Unknown device") return "Unknown device";
-  return browser ? `${platform} · ${browser}` : platform;
 }
 
 export function locationLabel(session: ViewSession): string {

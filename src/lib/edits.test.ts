@@ -107,6 +107,19 @@ describe("parseEdits", () => {
     });
     expect(parsed.markers).toEqual([{ t: 1 }]);
   });
+
+  it("returns a fresh object for empty/invalid input each time", () => {
+    expect(parseEdits(null)).not.toBe(parseEdits(null));
+  });
+
+  it("does not let mutating one result affect a later call", () => {
+    const first = parseEdits(null);
+    first.cuts.push({ start: 0, end: 1 });
+    first.markers.push({ t: 1 });
+    const second = parseEdits(undefined);
+    expect(second.cuts).toEqual([]);
+    expect(second.markers).toEqual([]);
+  });
 });
 
 describe("isEmptyEdits", () => {
@@ -118,5 +131,15 @@ describe("isEmptyEdits", () => {
     expect(
       isEmptyEdits({ ...EMPTY_EDITS, markers: [{ t: 1 }] }),
     ).toBe(false);
+  });
+});
+
+describe("EMPTY_EDITS", () => {
+  it("is deeply frozen so it can be safely shared as a default", () => {
+    expect(Object.isFrozen(EMPTY_EDITS)).toBe(true);
+    expect(Object.isFrozen(EMPTY_EDITS.cuts)).toBe(true);
+    expect(Object.isFrozen(EMPTY_EDITS.zooms)).toBe(true);
+    expect(Object.isFrozen(EMPTY_EDITS.overlays)).toBe(true);
+    expect(Object.isFrozen(EMPTY_EDITS.markers)).toBe(true);
   });
 });

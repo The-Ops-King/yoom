@@ -118,6 +118,28 @@ describe("listVideos", () => {
     expect(rows[0].lastViewedAt).toBeNull();
   });
 
+  it("rounds avg_max_percent to one decimal place", async () => {
+    const videos = chain({ data: [ROW_A], error: null });
+    const stats = chain({
+      data: [
+        {
+          video_id: ROW_A.id,
+          view_count: 1,
+          unique_viewers: 1,
+          avg_max_percent: "42.567",
+          last_viewed_at: null,
+        },
+      ],
+      error: null,
+    });
+    from.mockImplementation((table: string) =>
+      table === "videos" ? videos : stats,
+    );
+
+    const rows = await listVideos({ sort: "newest" });
+    expect(rows[0].avgMaxPercent).toBe(42.6);
+  });
+
   it("applies a search filter across title, description and slug", async () => {
     const videos = chain({ data: [], error: null });
     from.mockImplementation((table: string) =>
@@ -144,6 +166,19 @@ describe("listVideos", () => {
         / /g,
         "",
       ),
+    );
+  });
+
+  it("strips ilike wildcard characters (% and _) from the search term", async () => {
+    const videos = chain({ data: [], error: null });
+    from.mockImplementation((table: string) =>
+      table === "videos" ? videos : chain({ data: [], error: null }),
+    );
+
+    await listVideos({ q: "a%b_c", sort: "newest" });
+
+    expect(videos.or).toHaveBeenCalledWith(
+      "title.ilike.%abc%,description.ilike.%abc%,slug.ilike.%abc%",
     );
   });
 
@@ -191,7 +226,9 @@ describe("updateVideoMeta", () => {
     expect(from).toHaveBeenCalledWith("videos");
     expect(builder.update).toHaveBeenCalledWith({ title: "New" });
     expect(builder.eq).toHaveBeenCalledWith("id", ROW_A.id);
-    expect(row.title).toBe("New");
+    expect(builder.is).toHaveBeenCalledWith("deleted_at", null);
+    expect(builder.maybeSingle).toHaveBeenCalled();
+    expect(row?.title).toBe("New");
   });
 
   it("normalises an empty description to null", async () => {
@@ -207,6 +244,13 @@ describe("updateVideoMeta", () => {
     await updateVideoMeta(ROW_A.id, {});
     expect(builder.update).not.toHaveBeenCalled();
     expect(builder.select).toHaveBeenCalled();
+    expect(builder.is).toHaveBeenCalledWith("deleted_at", null);
+  });
+
+  it("returns null when the video is missing or soft-deleted", async () => {
+    const builder = chain({ data: null, error: null });
+    from.mockReturnValue(builder);
+    await expect(updateVideoMeta(ROW_A.id, { title: "New" })).resolves.toBeNull();
   });
 });
 
