@@ -81,7 +81,11 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
   // out at, so it matches the drag layer exactly.
   const box = contentRect(player.size.width, player.size.height, edits.frame);
   const aspect = box.h > 0 ? box.w / box.h : 16 / 9;
-  const sample = cameraAt(track, player.time);
+  // The live playhead, not the 10 Hz `player.time` mirror: every control below
+  // *writes* at `timeRef.current`, so the pressed state has to be read from
+  // the same clock or a button can look off while it is on. (`player.time`
+  // still drives the re-render that gets us here.)
+  const sample = cameraAt(track, player.timeRef.current);
 
   /**
    * Every "at the playhead" control writes one keyframe at `t` so the change
@@ -96,6 +100,9 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
   const setShape = (shape: BubbleShape) => {
     const t = player.timeRef.current;
     const cur = cameraAt(track, t);
+    // There is no bubble to reshape while the camera is hidden, and writing a
+    // keyframe here would silently pin "hidden" at the playhead forever.
+    if (cur.mode === "hidden") return;
     // Re-derive `h` for the new shape so the pixel box stays right (a circle
     // is square in pixels, `rounded` follows the camera aspect, and so on).
     const h = Math.min(1, bubbleHeightFor(shape, cur.rect.w, aspect));
@@ -142,6 +149,9 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
               key={s.id}
               type="button"
               aria-pressed={sample.shape === s.id}
+              // A hidden camera has no bubble to reshape; `setShape` refuses
+              // anyway, so say so rather than looking broken.
+              disabled={sample.mode === "hidden"}
               className={sample.shape === s.id ? btnOn : btn}
               onClick={() => setShape(s.id)}
             >

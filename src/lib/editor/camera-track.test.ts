@@ -97,6 +97,18 @@ describe("cameraAt", () => {
     expect(cameraAt(dragged, 4.2).rect).toEqual({ x: 0.42, y: 0.11, w: 0.2, h: 0.2 });
   });
 
+  it("compresses, never clips, the window of a keyframe near t = 0", () => {
+    // kf@0 and kf@0.1: the full 0.3 s window would start at -0.2, so frame 0
+    // would already be two-thirds through the move and the t=0 state would
+    // never be shown. The window compresses to [0, 0.1] instead.
+    const near = upsertKeyframe(track, 0.1, { rect: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } });
+    expect(cameraAt(near, 0).rect).toEqual(track.keyframes[0].rect);
+    expect(cameraAt(near, 0.1).rect).toEqual({ x: 0.1, y: 0.1, w: 0.2, h: 0.2 });
+    const mid = cameraAt(near, 0.05);
+    expect(mid.rect.x).toBeGreaterThan(0.1);
+    expect(mid.rect.x).toBeLessThan(track.keyframes[0].rect.x);
+  });
+
   it("does not pop when a keyframe re-targets before the prior animation settles", () => {
     // keyframe1 at t=5, keyframe2 at t=5.1 — its window [4.8, 5.1] opens
     // while keyframe1's window [4.7, 5.0] is still running.

@@ -70,8 +70,16 @@ export function defaultCameraTrack(shape: BubbleShape, size: BubbleSize, screenA
   return { shape, mirror: true, keyframes: [{ t: 0, mode: "bubble", rect }] };
 }
 
-/** The moment `k`'s eased transition begins. The first keyframe has none. */
-const startOf = (k: CameraKeyframe): number => k.t - CAMERA_ANIM_S;
+/**
+ * The moment `k`'s eased transition begins. The first keyframe has none.
+ *
+ * Clamped at 0: a keyframe closer to the start than `CAMERA_ANIM_S` gets a
+ * *compressed* window rather than a clipped one. Clipping would mean the
+ * transition was already partway through at `t = 0` — with keyframes at 0 and
+ * 0.1 s the take would open two-thirds of the way into the move and the
+ * `t = 0` state would never be shown at all.
+ */
+const startOf = (k: CameraKeyframe): number => Math.max(0, k.t - CAMERA_ANIM_S);
 
 /** A keyframe as a fully settled sample. */
 function settled(k: CameraKeyframe, fallbackShape: BubbleShape): CameraSample {
@@ -102,11 +110,15 @@ function carry(reversing: boolean, fade: number, e: number): number {
  * scratch).
  */
 function advanceTo(from: CameraSample, target: CameraKeyframe, t: number, fallbackShape: BubbleShape): CameraSample {
-  // `1 + (t - target.t)/ANIM` rather than `(t - startOf(target))/ANIM`: it is
+  // The window is `[startOf(target), target.t]`, which is shorter than
+  // CAMERA_ANIM_S only for a keyframe within CAMERA_ANIM_S of the start; a
+  // zero-length one (two keyframes at t = 0) is instant.
+  const span = target.t - startOf(target);
+  // `1 + (t - target.t)/span` rather than `(t - startOf(target))/span`: it is
   // exactly 1 at `t === target.t` and exactly 0 at the window's start, where
   // the algebraically identical form loses a bit and leaves p at 0.9999999993
   // — which would make a keyframe never quite settle at its own `t`.
-  const p = Math.min(1, Math.max(0, 1 + (t - target.t) / CAMERA_ANIM_S));
+  const p = span > 0 ? Math.min(1, Math.max(0, 1 + (t - target.t) / span)) : 1;
   const e = easeInOutCubic(p);
   const shape = target.shape ?? fallbackShape;
   if (p >= 1) return { mode: target.mode, fade: 1, rect: { ...target.rect }, shape, shapeFade: 1 };
