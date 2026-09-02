@@ -412,6 +412,27 @@ describe("staging, rendering, upload and done", () => {
     expect(s.status).toBe("done");
     expect(s.shareUrl).toBe("https://jtylerray.com/v/abc");
     expect(s.blob).toBeNull();
+    expect(s.cameraBlob).toBeNull();
+  });
+
+  it("DISCARD resets render progress; CANCEL drops the camera blob", () => {
+    const blob = new Blob(["x"], { type: "video/webm" });
+    let s = initialRecorderState();
+    s = recorderReducer(s, { type: "ACQUIRE" });
+    s = recorderReducer(s, { type: "ACQUIRED", surface: "monitor", hasSystemAudio: true, hasCamera: true });
+    s = recorderReducer(s, { type: "START" });
+    s = recorderReducer(s, { type: "SKIP_COUNTDOWN" });
+    const live = s;
+    s = recorderReducer(s, { type: "STOP" });
+    s = recorderReducer(s, { type: "BLOB_READY", blob, cameraBlob: blob, cameraOffsetMs: 10, durationMs: 1000, width: 1, height: 1 });
+    s = recorderReducer(s, { type: "RENDER" });
+    s = recorderReducer(s, { type: "RENDER_PROGRESS", percent: 40 });
+    s = recorderReducer(s, { type: "RENDER_FAILED", error: "" });
+    s = recorderReducer(s, { type: "DISCARD" });
+    expect(s.renderProgress).toBe(0);
+    const cancelled = recorderReducer({ ...live, cameraBlob: blob, cameraOffsetMs: 10 }, { type: "CANCEL" });
+    expect(cancelled.cameraBlob).toBeNull();
+    expect(cancelled.cameraOffsetMs).toBe(0);
   });
 
   it("UPLOAD_FAILED returns to staging with an error so the blob can be retried", () => {
