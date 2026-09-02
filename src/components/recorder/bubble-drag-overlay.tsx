@@ -139,10 +139,13 @@ export function BubbleDragOverlay({
         onKeyDown={(e) => {
           const step = e.shiftKey ? 0.1 : 0.02;
           const { x, y } = bubble.pos;
-          if (e.key === "ArrowLeft") onMove({ x: x - step, y });
-          else if (e.key === "ArrowRight") onMove({ x: x + step, y });
-          else if (e.key === "ArrowUp") onMove({ x, y: y - step });
-          else if (e.key === "ArrowDown") onMove({ x, y: y + step });
+          // Nudges snap like drags do; a tween per auto-repeated keypress
+          // would leave the composited bubble lagging the handle.
+          const snap = { immediate: true };
+          if (e.key === "ArrowLeft") onMove({ x: x - step, y }, snap);
+          else if (e.key === "ArrowRight") onMove({ x: x + step, y }, snap);
+          else if (e.key === "ArrowUp") onMove({ x, y: y - step }, snap);
+          else if (e.key === "ArrowDown") onMove({ x, y: y + step }, snap);
           else return;
           e.preventDefault();
         }}

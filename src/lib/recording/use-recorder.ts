@@ -732,6 +732,8 @@ export function useRecorder(): UseRecorderResult {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
       if (!meta || !e.shiftKey) return;
+      // Holding a chord must not restart/cancel repeatedly.
+      if (e.repeat) return;
       const key = e.key.toLowerCase();
       const status = stateRef.current.status;
       if (key === "l") {
