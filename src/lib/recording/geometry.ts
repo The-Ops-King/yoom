@@ -170,6 +170,32 @@ export function computeFrameLayout(
   };
 }
 
+/**
+ * The rendered content box of a canvas shown with `object-contain` inside a
+ * DOM element. Letterbox bars appear on the sides or top/bottom when the
+ * canvas aspect ratio doesn't match the element's aspect ratio; this returns
+ * the sub-rect the canvas actually occupies (in the same coordinate space as
+ * `bounds`), so pointer math and handle placement never land in a bar.
+ */
+export function contentBox(
+  bounds: { left: number; top: number; width: number; height: number },
+  canvasWidth: number,
+  canvasHeight: number,
+): { left: number; top: number; width: number; height: number } {
+  if (canvasWidth <= 0 || canvasHeight <= 0) return bounds;
+
+  const scale = Math.min(bounds.width / canvasWidth, bounds.height / canvasHeight);
+  const contentW = canvasWidth * scale;
+  const contentH = canvasHeight * scale;
+
+  return {
+    left: bounds.left + (bounds.width - contentW) / 2,
+    top: bounds.top + (bounds.height - contentH) / 2,
+    width: contentW,
+    height: contentH,
+  };
+}
+
 /** Drag helper: a client point inside a DOM rect → a normalized bubble centre. */
 export function pointerToNormalized(
   clientX: number,

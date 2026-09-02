@@ -5,6 +5,7 @@ import {
   clampNormalized,
   computeBubbleRect,
   computeFrameLayout,
+  contentBox,
   coverCrop,
   pointerToNormalized,
   SIZE_FRACTION,
@@ -151,6 +152,29 @@ describe("computeFrameLayout", () => {
     const l = computeFrameLayout(1919, 1079, { ...DEFAULT_FRAME, enabled: false });
     expect(l.canvasW).toBe(1920);
     expect(l.canvasH).toBe(1080);
+  });
+});
+
+describe("contentBox", () => {
+  it("centres a taller-than-16:9 canvas with side bars", () => {
+    const bounds = { left: 0, top: 0, width: 1600, height: 900 };
+    expect(contentBox(bounds, 1920, 1200)).toEqual({
+      left: 80,
+      top: 0,
+      width: 1440,
+      height: 900,
+    });
+  });
+
+  it("returns the full bounds for a 16:9 canvas", () => {
+    const bounds = { left: 10, top: 20, width: 1600, height: 900 };
+    expect(contentBox(bounds, 1920, 1080)).toEqual(bounds);
+  });
+
+  it("returns the bounds unchanged for a degenerate canvas size", () => {
+    const bounds = { left: 0, top: 0, width: 1600, height: 900 };
+    expect(contentBox(bounds, 0, 0)).toEqual(bounds);
+    expect(contentBox(bounds, -10, 900)).toEqual(bounds);
   });
 });
 

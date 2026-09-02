@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import { DeviceSelector } from "@/components/device-selector";
 import { LevelMeter } from "./level-meter";
 import type { Capabilities } from "@/lib/recording/types";
@@ -59,6 +60,9 @@ export function AudioControls({
   onToggleSystem,
   onMicChange,
 }: AudioControlsProps) {
+  const getMicLevel = useCallback(() => getLevel("mic"), [getLevel]);
+  const getSystemLevel = useCallback(() => getLevel("system"), [getLevel]);
+
   return (
     <div className="space-y-3 rounded-lg border border-border bg-surface p-3">
       <span className="text-xs font-medium uppercase tracking-wider text-muted-dim">
@@ -68,7 +72,7 @@ export function AudioControls({
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm text-foreground">Microphone</span>
         <div className="flex items-center gap-3">
-          <LevelMeter getLevel={() => getLevel("mic")} active={micOn} label="Microphone" />
+          <LevelMeter getLevel={getMicLevel} active={micOn} label="Microphone" />
           <Toggle on={micOn} label="Microphone" onClick={onToggleMic} />
         </div>
       </div>
@@ -86,7 +90,7 @@ export function AudioControls({
         <span className="text-sm text-foreground">System audio</span>
         <div className="flex items-center gap-3">
           <LevelMeter
-            getLevel={() => getLevel("system")}
+            getLevel={getSystemLevel}
             active={systemOn && hasSystemAudio}
             label="System audio"
           />
@@ -94,7 +98,7 @@ export function AudioControls({
         </div>
       </div>
 
-      {live && !hasSystemAudio && (
+      {!hasSystemAudio && capabilities.systemAudio !== "full" && (
         <p className="text-[11px] leading-tight text-muted-dim">
           {capabilities.systemAudio === "tab-only"
             ? "System audio is available for tab recordings, or use the desktop app."

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   computeBubbleRect,
+  contentBox,
   pointerToNormalized,
 } from "@/lib/recording/geometry";
 import type { BubbleConfig } from "@/lib/recording/types";
@@ -31,25 +32,49 @@ export function BubbleDragOverlay({
 }: BubbleDragOverlayProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [hostSize, setHostSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const update = () => {
+      const bounds = host.getBoundingClientRect();
+      setHostSize({ width: bounds.width, height: bounds.height });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
 
   const rect =
     canvasWidth > 0 && canvasHeight > 0
       ? computeBubbleRect(canvasWidth, canvasHeight, cameraWidth, cameraHeight, bubble)
       : null;
 
+  // The canvas renders with `object-contain` inside the stage, so it may be
+  // letterboxed on the sides or top/bottom. The handle must be positioned —
+  // and drags interpreted — relative to that rendered content box, not the
+  // full (possibly letterboxed) host box.
+  const box = contentBox({ left: 0, top: 0, ...hostSize }, canvasWidth, canvasHeight);
+
   const handlePointer = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const host = hostRef.current;
       if (!host) return;
       const bounds = host.getBoundingClientRect();
-      onMove(pointerToNormalized(e.clientX, e.clientY, bounds));
+      const content = contentBox(bounds, canvasWidth, canvasHeight);
+      onMove(pointerToNormalized(e.clientX, e.clientY, content));
     },
-    [onMove],
+    [onMove, canvasWidth, canvasHeight],
   );
 
   if (!bubble.visible || !rect || bubble.shape === "full") return null;
 
-  const pct = (n: number, total: number) => `${(n / total) * 100}%`;
+  const pctX = (n: number) => `${box.left + (n / canvasWidth) * box.width}px`;
+  const pctY = (n: number) => `${box.top + (n / canvasHeight) * box.height}px`;
+  const pctW = (n: number) => `${(n / canvasWidth) * box.width}px`;
+  const pctH = (n: number) => `${(n / canvasHeight) * box.height}px`;
 
   return (
     <div ref={hostRef} className="absolute inset-0">
@@ -89,10 +114,10 @@ export function BubbleDragOverlay({
         }}
         style={{
           position: "absolute",
-          left: pct(rect.x, canvasWidth),
-          top: pct(rect.y, canvasHeight),
-          width: pct(rect.w, canvasWidth),
-          height: pct(rect.h, canvasHeight),
+          left: pctX(rect.x),
+          top: pctY(rect.y),
+          width: pctW(rect.w),
+          height: pctH(rect.h),
           borderRadius: bubble.shape === "circle" ? "50%" : "12px",
         }}
         className={`cursor-grab touch-none outline-none transition-shadow ${

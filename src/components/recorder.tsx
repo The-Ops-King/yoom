@@ -63,6 +63,7 @@ export function Recorder() {
           <div className="flex items-center gap-2 rounded-lg border border-border bg-surface p-2.5">
             <input
               readOnly
+              aria-label="Share link"
               value={state.shareUrl}
               className="flex-1 truncate bg-transparent text-sm text-muted outline-none"
             />
@@ -194,7 +195,11 @@ export function Recorder() {
           )}
 
           {(state.status === "setup" || live) && state.mode === "screen+camera" && (
-            <FramePicker frame={state.frame} locked={live} onChange={actions.setFrame} />
+            <FramePicker
+              frame={state.frame}
+              locked={live || state.status === "countdown"}
+              onChange={actions.setFrame}
+            />
           )}
 
           {state.error && (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const SEGMENTS = 8;
 
@@ -13,14 +13,19 @@ interface LevelMeterProps {
 
 export function LevelMeter({ getLevel, active, label }: LevelMeterProps) {
   const [lit, setLit] = useState(0);
+  const getLevelRef = useRef(getLevel);
+
+  useEffect(() => {
+    getLevelRef.current = getLevel;
+  });
 
   useEffect(() => {
     if (!active) return;
     const id = window.setInterval(() => {
-      setLit(Math.round(getLevel() * SEGMENTS));
+      setLit(Math.round(getLevelRef.current() * SEGMENTS));
     }, 100);
     return () => window.clearInterval(id);
-  }, [active, getLevel]);
+  }, [active]);
 
   // Derived rather than reset in the effect body: setting state synchronously
   // inside an effect trips `react-hooks/set-state-in-effect`.

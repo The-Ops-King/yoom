@@ -41,7 +41,7 @@ export function PreviewStage({
   onBubbleMove,
 }: PreviewStageProps) {
   const live = status === "recording" || status === "paused";
-  const showStage = status !== "idle" && status !== "acquiring";
+  const showStage = status !== "idle" && status !== "acquiring" && status !== "review";
 
   return (
     <div
