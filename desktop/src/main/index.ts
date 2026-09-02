@@ -7,7 +7,12 @@ import { warmPermissionsAtLaunch } from "./permissions";
 import { installPickerIpc } from "./picker";
 import { registerShortcuts, unregisterShortcuts } from "./shortcuts";
 import { createTray, destroyTray, refreshTrayMenu } from "./tray";
-import { createRecorderWindow, getRecorderWindow, yoomSession } from "./windows";
+import {
+  createRecorderWindow,
+  getRecorderWindow,
+  setQuitting,
+  yoomSession,
+} from "./windows";
 
 /**
  * Escape hatch for the macOS 14.2+ CoreAudio Tap path. From the desktopCapturer
@@ -79,6 +84,12 @@ if (!app.requestSingleInstanceLock()) {
   // they are already gone. Destroying the camera-holding windows here is what
   // makes the macOS camera indicator go out at quit rather than at process exit.
   app.on("before-quit", () => {
+    // Must come first: it is what lets the recorder window's
+    // `will-prevent-unload` handler override the page's `beforeunload` guard.
+    // Without it a quit requested while a take is live (or a staged blob is
+    // still in memory) is silently cancelled by the renderer and the app never
+    // exits — tray → "Quit Yoom" and ⌘Q both looked like dead menu items.
+    setQuitting(true);
     destroyBubble();
     destroyHud();
   });

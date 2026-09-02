@@ -66,6 +66,18 @@ export function yoomSession(): Session {
 
 let recorderWindow: BrowserWindow | null = null;
 
+/**
+ * True once `app.quit()` is under way. See the `will-prevent-unload` handler in
+ * `createRecorderWindow`: the recorder page arms a `beforeunload` guard while a
+ * take (or a staged blob) is alive, and that guard has to be honoured for an
+ * ordinary window close but ignored for a deliberate Quit.
+ */
+let quitting = false;
+
+export function setQuitting(value: boolean): void {
+  quitting = value;
+}
+
 export function getRecorderWindow(): BrowserWindow | null {
   return recorderWindow && !recorderWindow.isDestroyed() ? recorderWindow : null;
 }
@@ -177,6 +189,23 @@ export function createRecorderWindow(): BrowserWindow {
   });
 
   installNavigationGuard(win);
+
+  /**
+   * `use-recorder.ts` arms a `beforeunload` guard for every status that owns
+   * unsaved bytes — recording, paused, stopping, rendering, uploading, and
+   * `staging` with a blob. In Electron a prevented unload silently CANCELS the
+   * window close, and a cancelled close aborts `app.quit()`: that is why tray →
+   * "Quit Yoom" and ⌘Q did nothing while a take sat in staging.
+   *
+   * Per the webContents docs, calling `event.preventDefault()` here "will
+   * ignore the `beforeunload` event handler and allow the page to be unloaded".
+   * We only do that once a quit is actually under way (`before-quit` sets the
+   * flag), so closing or hiding the window mid-take still protects the take.
+   */
+  win.webContents.on("will-prevent-unload", (event) => {
+    if (quitting) event.preventDefault();
+  });
+
   win.once("ready-to-show", () => win.show());
   win.on("closed", () => {
     recorderWindow = null;
