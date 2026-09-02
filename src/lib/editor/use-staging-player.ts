@@ -10,8 +10,24 @@ import {
   sourceToEditedIn,
   type Range,
 } from "./cuts";
-import { loadBackground } from "./export";
+import { loadBackground, mountOffscreen } from "./export";
 import { drawFrame, outputSize, type RenderInputs } from "./render";
+
+/**
+ * Should the draw loop repaint this animation frame?
+ *
+ * Note what is NOT an input: whether `requestVideoFrameCallback` is available.
+ * The loop used to skip the draw while playing whenever rVFC existed, on the
+ * theory that rVFC would set `dirty` once per decoded frame. It does not for
+ * these decoders: they are detached `<video>` elements, and Chromium only fires
+ * rVFC when a frame is presented for composition, so an uncomposited element
+ * falls back to background rendering at ~4 Hz. The preview redrew four times a
+ * second, and zoom ramps — a function of TIME, not of new video pixels, so they
+ * need a repaint even on a frozen frame — did not animate.
+ */
+export function shouldDraw(playing: boolean, dirty: boolean): boolean {
+  return dirty || playing;
+}
 
 /** One frame at the export frame rate — the unit `step()` moves by. */
 const FRAME_S = 1 / 30;
@@ -67,6 +83,8 @@ function release(el: HTMLImageElement | HTMLVideoElement | null): void {
   el.pause();
   el.removeAttribute("src");
   el.load();
+  // Decoders are parked in the document (see `mountOffscreen`); take them out.
+  el.remove();
 }
 
 /** Identity of the frame background, so it is only decoded when it actually changes. */
@@ -93,8 +111,6 @@ export function useStagingPlayer(
   const dirtyRef = useRef(true);
   /** Canvas size at the last draw, so a resize forces a redraw while paused. */
   const drawnSizeRef = useRef({ w: 0, h: 0 });
-  /** True when the primary drives redraws through `requestVideoFrameCallback`. */
-  const vfcRef = useRef(false);
   /** Live playhead, written every frame; `time` is its throttled mirror. */
   const timeRef = useRef(0);
 
@@ -133,6 +149,7 @@ export function useStagingPlayer(
     // Read from the ref so a rebuild (source or mode change) keeps the option.
     primary.muted = mutedRef.current;
     if (src) primary.src = src;
+    mountOffscreen(primary);
     primaryRef.current = primary;
 
     let camera: HTMLVideoElement | null = null;
@@ -142,6 +159,7 @@ export function useStagingPlayer(
       camera.muted = true;
       camera.playsInline = true;
       camera.preload = "auto";
+      mountOffscreen(camera);
     }
     cameraRef.current = camera;
 
@@ -168,13 +186,12 @@ export function useStagingPlayer(
     primary.addEventListener("seeked", onSeeked);
     camera?.addEventListener("seeked", onSeeked);
 
-    // Prefer the compositor's own frame signal: it fires exactly when a new
-    // frame is presented (including after a seek), so the loop only redraws
-    // when there is something new. Without it the loop redraws every rAF
-    // while playing.
+    // An EXTRA dirty source, never the only one: rVFC fires when a frame is
+    // presented for composition, which is a useful nudge while paused (a seek
+    // landing, a decoder catching up) but is not a reliable clock — see
+    // `shouldDraw`. The loop redraws every rAF while playing regardless.
     let vfc = 0;
     const supportsVfc = typeof primary.requestVideoFrameCallback === "function";
-    vfcRef.current = supportsVfc;
     if (supportsVfc) {
       const onFrame = () => {
         dirtyRef.current = true;
@@ -295,9 +312,9 @@ export function useStagingPlayer(
           drawnSizeRef.current = { w: canvas.width, h: canvas.height };
           dirtyRef.current = true;
         }
-        // Without `requestVideoFrameCallback` there is no frame signal, so
-        // every rAF is a candidate frame while playing.
-        if (dirtyRef.current || (!p.paused && !vfcRef.current)) {
+        // While playing, every rAF is a draw: zoom ramps and the camera bubble
+        // move with TIME, not with new decoded pixels.
+        if (shouldDraw(!p.paused, dirtyRef.current)) {
           const ctx = canvas.getContext("2d");
           if (ctx) {
             const inputs: RenderInputs = {

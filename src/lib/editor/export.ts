@@ -27,7 +27,7 @@ const CODECS = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "vid
 /** Camera drift past this many seconds is corrected with a hard seek. */
 const RESYNC_S = 0.08;
 
-/** How long a seek or a frame callback may stall before we give up. */
+/** How long a seek, or the playhead, may stall before we give up. */
 const STALL_MS = 4000;
 
 function abortError(): DOMException {
@@ -38,14 +38,56 @@ function stallError(): Error {
   return new Error("Playback stalled while rendering.");
 }
 
-/** `requestVideoFrameCallback` aligns draws to decoded frames; not everywhere yet. */
-type RvfcVideo = HTMLVideoElement & {
-  requestVideoFrameCallback: (cb: () => void) => number;
-  cancelVideoFrameCallback: (handle: number) => void;
-};
+/**
+ * Milliseconds between draws for a capture rate, clamped to something a timer
+ * can actually honour. `captureStream(fps)` only emits a frame when the canvas
+ * is redrawn, so this interval IS the output frame rate.
+ */
+export function frameIntervalMs(fps: number): number {
+  const rate = Number.isFinite(fps) && fps > 0 ? Math.min(120, Math.max(1, fps)) : 30;
+  return 1000 / rate;
+}
 
-function hasRvfc(el: HTMLVideoElement): el is RvfcVideo {
-  return "requestVideoFrameCallback" in el;
+/** Watchdog state: the last playhead we saw, and when we saw it. */
+export interface StallWatch {
+  time: number;
+  at: number;
+}
+
+/**
+ * Advance the watchdog. Progress is measured on the PLAYHEAD, not on callback
+ * delivery: a loop that ticks happily while `currentTime` is frozen is still a
+ * stall, and a loop whose callbacks are slow but whose video is advancing is
+ * not. Movement in either direction counts — a resync seek is progress.
+ */
+export function tickStall(prev: StallWatch, time: number, now: number, epsilon = 1e-3): StallWatch {
+  return Math.abs(time - prev.time) > epsilon ? { time, at: now } : prev;
+}
+
+/** True once the playhead has been frozen for `limitMs`. */
+export function isStalled(watch: StallWatch, now: number, limitMs = STALL_MS): boolean {
+  return now - watch.at >= limitMs;
+}
+
+/**
+ * Chromium only advances a `<video>`'s frame pipeline for elements the
+ * compositor can see. A detached element (or a `display:none` one) falls back
+ * to "background rendering" — roughly one frame every 250 ms — and
+ * `requestVideoFrameCallback` fires at that same crawl. Parking the decoder in
+ * the document at 1×1 with zero opacity keeps it composited without showing
+ * anything.
+ *
+ * This is an optimisation, never a correctness dependency: the draw loops here
+ * and in the staging player run off their own clock and force a fresh frame
+ * through `drawImage`, so they still produce full-rate output if this element
+ * somehow is not composited.
+ */
+export function mountOffscreen(el: HTMLElement): void {
+  el.setAttribute(
+    "style",
+    "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1",
+  );
+  document.body?.appendChild(el);
 }
 
 /**
@@ -61,8 +103,9 @@ function makeVideo(blob: Blob, muted: boolean): Promise<HTMLVideoElement> {
     const url = URL.createObjectURL(blob);
     el.src = url;
     el.muted = muted; el.playsInline = true; el.preload = "auto";
+    mountOffscreen(el);
     el.onloadedmetadata = () => resolve(el);
-    el.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Could not decode the recording.")); };
+    el.onerror = () => { URL.revokeObjectURL(url); el.remove(); reject(new Error("Could not decode the recording.")); };
   });
 }
 
@@ -90,6 +133,7 @@ export async function loadBackground(edits: VideoEdits): Promise<HTMLImageElemen
   if (bg.kind === "video") {
     const v = document.createElement("video");
     v.src = bg.src; v.loop = true; v.muted = true; v.playsInline = true; v.crossOrigin = "anonymous";
+    mountOffscreen(v);
     await v.play().catch(() => {});
     return v;
   }
@@ -120,10 +164,12 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
     cleaned = true;
     primary.pause(); camera?.pause();
     URL.revokeObjectURL(primary.src); if (camera) URL.revokeObjectURL(camera.src);
+    primary.remove(); camera?.remove();
     if (background && "pause" in background) {
       background.pause();
       background.removeAttribute("src");
       background.load();
+      background.remove();
     }
     stream?.getTracks().forEach((t) => t.stop());
     audioCtx?.close().catch(() => {});
@@ -184,18 +230,18 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
     let recordedMs = 0;
     let segmentStart = 0;
 
-    // rVFC fires once per decoded frame; rAF is the fallback.
-    const rvfc = hasRvfc(primary) ? primary : null;
-    let handle = 0;
-    const schedule = (fn: () => void) => {
-      handle = rvfc ? rvfc.requestVideoFrameCallback(fn) : requestAnimationFrame(() => fn());
-    };
-    const unschedule = () => {
-      if (!handle) return;
-      if (rvfc) rvfc.cancelVideoFrameCallback(handle);
-      else cancelAnimationFrame(handle);
-      handle = 0;
-    };
+    // The draw loop runs off a plain timer at the capture rate.
+    //
+    // It used to be driven by `requestVideoFrameCallback` on the primary, which
+    // looks right — one draw per decoded frame — but is wrong here: these
+    // decoders are detached elements, and Chromium only fires rVFC when a frame
+    // is PRESENTED for composition. An uncomposited element falls back to
+    // background rendering (~4 Hz), so the canvas was only redrawn ~4 times a
+    // second and `captureStream(fps)`, which emits a frame only when the canvas
+    // changes, wrote a ~4 fps file. `requestAnimationFrame` would fix the rate
+    // but stops entirely in a hidden window; a timer keeps going (throttled to
+    // 1 Hz at worst) and still produces a correct, if coarse, render.
+    const intervalMs = frameIntervalMs(fps);
 
     recorder.start(250);
     recorder.pause();
@@ -212,22 +258,23 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
       segmentStart = performance.now();
       await new Promise<void>((resolve, reject) => {
         let timer = 0;
+        // The watchdog trips on a frozen PLAYHEAD, not on missing callbacks:
+        // the timer always fires, so callback delivery says nothing about
+        // whether the video is actually making progress.
+        let watch: StallWatch = { time: primary.currentTime, at: performance.now() };
         const off = () => {
-          clearTimeout(timer);
-          unschedule();
+          if (timer) { clearInterval(timer); timer = 0; }
           primary.removeEventListener("ended", onEnded);
           opts.signal.removeEventListener("abort", onAbort);
-        };
-        const arm = () => {
-          clearTimeout(timer);
-          timer = window.setTimeout(() => { off(); reject(stallError()); }, STALL_MS);
         };
         const onEnded = () => { off(); resolve(); };
         const onAbort = () => { off(); reject(abortError()); };
         const tick = () => {
           if (opts.signal.aborted) return onAbort();
-          arm();
           const t = primary.currentTime;
+          const now = performance.now();
+          watch = tickStall(watch, t, now);
+          if (isStalled(watch, now, STALL_MS)) { off(); return reject(stallError()); }
           if (camera && Math.abs(camera.currentTime - (t + offset)) > RESYNC_S) {
             camera.currentTime = Math.max(0, t + offset);
           }
@@ -238,12 +285,11 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
           }
           report(Math.min(99, Math.round(((done + (t - r.start)) / total) * 100)));
           if (t >= r.end || primary.ended) { off(); return resolve(); }
-          schedule(tick);
         };
         primary.addEventListener("ended", onEnded, { once: true });
         opts.signal.addEventListener("abort", onAbort, { once: true });
-        arm();
-        schedule(tick);
+        timer = window.setInterval(tick, intervalMs);
+        tick();
       });
       recorder.pause();
       recordedMs += performance.now() - segmentStart;
