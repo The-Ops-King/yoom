@@ -421,7 +421,18 @@ export function Recorder() {
       const completeRes = await fetch("/api/upload/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ driveFileId, durationMs, width, height }),
+        body: JSON.stringify({
+          driveFileId,
+          durationMs,
+          width,
+          height,
+          // Generated client-side so the default title reflects the recorder's
+          // local time zone rather than the server's (UTC on Vercel).
+          title: `Recording — ${new Intl.DateTimeFormat("en-US", {
+            dateStyle: "medium",
+            timeStyle: "short",
+          }).format(new Date())}`,
+        }),
       });
       if (!completeRes.ok) throw new Error("Failed to save the recording");
 
