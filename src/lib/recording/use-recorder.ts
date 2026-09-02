@@ -3,22 +3,12 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import fixWebmDuration from "fix-webm-duration";
+import type { VideoEdits } from "@/lib/edits";
+import { editedDuration } from "@/lib/editor/cuts";
+import { renderToBlob, type RenderSources } from "@/lib/editor/export";
 import { AudioMixer } from "./audio-mixer";
-import { Compositor } from "./compositor";
-import {
-  isDesktop,
-  onDesktopBubbleAppearance,
-  onDesktopBubbleMove,
-  onDesktopShortcut,
-  setDesktopBubbleAppearance,
-  setDesktopBubbleVisible,
-  setDesktopCameraDevice,
-  setDesktopHudState,
-  setDesktopRecordingActive,
-} from "./desktop-bridge";
-import { computeFrameLayout, displayPosToCanvasPos } from "./geometry";
+import { isDesktop, onDesktopShortcut, setDesktopHudState } from "./desktop-bridge";
 import { getProvider } from "./media-sources";
-import { createFpsOverlay, createNoopOverlay, debugOverlaysEnabled } from "./overlays";
 import {
   MAX_DURATION_MS,
   initialRecorderState,
@@ -60,9 +50,18 @@ function stopStream(stream: MediaStream | null): void {
   stream?.getTracks().forEach((t) => t.stop());
 }
 
-/** Object URLs come from the frame picker; only it creates `blob:` srcs. */
-function revokeBlob(src: string | undefined): void {
-  if (src?.startsWith("blob:")) URL.revokeObjectURL(src);
+/** Cuts shorten the take, so the uploaded duration is the edited one. */
+const editedDurationMs = (edits: VideoEdits, durationMs: number) =>
+  editedDuration(edits, durationMs / 1000) * 1000;
+
+/** Everything staging collected before the user pressed Save. */
+export interface FinishInput {
+  edits: VideoEdits;
+  title: string;
+  description: string;
+  slug: string;
+  /** Edited-timeline second to grab the thumbnail from. */
+  thumbnailAt: number;
 }
 
 export interface UseRecorderResult {
@@ -70,21 +69,12 @@ export interface UseRecorderResult {
   capabilities: Capabilities;
   /** True when running inside the Electron shell (Phase 4). */
   desktop: boolean;
-  /** Canvas the compositor paints into (camera and screen+camera modes). */
-  canvasRef: React.RefObject<HTMLCanvasElement | null>;
-  /** <video> element used to preview screen-only recordings. */
+  /** Raw screen preview while configuring (screen and screen+camera). */
   screenVideoRef: React.RefObject<HTMLVideoElement | null>;
-  /** Object URL for the recorded blob while on the review screen. */
-  reviewUrl: string | null;
-  /** Object URL for the captured thumbnail while on the review screen. */
-  thumbnailUrl: string | null;
-  /** Live canvas and camera dimensions, polled for the drag overlay. */
-  dimensions: {
-    canvasWidth: number;
-    canvasHeight: number;
-    cameraWidth: number;
-    cameraHeight: number;
-  };
+  /** Raw camera preview while configuring (camera and screen+camera). */
+  cameraVideoRef: React.RefObject<HTMLVideoElement | null>;
+  /** Object URLs for the two raw files while staging; null outside staging. */
+  staging: { screenUrl: string | null; cameraUrl: string | null } | null;
   getLevel: (id: "mic" | "system") => number;
   actions: {
     selectMode(mode: RecordingMode): void;
@@ -110,15 +100,13 @@ export interface UseRecorderResult {
     /** Drop a timestamp marker at the current elapsed time. Mark button / ⌘⇧M. */
     mark(): void;
     discard(): void;
-    upload(): void;
+    /** Render the edit list to one file, then upload it with the details. */
+    finish(input: FinishInput): void;
+    cancelRender(): void;
     reset(): void;
     toggleMic(on?: boolean): void;
     toggleSystem(on?: boolean): void;
-    /**
-     * `immediate` skips the compositor's 300 ms tween — the drag overlay uses
-     * it so the bubble tracks the pointer instead of chasing it.
-     */
-    setBubble(patch: Partial<BubbleConfig>, opts?: { immediate?: boolean }): void;
+    setBubble(patch: Partial<BubbleConfig>): void;
     setFrame(patch: Partial<FrameConfig>): void;
   };
 }
@@ -126,10 +114,11 @@ export interface UseRecorderResult {
 /**
  * The recorder hook.
  *
- * **Hard contract for the preview component:** `canvasRef` MUST be mounted
- * whenever `state.status` is `idle`, `acquiring` or `setup`. Camera and
- * screen+camera modes composite into that canvas, and `acquire()` fails loudly
- * (`ACQUIRE_FAILED`) rather than silently recording nothing if it is missing.
+ * Capture is raw: `screen` records the display track, `camera` records the
+ * camera track, and `screen+camera` runs TWO `MediaRecorder`s — one per source
+ * — started in the same tick so their `onstart` stamps differ only by encoder
+ * start-up skew. Nothing is composited live; the edit list and the renderer
+ * (`@/lib/editor`) decide what the finished file looks like.
  */
 export function useRecorder(): UseRecorderResult {
   const [state, dispatch] = useReducer(recorderReducer, DEFAULT_SETTINGS, initialRecorderState);
@@ -141,26 +130,18 @@ export function useRecorder(): UseRecorderResult {
   // `window.__yoomDesktop` does not exist during SSR, so this has to be set
   // from the boot effect rather than a lazy initializer.
   const [desktop, setDesktop] = useState(false);
-  const [reviewUrl, setReviewUrl] = useState<string | null>(null);
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   // Bumped by `restartNow`: a recording → recording restart does not change
   // `state.status`, so the "start the encoder" effect needs its own trigger.
   const [restartToken, setRestartToken] = useState(0);
-  const [dimensions, setDimensions] = useState({
-    canvasWidth: 0,
-    canvasHeight: 0,
-    cameraWidth: 0,
-    cameraHeight: 0,
-  });
-  // The live camera track's width/height, forwarded to the desktop shell so
-  // its floating bubble window can match a `rounded` bubble's real aspect
-  // ratio instead of assuming 16:9. Set once per acquire, after `getCamera`.
-  const [cameraAspect, setCameraAspect] = useState<number | undefined>(undefined);
+  const [staging, setStaging] = useState<{
+    screenUrl: string | null;
+    cameraUrl: string | null;
+  } | null>(null);
 
   const router = useRouter();
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   // Set inside `onSlug` (see `upload` below): whether the share link actually
   // made it onto the clipboard, which decides the `?new=1` toast.
   const copiedRef = useRef(false);
@@ -169,14 +150,18 @@ export function useRecorder(): UseRecorderResult {
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const mixerRef = useRef<AudioMixer | null>(null);
-  const compositorRef = useRef<Compositor | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  // The second encoder, only in `screen+camera`: the raw camera file.
+  const cameraRecorderRef = useRef<MediaRecorder | null>(null);
+  const cameraChunksRef = useRef<Blob[]>([]);
+  // `onstart` stamps of the two encoders; their delta is `cameraOffsetMs`.
+  const screenStartRef = useRef(0);
+  const cameraStartRef = useRef(0);
+  const renderAbortRef = useRef<AbortController | null>(null);
   const startedAtRef = useRef(0);
   const pausedAtRef = useRef(0);
   const pausedTotalRef = useRef(0);
-  const thumbnailRef = useRef<Blob | null>(null);
-  const thumbnailTimerRef = useRef<number | null>(null);
   const dimensionsRef = useRef<{ width: number | null; height: number | null }>({
     width: null,
     height: null,
@@ -186,8 +171,6 @@ export function useRecorder(): UseRecorderResult {
   // Settings are only persisted once the stored settings have been read back,
   // so the first render never writes DEFAULT_SETTINGS over the saved ones.
   const hydratedRef = useRef(false);
-  // Object URLs the frame picker created; revoked when replaced.
-  const prevFrameSrcRef = useRef<string | undefined>(undefined);
 
   // ---------- boot: settings + capabilities ----------
 
@@ -203,7 +186,6 @@ export function useRecorder(): UseRecorderResult {
     dispatch({ type: "SET_FRAME", patch: settings.frame });
     setCapabilities(getProvider().capabilities());
     setDesktop(isDesktop());
-    prevFrameSrcRef.current = settings.frame.background.src;
     hydratedRef.current = true;
   }, []);
 
@@ -240,12 +222,6 @@ export function useRecorder(): UseRecorderResult {
   // ---------- teardown ----------
 
   const teardown = useCallback(() => {
-    if (thumbnailTimerRef.current) {
-      window.clearTimeout(thumbnailTimerRef.current);
-      thumbnailTimerRef.current = null;
-    }
-    compositorRef.current?.dispose();
-    compositorRef.current = null;
     void mixerRef.current?.close();
     mixerRef.current = null;
     stopStream(screenStreamRef.current);
@@ -255,20 +231,13 @@ export function useRecorder(): UseRecorderResult {
     cameraStreamRef.current = null;
     micStreamRef.current = null;
     if (screenVideoRef.current) screenVideoRef.current.srcObject = null;
+    if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null;
     recorderRef.current = null;
+    cameraRecorderRef.current = null;
   }, []);
 
-  // Unmount: tear the pipeline down and release the picker's object URLs.
-  // `teardown` deliberately does NOT revoke them — it also runs on upload,
-  // where the user keeps the background as a setting.
-  useEffect(
-    () => () => {
-      teardown();
-      revokeBlob(prevFrameSrcRef.current);
-      prevFrameSrcRef.current = undefined;
-    },
-    [teardown],
-  );
+  // Unmount: tear the pipeline down.
+  useEffect(() => () => teardown(), [teardown]);
 
   // ---------- acquisition ----------
 
@@ -296,18 +265,8 @@ export function useRecorder(): UseRecorderResult {
       }
 
       if (current.mode !== "screen") {
-        // Camera and screen+camera composite into the canvas. A missing canvas
-        // means the preview is not mounted and we would silently record
-        // nothing — fail loudly instead (see the hook's contract above).
-        if (!canvasRef.current) throw new Error("Recorder canvas is not mounted");
         const camera = await provider.getCamera(current.cameraId || undefined);
         cameraStreamRef.current = camera;
-        const camSettings = camera.getVideoTracks()[0]?.getSettings();
-        setCameraAspect(
-          camSettings?.width && camSettings?.height && camSettings.width > 0 && camSettings.height > 0
-            ? camSettings.width / camSettings.height
-            : undefined,
-        );
         camera.getVideoTracks()[0]?.addEventListener("ended", () => {
           dispatch({ type: "STREAM_ENDED" });
         });
@@ -334,30 +293,14 @@ export function useRecorder(): UseRecorderResult {
       }
       mixerRef.current = mixer;
 
-      // Compositor for camera and screen+camera; screen-only bypasses it.
-      if (current.mode !== "screen" && canvasRef.current) {
-        const compositor = new Compositor(
-          canvasRef.current,
-          current.mode === "camera" ? "camera" : "screen+camera",
-        );
-        compositor.setSources({
-          screen: current.mode === "screen+camera" ? screenStreamRef.current : null,
-          camera: cameraStreamRef.current,
-        });
-        compositor.setBubble(
-          current.mode === "camera"
-            ? { ...current.bubble, shape: "full", visible: true }
-            : current.bubble,
-        );
-        compositor.setFrame(current.frame);
-        compositor.addOverlay(
-          debugOverlaysEnabled() ? createFpsOverlay() : createNoopOverlay(),
-        );
-        compositorRef.current = compositor;
-        await compositor.start();
-      } else if (screenVideoRef.current && screenStreamRef.current) {
+      // Raw previews: one <video> per live source, no compositing.
+      if (screenVideoRef.current && screenStreamRef.current) {
         screenVideoRef.current.srcObject = screenStreamRef.current;
         void screenVideoRef.current.play().catch(() => {});
+      }
+      if (cameraVideoRef.current && cameraStreamRef.current) {
+        cameraVideoRef.current.srcObject = cameraStreamRef.current;
+        void cameraVideoRef.current.play().catch(() => {});
       }
 
       dispatch({
@@ -371,9 +314,7 @@ export function useRecorder(): UseRecorderResult {
       const message =
         err instanceof Error && err.name === "NotAllowedError"
           ? "Permission denied. Please allow screen and camera access."
-          : err instanceof Error && err.message === "Recorder canvas is not mounted"
-            ? "The recorder is not ready yet. Please try again."
-            : "Could not start capture. Check your device permissions.";
+          : "Could not start capture. Check your device permissions.";
       dispatch({ type: "ACQUIRE_FAILED", error: message });
     }
   }, [teardown]);
@@ -402,28 +343,6 @@ export function useRecorder(): UseRecorderResult {
     [acquire, teardown],
   );
 
-  // ---------- push config into the compositor ----------
-
-  useEffect(() => {
-    if (!compositorRef.current) return;
-    // Depends on `state.mode` so switching to/from camera mode re-pushes the
-    // `shape: "full"` override even when the bubble config itself is unchanged.
-    compositorRef.current.setBubble(
-      state.mode === "camera"
-        ? { ...state.bubble, shape: "full", visible: true }
-        : state.bubble,
-    );
-  }, [state.bubble, state.mode]);
-
-  useEffect(() => {
-    const prev = prevFrameSrcRef.current;
-    if (prev !== state.frame.background.src) {
-      revokeBlob(prev);
-      prevFrameSrcRef.current = state.frame.background.src;
-    }
-    compositorRef.current?.setFrame(state.frame);
-  }, [state.frame]);
-
   // ---------- audio toggles ----------
 
   useEffect(() => {
@@ -447,40 +366,23 @@ export function useRecorder(): UseRecorderResult {
   const beginRecording = useCallback(() => {
     const current = stateRef.current;
     const mixer = mixerRef.current;
-    const compositor = compositorRef.current;
-
-    let recordStream: MediaStream;
-    if (current.mode === "screen") {
-      const videoTrack = screenStreamRef.current?.getVideoTracks()[0];
-      if (!videoTrack) {
-        dispatch({ type: "RECORD_FAILED", error: "Could not start the encoder." });
-        return;
-      }
-      const settings = videoTrack.getSettings();
-      dimensionsRef.current = {
-        width: settings.width ?? null,
-        height: settings.height ?? null,
-      };
-      recordStream = new MediaStream(
-        mixer ? [videoTrack, mixer.outputTrack] : [videoTrack],
-      );
-    } else {
-      if (!compositor || !canvasRef.current) {
-        dispatch({ type: "RECORD_FAILED", error: "Could not start the encoder." });
-        return;
-      }
-      compositor.lockSize();
-      dimensionsRef.current = {
-        width: canvasRef.current.width,
-        height: canvasRef.current.height,
-      };
-      const canvasStream = compositor.captureStream(60);
-      if (mixer) canvasStream.addTrack(mixer.outputTrack);
-      recordStream = canvasStream;
+    const screenTrack = screenStreamRef.current?.getVideoTracks()[0] ?? null;
+    const cameraTrack = cameraStreamRef.current?.getVideoTracks()[0] ?? null;
+    const primaryTrack = current.mode === "camera" ? cameraTrack : screenTrack;
+    if (!primaryTrack) {
+      dispatch({ type: "RECORD_FAILED", error: "Could not start the encoder." });
+      return;
     }
+    const settings = primaryTrack.getSettings();
+    dimensionsRef.current = { width: settings.width ?? null, height: settings.height ?? null };
+    // Audio always rides the primary file; the secondary camera file is video-only.
+    const recordStream = new MediaStream(
+      mixer ? [primaryTrack, mixer.outputTrack] : [primaryTrack],
+    );
+    const cameraStream =
+      current.mode === "screen+camera" && cameraTrack ? new MediaStream([cameraTrack]) : null;
 
     chunksRef.current = [];
-    thumbnailRef.current = null;
 
     const mimeType = pickMimeType();
     const recorder = new MediaRecorder(recordStream, {
@@ -498,19 +400,37 @@ export function useRecorder(): UseRecorderResult {
     recorder.onstop = () => {
       void finishRecording();
     };
+    recorder.onstart = () => {
+      screenStartRef.current = performance.now();
+    };
+
+    cameraChunksRef.current = [];
+    cameraRecorderRef.current = null;
+    if (cameraStream) {
+      const camRecorder = new MediaRecorder(cameraStream, {
+        ...(mimeType ? { mimeType } : {}),
+        videoBitsPerSecond: 4_000_000,
+      });
+      camRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) cameraChunksRef.current.push(e.data);
+      };
+      camRecorder.onstart = () => {
+        cameraStartRef.current = performance.now();
+      };
+      // A camera-file failure must not kill the take: the screen file is still
+      // usable and the renderer treats a missing camera blob as camera-less.
+      camRecorder.onerror = (e) => console.warn("[Yoom] camera MediaRecorder error", e);
+      cameraRecorderRef.current = camRecorder;
+    }
 
     startedAtRef.current = performance.now();
     pausedAtRef.current = 0;
     pausedTotalRef.current = 0;
+    // Same tick, so the two `onstart` stamps differ only by encoder start-up skew.
     recorder.start(250);
+    cameraRecorderRef.current?.start(250);
     recorderRef.current = recorder;
-
-    thumbnailTimerRef.current = window.setTimeout(() => {
-      void captureThumbnail().then((blob) => {
-        thumbnailRef.current = blob;
-      });
-    }, 1000);
-    // `finishRecording` and `captureThumbnail` are stable callbacks defined below.
+    // `finishRecording` is a stable callback defined below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -537,17 +457,22 @@ export function useRecorder(): UseRecorderResult {
   useEffect(() => {
     const recorder = recorderRef.current;
     if (!recorder) return;
+    // The camera encoder shadows the primary one so the two files stay aligned.
+    const cam = cameraRecorderRef.current;
     if (state.status === "paused" && recorder.state === "recording") {
       pausedAtRef.current = performance.now();
       recorder.pause();
+      if (cam?.state === "recording") cam.pause();
     } else if (state.status === "recording" && recorder.state === "paused") {
       if (pausedAtRef.current) {
         pausedTotalRef.current += performance.now() - pausedAtRef.current;
         pausedAtRef.current = 0;
       }
       recorder.resume();
+      if (cam?.state === "paused") cam.resume();
     } else if (state.status === "stopping" && recorder.state !== "inactive") {
       recorder.stop();
+      if (cam && cam.state !== "inactive") cam.stop();
     }
   }, [state.status]);
 
@@ -566,56 +491,26 @@ export function useRecorder(): UseRecorderResult {
     return () => window.clearTimeout(id);
   }, [state.status]);
 
-  const captureThumbnail = useCallback(async (): Promise<Blob | null> => {
-    const compositor = compositorRef.current;
-    if (compositor) return compositor.snapshot();
-
-    const track = screenStreamRef.current?.getVideoTracks()[0];
-    if (!track || track.readyState !== "live") return null;
-
-    const video = document.createElement("video");
-    video.muted = true;
-    video.playsInline = true;
-    video.srcObject = new MediaStream([track]);
-    const ready = new Promise<boolean>((resolve) => {
-      const timer = window.setTimeout(() => resolve(false), 2000);
-      video.onloadeddata = () => {
-        window.clearTimeout(timer);
-        resolve(true);
-      };
-    });
-    try {
-      await video.play();
-      if (!(await ready) || !video.videoWidth) return null;
-      const scratch = document.createElement("canvas");
-      scratch.width = video.videoWidth;
-      scratch.height = video.videoHeight;
-      scratch.getContext("2d")?.drawImage(video, 0, 0, scratch.width, scratch.height);
-      return await new Promise((resolve) =>
-        scratch.toBlob((blob) => resolve(blob), "image/jpeg", 0.8),
-      );
-    } catch {
-      return null;
-    } finally {
-      video.pause();
-      video.srcObject = null;
-    }
-  }, []);
-
   const finishRecording = useCallback(async () => {
-    if (thumbnailTimerRef.current) {
-      window.clearTimeout(thumbnailTimerRef.current);
-      thumbnailTimerRef.current = null;
-    }
-    if (!thumbnailRef.current) thumbnailRef.current = await captureThumbnail();
-
     if (chunksRef.current.length === 0) {
       recorderRef.current = null;
+      cameraRecorderRef.current = null;
       dispatch({
         type: "RECORD_FAILED",
         error: "Recording captured no data. Please try again.",
       });
       return;
+    }
+
+    // The camera recorder was stopped in the same effect; wait for its last
+    // chunk so both files describe the same span of time.
+    const cam = cameraRecorderRef.current;
+    if (cam && cam.state !== "inactive") {
+      await new Promise<void>((resolve) => {
+        const done = () => resolve();
+        cam.addEventListener("stop", done, { once: true });
+        window.setTimeout(done, 2000);
+      });
     }
 
     const durationMs = Math.max(
@@ -625,108 +520,181 @@ export function useRecorder(): UseRecorderResult {
     const recorder = recorderRef.current;
     const type = recorder?.mimeType?.split(";")[0] || "video/webm";
     recorderRef.current = null;
+    cameraRecorderRef.current = null;
 
-    const rawBlob = new Blob(chunksRef.current, { type });
-    chunksRef.current = [];
-
-    let blob = rawBlob;
-    if (type.includes("webm")) {
-      // MediaRecorder omits the EBML duration; patch it so seeking works.
+    // MediaRecorder omits the EBML duration; patch it so seeking works.
+    const patch = async (chunks: Blob[]): Promise<Blob> => {
+      const raw = new Blob(chunks, { type });
+      if (!type.includes("webm")) return raw;
       try {
-        blob = await fixWebmDuration(rawBlob, durationMs, { logger: false });
+        return await fixWebmDuration(raw, durationMs, { logger: false });
       } catch (err) {
         console.warn("[Yoom] could not patch WebM duration", err);
+        return raw;
       }
-    }
+    };
+
+    const blob = await patch(chunksRef.current);
+    const cameraBlob =
+      cameraChunksRef.current.length > 0 ? await patch(cameraChunksRef.current) : null;
+    chunksRef.current = [];
+    cameraChunksRef.current = [];
+    const cameraOffsetMs = cameraBlob
+      ? Math.round(cameraStartRef.current - screenStartRef.current)
+      : 0;
 
     const { width, height } = dimensionsRef.current;
-    dispatch({ type: "BLOB_READY", blob, durationMs, width, height });
-  }, [captureThumbnail]);
+    dispatch({
+      type: "BLOB_READY",
+      blob,
+      cameraBlob,
+      cameraOffsetMs,
+      durationMs,
+      width,
+      height,
+    });
+  }, []);
 
-  // ---------- review object URLs ----------
+  // ---------- staging object URLs ----------
 
+  // The URLs must outlive `staging`: the renderer decodes them all the way
+  // through `rendering`, and an UPLOAD_FAILED drops back to staging with the
+  // same blobs.
   useEffect(() => {
-    if (state.status !== "review" || !state.blob) {
-      setReviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
+    if (
+      (state.status !== "staging" &&
+        state.status !== "rendering" &&
+        state.status !== "uploading") ||
+      !state.blob
+    ) {
+      setStaging(null);
       return;
     }
-    const url = URL.createObjectURL(state.blob);
-    setReviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [state.status, state.blob]);
-
-  useEffect(() => {
-    if (state.status !== "review" || !thumbnailRef.current) return;
-    const url = URL.createObjectURL(thumbnailRef.current);
-    setThumbnailUrl(url);
+    const screenUrl = URL.createObjectURL(state.blob);
+    const cameraUrl = state.cameraBlob ? URL.createObjectURL(state.cameraBlob) : null;
+    setStaging({ screenUrl, cameraUrl });
     return () => {
-      URL.revokeObjectURL(url);
-      setThumbnailUrl(null);
+      URL.revokeObjectURL(screenUrl);
+      if (cameraUrl) URL.revokeObjectURL(cameraUrl);
     };
-  }, [state.status]);
+  }, [state.status, state.blob, state.cameraBlob]);
 
-  // ---------- upload ----------
+  // ---------- render + upload ----------
 
-  const upload = useCallback(async () => {
-    const current = stateRef.current;
-    const blob = current.blob;
-    if (!blob) return;
-    dispatch({ type: "UPLOAD" });
-    // Free the camera and screen while the bytes go up. The streams are gone,
-    // so the machine must know it: otherwise an UPLOAD_FAILED drops back to
-    // `review` still believing `streamsAlive`, and Discard lands in a `setup`
-    // screen with no capture behind it.
-    teardown();
-    dispatch({ type: "STREAM_ENDED" });
-    copiedRef.current = false;
-    let reservedSlug = "";
-    try {
-      const result = await uploadRecording({
-        blob,
+  /**
+   * Render the staged edit list into one file, then upload it. Both halves of
+   * the trip live here because `rendering → uploading` is one user action
+   * ("Save"), and a failure in either drops back to `staging` with the raw
+   * blobs intact.
+   */
+  const finish = useCallback(
+    async (input: FinishInput) => {
+      const current = stateRef.current;
+      if (current.status !== "staging" || !current.blob) return;
+
+      // In camera-only mode the single recorded file IS the camera.
+      const sources: RenderSources = {
+        screen: current.mode === "camera" ? null : current.blob,
+        camera:
+          current.mode === "screen"
+            ? null
+            : current.mode === "camera"
+              ? current.blob
+              : current.cameraBlob,
+        mode: current.mode,
         durationMs: current.durationMs,
-        width: current.width,
-        height: current.height,
-        thumbnail: thumbnailRef.current,
-        markers: current.markers,
-        onProgress: (percent) => dispatch({ type: "UPLOAD_PROGRESS", percent }),
-        // Loom behaviour: the link must be on the clipboard before the page
-        // changes. `navigator.clipboard.writeText` only works inside the
-        // click's transient activation (~5 s), and a real upload takes far
-        // longer than that — so the server reserves the slug up front and we
-        // copy here, one round-trip after the click.
-        onSlug: (url) => {
-          reservedSlug = url.slice(url.lastIndexOf("/") + 1);
-          navigator.clipboard
-            .writeText(url)
-            .then(() => {
-              copiedRef.current = true;
-            })
-            .catch(() => {
-              // Insecure context or denied permission; the detail page still
-              // shows the link.
-            });
-        },
-      });
-      if (reservedSlug && result.slug !== reservedSlug) {
-        // A slug collision made the server mint a different one, so whatever
-        // is on the clipboard points at the wrong video.
-        console.warn(
-          `Reserved slug ${reservedSlug} was taken; saved as ${result.slug}. The copied link is stale.`,
-        );
-        copiedRef.current = false;
+      };
+
+      dispatch({ type: "RENDER" });
+      const abort = new AbortController();
+      renderAbortRef.current = abort;
+      let rendered: { blob: Blob; thumbnail: Blob | null; width: number; height: number };
+      try {
+        rendered = await renderToBlob(sources, input.edits, {
+          thumbnailAt: input.thumbnailAt,
+          onProgress: (percent) => dispatch({ type: "RENDER_PROGRESS", percent }),
+          signal: abort.signal,
+        });
+      } catch (err) {
+        renderAbortRef.current = null;
+        // A cancel is not an error the user needs told about.
+        dispatch({
+          type: "RENDER_FAILED",
+          error: abort.signal.aborted
+            ? ""
+            : err instanceof Error
+              ? err.message
+              : "Render failed.",
+        });
+        return;
       }
-      dispatch({ type: "UPLOAD_DONE", videoId: result.id, shareUrl: result.url });
-      router.push(`/library/${result.id}${copiedRef.current ? "?new=1" : ""}`);
-    } catch (err) {
-      dispatch({
-        type: "UPLOAD_FAILED",
-        error: err instanceof Error ? err.message : "Upload failed. Please try again.",
-      });
-    }
-  }, [router, teardown]);
+      renderAbortRef.current = null;
+      dispatch({ type: "RENDER_DONE" });
+
+      // Free the camera and screen while the bytes go up. The streams are gone,
+      // so the machine must know it: otherwise an UPLOAD_FAILED drops back to
+      // `staging` still believing `streamsAlive`, and Discard lands in a `setup`
+      // screen with no capture behind it.
+      teardown();
+      dispatch({ type: "STREAM_ENDED" });
+      copiedRef.current = false;
+      let reservedSlug = "";
+      try {
+        const result = await uploadRecording({
+          blob: rendered.blob,
+          durationMs: Math.round(
+            rendered.blob.size > 0
+              ? editedDurationMs(input.edits, current.durationMs)
+              : current.durationMs,
+          ),
+          width: rendered.width,
+          height: rendered.height,
+          thumbnail: rendered.thumbnail,
+          title: input.title,
+          description: input.description,
+          slug: input.slug,
+          edits: input.edits,
+          onProgress: (percent) => dispatch({ type: "UPLOAD_PROGRESS", percent }),
+          // Loom behaviour: the link must be on the clipboard before the page
+          // changes. `navigator.clipboard.writeText` only works inside the
+          // click's transient activation (~5 s), and a real upload takes far
+          // longer than that — so the server reserves the slug up front and we
+          // copy here, one round-trip after the click.
+          onSlug: (url) => {
+            reservedSlug = url.slice(url.lastIndexOf("/") + 1);
+            navigator.clipboard
+              .writeText(url)
+              .then(() => {
+                copiedRef.current = true;
+              })
+              .catch(() => {
+                // Insecure context or denied permission; the detail page still
+                // shows the link.
+              });
+          },
+        });
+        if (reservedSlug && result.slug !== reservedSlug) {
+          // A slug collision made the server mint a different one, so whatever
+          // is on the clipboard points at the wrong video.
+          console.warn(
+            `Reserved slug ${reservedSlug} was taken; saved as ${result.slug}. The copied link is stale.`,
+          );
+          copiedRef.current = false;
+        }
+        dispatch({ type: "UPLOAD_DONE", videoId: result.id, shareUrl: result.url });
+        router.push(`/library/${result.id}${copiedRef.current ? "?new=1" : ""}`);
+      } catch (err) {
+        dispatch({
+          type: "UPLOAD_FAILED",
+          error: err instanceof Error ? err.message : "Upload failed. Please try again.",
+        });
+      }
+    },
+    [router, teardown],
+  );
+
+  /** Abort an in-flight render; the machine falls back to `staging`. */
+  const cancelRender = useCallback(() => renderAbortRef.current?.abort(), []);
 
   // ---------- discard / reset ----------
 
@@ -735,29 +703,31 @@ export function useRecorder(): UseRecorderResult {
    * first so `finishRecording` never runs for a take the user abandoned.
    */
   const discardRecorder = useCallback(() => {
-    if (thumbnailTimerRef.current) {
-      window.clearTimeout(thumbnailTimerRef.current);
-      thumbnailTimerRef.current = null;
-    }
     chunksRef.current = [];
-    thumbnailRef.current = null;
+    cameraChunksRef.current = [];
     const recorder = recorderRef.current;
+    const cam = cameraRecorderRef.current;
     recorderRef.current = null;
+    cameraRecorderRef.current = null;
     if (recorder && recorder.state !== "inactive") {
       recorder.onstop = null;
       recorder.ondataavailable = null;
       recorder.stop();
     }
+    // The camera encoder has no `onstop` handler, but it must still be stopped
+    // or it keeps writing chunks for a take nobody will ever see.
+    if (cam && cam.state !== "inactive") {
+      cam.ondataavailable = null;
+      cam.stop();
+    }
   }, []);
 
   const discard = useCallback(() => {
-    thumbnailRef.current = null;
     dispatch({ type: "DISCARD" });
   }, []);
 
   const reset = useCallback(() => {
     teardown();
-    thumbnailRef.current = null;
     dispatch({ type: "RESET" });
   }, [teardown]);
 
@@ -775,8 +745,9 @@ export function useRecorder(): UseRecorderResult {
       state.status === "recording" ||
       state.status === "paused" ||
       state.status === "stopping" ||
+      state.status === "rendering" ||
       state.status === "uploading" ||
-      (state.status === "review" && !!state.blob);
+      (state.status === "staging" && !!state.blob);
     if (!risky) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
@@ -869,98 +840,9 @@ export function useRecorder(): UseRecorderResult {
         }
         discardRecorder();
         dispatch({ type: "CANCEL" });
-      } else if (action === "bubbleToggle") {
-        // The HUD's camera button. Mirrors the bubble's own hide control, but
-        // toggles rather than only hiding, so the HUD can bring it back.
-        const visible = !stateRef.current.bubble.visible;
-        dispatch({ type: "SET_BUBBLE", patch: { visible } });
       }
     });
   }, [acquire, discardRecorder]);
-
-  // ---------- floating desktop bubble ----------
-
-  // The shell's bubble window only makes sense over a screen capture with a
-  // camera. Camera-only mode fills the canvas, and screen-only has no camera.
-  const desktopBubbleActive =
-    state.mode === "screen+camera" &&
-    (state.status === "setup" ||
-      state.status === "countdown" ||
-      state.status === "recording" ||
-      state.status === "paused");
-
-  useEffect(() => {
-    setDesktopBubbleVisible(desktopBubbleActive);
-    return () => setDesktopBubbleVisible(false);
-  }, [desktopBubbleActive]);
-
-  // The shell hides the live bubble window while the encoder runs whenever
-  // self-occlusion cannot work (window captures, framed capture, or the
-  // YOOM_BUBBLE_HIDE_WHILE_RECORDING escape hatch).
-  useEffect(() => {
-    setDesktopRecordingActive(state.status === "recording" || state.status === "paused");
-  }, [state.status]);
-
-  useEffect(() => {
-    setDesktopBubbleAppearance({
-      shape: state.bubble.shape,
-      size: state.bubble.size,
-      mirror: state.bubble.mirror,
-      visible: state.bubble.visible,
-      framed: state.frame.enabled,
-      ...(cameraAspect !== undefined ? { cameraAspect } : {}),
-    });
-  }, [
-    state.bubble.shape,
-    state.bubble.size,
-    state.bubble.mirror,
-    state.bubble.visible,
-    state.frame.enabled,
-    cameraAspect,
-  ]);
-
-  useEffect(() => {
-    setDesktopCameraDevice(state.cameraId || null);
-  }, [state.cameraId]);
-
-  // The bubble's own hover strip can hide it and cycle its shape; the shell
-  // echoes the new appearance back so the web state stays authoritative and
-  // the change is persisted with the rest of the bubble config.
-  useEffect(() => {
-    return onDesktopBubbleAppearance(({ shape, size, mirror, visible }) => {
-      dispatch({ type: "SET_BUBBLE", patch: { shape, size, mirror, visible } });
-    });
-  }, []);
-
-  // The shell reports a centre normalized to the captured DISPLAY. With framed
-  // capture on, the canvas is bigger than the screen and the screen sits inset,
-  // so the position has to be re-based before it reaches the bubble config.
-  // `immediate: true` skips the compositor's 300 ms tween: the burned-in bubble
-  // must not lag the window the user is physically dragging, or the live
-  // window's captured pixels peek out from behind it.
-  useEffect(() => {
-    return onDesktopBubbleMove((pos) => {
-      const track = screenStreamRef.current?.getVideoTracks()[0];
-      const settings = track?.getSettings();
-      const srcW = settings?.width ?? 0;
-      const srcH = settings?.height ?? 0;
-      const mapped =
-        srcW > 0 && srcH > 0
-          ? displayPosToCanvasPos(
-              pos,
-              computeFrameLayout(srcW, srcH, stateRef.current.frame),
-            )
-          : pos;
-
-      if (compositorRef.current) {
-        compositorRef.current.setBubble(
-          { ...stateRef.current.bubble, pos: mapped },
-          { immediate: true },
-        );
-      }
-      dispatch({ type: "SET_BUBBLE", patch: { pos: mapped } });
-    });
-  }, []);
 
   // ---------- recording HUD ----------
 
@@ -975,7 +857,8 @@ export function useRecorder(): UseRecorderResult {
     state.status === "recording" ||
     state.status === "paused" ||
     state.status === "stopping" ||
-    state.status === "review" ||
+    state.status === "staging" ||
+    state.status === "rendering" ||
     state.status === "error" ||
     state.status === "idle"
       ? state.status
@@ -990,7 +873,8 @@ export function useRecorder(): UseRecorderResult {
           current.status === "recording" ||
           current.status === "paused" ||
           current.status === "stopping" ||
-          current.status === "review" ||
+          current.status === "staging" ||
+          current.status === "rendering" ||
           current.status === "error" ||
           current.status === "idle"
             ? current.status
@@ -998,7 +882,6 @@ export function useRecorder(): UseRecorderResult {
         elapsedMs: current.elapsedMs,
         countdown: current.countdown,
         markers: current.markers.length,
-        bubbleVisible: current.bubble.visible,
       });
     };
 
@@ -1008,37 +891,7 @@ export function useRecorder(): UseRecorderResult {
     if (hudStatus !== "countdown" && hudStatus !== "recording") return;
     const id = window.setInterval(push, 250);
     return () => window.clearInterval(id);
-  }, [hudStatus, state.markers.length, state.bubble.visible]);
-
-  // Polled rather than pushed so the draw loop stays free of React.
-  useEffect(() => {
-    const active =
-      state.status === "setup" ||
-      state.status === "countdown" ||
-      state.status === "recording" ||
-      state.status === "paused";
-    if (!active) return;
-    const id = window.setInterval(() => {
-      const canvas = canvasRef.current;
-      const camTrack = cameraStreamRef.current?.getVideoTracks()[0];
-      const camSettings = camTrack?.getSettings();
-      setDimensions((prev) => {
-        const next = {
-          canvasWidth: canvas?.width ?? 0,
-          canvasHeight: canvas?.height ?? 0,
-          cameraWidth: camSettings?.width ?? 0,
-          cameraHeight: camSettings?.height ?? 0,
-        };
-        return prev.canvasWidth === next.canvasWidth &&
-          prev.canvasHeight === next.canvasHeight &&
-          prev.cameraWidth === next.cameraWidth &&
-          prev.cameraHeight === next.cameraHeight
-          ? prev
-          : next;
-      });
-    }, 400);
-    return () => window.clearInterval(id);
-  }, [state.status]);
+  }, [hudStatus, state.markers.length]);
 
   const getLevel = useCallback(
     (id: "mic" | "system") => mixerRef.current?.getLevel(id) ?? 0,
@@ -1077,38 +930,24 @@ export function useRecorder(): UseRecorderResult {
       },
       mark: () => dispatch({ type: "MARK" }),
       discard,
-      upload: () => void upload(),
+      finish: (input: FinishInput) => void finish(input),
+      cancelRender,
       reset,
       toggleMic: (on?: boolean) => dispatch({ type: "TOGGLE_MIC", on }),
       toggleSystem: (on?: boolean) => dispatch({ type: "TOGGLE_SYSTEM", on }),
-      setBubble: (patch: Partial<BubbleConfig>, opts?: { immediate?: boolean }) => {
-        // `immediate` never reaches the reducer: it describes how to render the
-        // change, not what the change is. Push it straight at the compositor
-        // (which is React-free) and let the dispatch update state as usual.
-        if (opts?.immediate && compositorRef.current) {
-          const current = stateRef.current;
-          const next = { ...current.bubble, ...patch };
-          compositorRef.current.setBubble(
-            current.mode === "camera" ? { ...next, shape: "full", visible: true } : next,
-            { immediate: true },
-          );
-        }
-        dispatch({ type: "SET_BUBBLE", patch });
-      },
+      setBubble: (patch: Partial<BubbleConfig>) => dispatch({ type: "SET_BUBBLE", patch }),
       setFrame: (patch: Partial<FrameConfig>) => dispatch({ type: "SET_FRAME", patch }),
     }),
-    [acquire, discard, discardRecorder, reacquireWith, reset, upload],
+    [acquire, cancelRender, discard, discardRecorder, finish, reacquireWith, reset],
   );
 
   return {
     state,
     capabilities,
     desktop,
-    canvasRef,
     screenVideoRef,
-    reviewUrl,
-    thumbnailUrl,
-    dimensions,
+    cameraVideoRef,
+    staging,
     getLevel,
     actions,
   };
