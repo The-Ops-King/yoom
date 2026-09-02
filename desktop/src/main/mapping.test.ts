@@ -239,6 +239,13 @@ describe("recorderWindowVisibility", () => {
     expect(recorderWindowVisibility("countdown", "idle")).toBe("show");
   });
 
+  it("shows the recorder again after a discard back to setup", () => {
+    // `setup` collapses to `other` on the HUD channel; a cancel goes straight
+    // there without passing through review/error/idle.
+    expect(recorderWindowVisibility("recording", "other")).toBe("show");
+    expect(recorderWindowVisibility("countdown", "other")).toBe("show");
+  });
+
   it("does not re-show a window it never hid", () => {
     expect(recorderWindowVisibility("other", "review")).toBe("none");
     expect(recorderWindowVisibility("idle", "idle")).toBe("none");

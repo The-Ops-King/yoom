@@ -240,7 +240,10 @@ function createBubbleWindow(): BrowserWindow {
   };
   win.once("ready-to-show", () => {
     win.webContents.send(IPC.bubbleApply, appearance);
-    win.webContents.send(IPC.bubbleCamera, cameraDeviceId);
+    // Only light the camera if the bubble is still wanted: a hide that lands
+    // while the window is loading would otherwise re-acquire the camera on a
+    // window nobody can see. `sync()` sends it again on the next show.
+    if (shouldShow()) win.webContents.send(IPC.bubbleCamera, cameraDeviceId);
     onLoaded();
   });
   win.webContents.once("did-finish-load", onLoaded);
@@ -337,6 +340,9 @@ export function setCaptureKind(kind: "screen" | "window"): void {
 
 export function setCameraDevice(deviceId: string | null): void {
   cameraDeviceId = deviceId;
+  // Never re-acquire the camera for a hidden bubble — that is what keeps the
+  // macOS indicator lit after a take. `sync()` sends the device on every show.
+  if (!shouldShow()) return;
   alive()?.webContents.send(IPC.bubbleCamera, cameraDeviceId);
 }
 

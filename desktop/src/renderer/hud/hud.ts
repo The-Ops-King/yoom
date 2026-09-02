@@ -68,7 +68,18 @@ for (const [id, action] of ACTIONS) {
 }
 
 // Feeds the YOOM_HUD_HIDE_WHILE_RECORDING idle timer in the main process.
-document.addEventListener("pointerenter", () => api?.interact(), true);
-document.addEventListener("pointermove", () => api?.interact(), { passive: true });
+// Throttled: a pointermove fires per frame, and the idle timer only needs to
+// know "still being used" at a fraction of that rate.
+const INTERACT_THROTTLE_MS = 200;
+let lastInteract = 0;
+function noteInteract(): void {
+  const now = Date.now();
+  if (now - lastInteract < INTERACT_THROTTLE_MS) return;
+  lastInteract = now;
+  api?.interact();
+}
+
+document.addEventListener("pointerenter", () => noteInteract(), true);
+document.addEventListener("pointermove", () => noteInteract(), { passive: true });
 
 api?.onApply(apply);

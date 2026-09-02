@@ -198,5 +198,10 @@ export function recorderWindowVisibility(
   if (prev === next) return "none";
   if (next === "countdown") return "hide";
   if (HIDDEN_DURING.has(prev) && RESTORES.has(next)) return "show";
+  // A discard (⌘⇧X, or the pill's bin) goes straight back to `setup`, which
+  // collapses to `other` on this channel and is in neither set above. Leaving
+  // it at "none" strands the recorder window hidden with no way back. Any exit
+  // from a hidden-during status is an end of take, so restore.
+  if (HIDDEN_DURING.has(prev) && !HIDDEN_DURING.has(next)) return "show";
   return "none";
 }
