@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { DbError, UNIQUE_VIOLATION, insertVideo } from "@/lib/db";
 import { getFileMeta } from "@/lib/google-drive";
+import { MAX_DESCRIPTION, MAX_TITLE } from "@/lib/limits";
 import { newSlug, SLUG_RE } from "@/lib/slug";
 import { parseEdits } from "@/lib/edits";
 import { shareUrl } from "@/lib/share";
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Drive file is trashed" }, { status: 404 });
   }
 
-  const title = body.title?.trim() || defaultTitle();
+  const title = (body.title?.trim() || defaultTitle()).slice(0, MAX_TITLE);
 
   // The slug the client reserved from /api/upload and already copied to the
   // user's clipboard. Untrusted input, so it still has to pass SLUG_RE.
@@ -69,8 +70,10 @@ export async function POST(request: Request) {
           markers: Array.isArray(body.markers) ? body.markers : [],
         },
   );
-  const description =
-    typeof body.description === "string" ? body.description.trim().slice(0, 2000) : null;
+  // Empty (after trim) collapses to null, matching `updateVideoMeta`.
+  const descriptionInput =
+    typeof body.description === "string" ? body.description.trim().slice(0, MAX_DESCRIPTION) : "";
+  const description = descriptionInput === "" ? null : descriptionInput;
   const toInt = (value: unknown): number | null => {
     const n = Number(value);
     return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
@@ -93,10 +96,14 @@ export async function POST(request: Request) {
         height: toInt(body.height),
         edits,
       });
+      // The client already copied the reserved slug to the clipboard; tell it
+      // when a late collision forced a different one so it can correct itself.
+      const slugChanged = reserved !== null && video.slug !== reserved;
       return NextResponse.json({
         id: video.id,
         slug: video.slug,
         url: shareUrl(video.slug),
+        ...(slugChanged ? { slugChanged: true } : {}),
       });
     } catch (error) {
       if (error instanceof DbError && error.code === UNIQUE_VIOLATION) {

@@ -30,6 +30,8 @@ export interface UploadRecordingResult {
   id: string;
   slug: string;
   url: string;
+  /** True when a late slug collision forced the server to mint a different one. */
+  slugChanged?: boolean;
 }
 
 /**
@@ -91,7 +93,16 @@ export async function uploadRecording(
     }),
     signal,
   });
-  if (!sessionRes.ok) throw new Error("Failed to start the upload");
+  if (!sessionRes.ok) {
+    let message = "Failed to start the upload";
+    try {
+      const errorBody = (await sessionRes.json()) as { error?: string };
+      if (typeof errorBody.error === "string" && errorBody.error) message = errorBody.error;
+    } catch {
+      // Malformed or empty body: keep the fallback message.
+    }
+    throw new Error(message);
+  }
 
   const { sessionUri, slug: reservedSlug } = (await sessionRes.json()) as {
     sessionUri: string;
@@ -127,7 +138,12 @@ export async function uploadRecording(
   });
   if (!completeRes.ok) throw new Error("Failed to save the recording");
 
-  const { id, slug: finalSlug, url } = (await completeRes.json()) as UploadRecordingResult;
+  const {
+    id,
+    slug: finalSlug,
+    url,
+    slugChanged,
+  } = (await completeRes.json()) as UploadRecordingResult;
 
   if (thumbnail) {
     const form = new FormData();
@@ -138,5 +154,5 @@ export async function uploadRecording(
     );
   }
 
-  return { id, slug: finalSlug, url };
+  return { id, slug: finalSlug, url, slugChanged };
 }

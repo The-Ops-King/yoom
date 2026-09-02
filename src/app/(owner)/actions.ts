@@ -12,6 +12,7 @@ import {
   updateVideoMeta,
 } from "@/lib/db";
 import { trashFile } from "@/lib/google-drive";
+import { MAX_DESCRIPTION, MAX_TITLE } from "@/lib/limits";
 import { SLUG_RE, normalizeSlug } from "@/lib/slug";
 
 export type ActionState = { error?: string; ok?: boolean };
@@ -40,7 +41,7 @@ export async function updateTitle(
   const title = field(formData, "title").trim();
   if (!id) return { error: "Missing video." };
   if (title.length === 0) return { error: "Title cannot be empty." };
-  if (title.length > 200) return { error: "Title is too long (200 max)." };
+  if (title.length > MAX_TITLE) return { error: `Title is too long (${MAX_TITLE} max).` };
 
   // updateVideoMeta resolves to null when the row is missing or soft-deleted.
   let saved;
@@ -64,7 +65,7 @@ export async function updateDescription(
   const id = field(formData, "id");
   const description = field(formData, "description");
   if (!id) return { error: "Missing video." };
-  if (description.length > 5000) return { error: "Description is too long." };
+  if (description.length > MAX_DESCRIPTION) return { error: "Description is too long." };
 
   let saved;
   try {

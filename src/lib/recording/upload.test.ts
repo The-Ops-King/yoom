@@ -12,10 +12,10 @@ const blob = new Blob([new Uint8Array(16)], { type: "video/webm" });
 /** A minimal, valid edit list for tests that don't care about its contents. */
 const emptyEdits: VideoEdits = { version: 1, cuts: [], crop: null, zooms: [], overlays: [], markers: [] };
 
-function jsonResponse(body: unknown, ok = true): Response {
+function jsonResponse(body: unknown, ok = true, status = ok ? 200 : 500): Response {
   return {
     ok,
-    status: ok ? 200 : 500,
+    status,
     json: async () => body,
   } as unknown as Response;
 }
@@ -243,6 +243,27 @@ describe("uploadRecording", () => {
         edits: emptyEdits,
       }),
     ).rejects.toThrow("Failed to start the upload");
+  });
+
+  it("surfaces the server's error message when /api/upload rejects the request", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ error: "That link is already taken" }, false, 409),
+    );
+    await expect(
+      uploadRecording({
+        blob,
+        durationMs: 1,
+        width: null,
+        height: null,
+        thumbnail: null,
+        onProgress: () => {},
+        title: "",
+        description: "",
+        slug: "taken-slug",
+        edits: emptyEdits,
+      }),
+    ).rejects.toThrow("That link is already taken");
+    expect(uploadToDrive).not.toHaveBeenCalled();
   });
 
   it("throws a readable error when completing fails", async () => {
