@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getProvider } from "@/lib/recording/media-sources";
 
 interface DeviceSelectorProps {
@@ -19,35 +19,43 @@ export function DeviceSelector({
   disabled = false,
 }: DeviceSelectorProps) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  // Read inside the `devicechange` listener, which is registered once.
+  const devicesRef = useRef<MediaDeviceInfo[]>([]);
+  devicesRef.current = devices;
 
   useEffect(() => {
     let cancelled = false;
     const provider = getProvider();
 
-    async function loadDevices() {
-      // Labels are only exposed after a permission grant.
-      await provider.warmPermissions(kind);
+    /**
+     * `warmPermissions` is a `getUserMedia` call whose only purpose is to make
+     * macOS/Chromium hand back device *labels*. In the desktop shell it can
+     * legitimately fail the first time — the TCC prompt may still be on screen
+     * — so an empty list is a reason to warm again, not a permanent answer.
+     */
+    async function load(warm: boolean): Promise<void> {
+      if (warm) await provider.warmPermissions(kind);
       const filtered = await provider.enumerateDevices(kind);
       if (cancelled) return;
       setDevices(filtered);
       if (filtered.length > 0 && !value) onChange(filtered[0].deviceId);
+      if (value && !filtered.some((device) => device.deviceId === value)) onChange("");
     }
 
-    void loadDevices();
+    void load(true);
 
     const md = typeof navigator !== "undefined" ? navigator.mediaDevices : null;
-    const onChangeDevices = () => {
-      void provider.enumerateDevices(kind).then((d) => {
-        if (cancelled) return;
-        setDevices(d);
-        if (value && !d.some((device) => device.deviceId === value)) onChange("");
-      });
+    // A grant landing (or a device being plugged in) fires `devicechange`.
+    // Re-warm when we still have nothing: the grant that just landed is
+    // exactly the case where the first warm failed.
+    const onDeviceChange = () => {
+      void load(devicesRef.current.length === 0);
     };
-    md?.addEventListener?.("devicechange", onChangeDevices);
+    md?.addEventListener?.("devicechange", onDeviceChange);
 
     return () => {
       cancelled = true;
-      md?.removeEventListener?.("devicechange", onChangeDevices);
+      md?.removeEventListener?.("devicechange", onDeviceChange);
     };
     // `value`/`onChange` are intentionally excluded: re-running on every
     // selection would re-prompt for permissions.

@@ -354,6 +354,7 @@ export function Recorder() {
           {(state.status === "setup" || capturing) && (
             <p className="text-center text-[11px] text-muted-dim">
               ⌘⇧L start / stop · ⌘⇧P pause · ⌘⇧M mark · ⌘⇧K restart · ⌘⇧X cancel
+              {desktop && " · this window hides while recording — use the floating controls"}
             </p>
           )}
         </div>
