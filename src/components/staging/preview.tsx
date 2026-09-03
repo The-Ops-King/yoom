@@ -3,6 +3,7 @@
 import type { StagingContext } from "./types";
 import { CameraLayer } from "./camera-layer";
 import { OverlayLayer } from "./overlay-layer";
+import { ZoomLayer } from "./zoom-layer";
 
 export function Preview({ ctx }: { ctx: StagingContext }) {
   const { canvasRef, size, playing, toggle } = ctx.player;
@@ -21,9 +22,12 @@ export function Preview({ ctx }: { ctx: StagingContext }) {
         Order matters: the overlay layer (z-10) sits under the camera layer
         (z-20) so the bubble stays draggable in select mode, while an armed
         drawing tool still gets the whole frame — the camera layer takes
-        pointer events only on the bubble's own box.
+        pointer events only on the bubble's own box. The zoom layer (z-15)
+        goes between them: it renders nothing at all unless a zoom is selected
+        in select mode, and even then takes pointer events only on its own box.
       */}
       <OverlayLayer ctx={ctx} />
+      <ZoomLayer ctx={ctx} />
       <CameraLayer ctx={ctx} />
       <button
         type="button"
