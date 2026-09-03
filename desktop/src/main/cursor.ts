@@ -114,6 +114,8 @@ export function onRecorderStatus(status: HudStatus): void {
 
   if (status === "paused") {
     clock.pause(Date.now());
+    // Nothing to sample while paused; the `recording` branch restarts the timers.
+    stopTimers();
     flush();
     return;
   }
