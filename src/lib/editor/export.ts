@@ -3,7 +3,7 @@ import type { VideoEdits } from "@/lib/edits";
 import type { CursorSample, RecordingMode } from "@/lib/recording/types";
 import { createCursorSampler } from "./cursor-path";
 import { editedToSource, keptRanges } from "./cuts";
-import { drawFrame, outputSize, type RenderInputs } from "./render";
+import { drawFrame, outputSize, preloadOverlayImages, type RenderInputs } from "./render";
 
 export interface RenderSources {
   screen: Blob | null;
@@ -227,6 +227,9 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
     }
     camera = sources.mode === "screen+camera" && sources.camera ? await makeVideo(sources.camera, true) : null;
     background = await loadBackground(edits);
+    // Image overlays decode asynchronously; drawFrame is sync and skips images
+    // that are not ready, so decode them all before the first frame.
+    await preloadOverlayImages(edits);
     const duration = sources.durationMs / 1000;
     const offset = (edits.cameraOffsetMs ?? 0) / 1000;
 
