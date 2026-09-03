@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseEdits, type CameraTrack } from "@/lib/edits";
-import { defaultCameraTrack } from "./camera-track";
+import { defaultCameraTrack, upsertKeyframe } from "./camera-track";
 import { drawFrame, outputSize, preloadOverlayImages, type RenderInputs } from "./render";
 
 /**
@@ -204,6 +204,49 @@ describe("drawFrame", () => {
     const draw = ctx.calls.find((c) => c[0] === "drawImage")!;
     // The 640×720 zoom region is cover-cropped to 16:9, not squeezed into it.
     expect(draw[1].slice(1, 5)).toEqual([0, 180, 640, 360]);
+  });
+
+  /** The camera's source rect from the nth `drawImage` of this frame. */
+  const cropOf = (ctx: ReturnType<typeof fakeCtx>, n: number) =>
+    ctx.calls.filter((c) => c[0] === "drawImage")[n][1].slice(1, 5);
+
+  it("cover-crops the bubble at the sample's pan", () => {
+    // The 1280×720 camera in a square bubble leaves 1280 - 720 = 560 px of
+    // horizontal slack; pan.x picks where in that slack the window sits.
+    const panned = (x: number) => {
+      const ctx = fakeCtx();
+      const track = upsertKeyframe(defaultCameraTrack("circle", "medium", 16 / 9), 0, { pan: { x, y: 0.5 } });
+      drawFrame(ctx, inputs({ ...base, camera: track }), 0, 1920, 1080);
+      return cropOf(ctx, 1)[0]; // [0] is the screen, [1] the bubble
+    };
+    expect(panned(0)).toBe(0);
+    expect(panned(0.5)).toBe(280);
+    expect(panned(1)).toBe(560);
+  });
+
+  it("leaves the bubble centred when no keyframe carries a pan", () => {
+    const ctx = fakeCtx();
+    const e = { ...base, camera: defaultCameraTrack("circle", "medium", 16 / 9) };
+    drawFrame(ctx, inputs(e), 0, 1920, 1080);
+    expect(cropOf(ctx, 1)[0]).toBe(280);
+  });
+
+  it("pans a camera-only primary draw too", () => {
+    // Zoomed to a 640×720 region and covered into 16:9: 360 px of vertical slack.
+    const panned = (y: number) => {
+      const ctx = fakeCtx();
+      const track = upsertKeyframe(
+        { shape: "circle", mirror: true, keyframes: [{ t: 0, mode: "full", rect: { x: 0, y: 0, w: 1, h: 1 } }] } as CameraTrack,
+        0,
+        { pan: { x: 0.5, y } },
+      );
+      const e = { ...base, camera: track, zooms: [{ start: 0, end: 10, rect: { x: 0, y: 0, w: 0.5, h: 1 }, ramp: 0 }] };
+      drawFrame(ctx, inputs(e, "camera"), 5, 1920, 1080);
+      return cropOf(ctx, 0)[1];
+    };
+    expect(panned(0)).toBe(0);
+    expect(panned(0.5)).toBe(180);
+    expect(panned(1)).toBe(360);
   });
 });
 

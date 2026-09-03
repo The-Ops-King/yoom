@@ -269,9 +269,14 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
   // letterboxed selfie looks broken) and mirror it, matching the live preview.
   const camOnly = inputs.mode === "camera";
   const camOnlyMirror = camOnly && (inputs.edits.camera?.mirror ?? true);
+  // The keyframed framing applies to the camera whichever way it is drawn, so
+  // camera-only reads the same track the bubble would. Pan is in source space,
+  // ahead of the mirror below: `pan.x = 0` is the source's left edge, which a
+  // mirrored draw then shows on the viewer's right.
+  const camOnlyPan = camOnly && inputs.edits.camera ? cameraAt(inputs.edits.camera, t).pan : undefined;
   const drawPrimary = (box: Rect) => {
     if (!camOnly) { ctx.drawImage(src, sx, sy, svw, svh, box.x, box.y, box.w, box.h); return; }
-    const crop = coverCrop(svw, svh, box.w, box.h);
+    const crop = coverCrop(svw, svh, box.w, box.h, camOnlyPan);
     const csx = sx + crop.sx, csy = sy + crop.sy;
     if (camOnlyMirror) {
       ctx.save(); ctx.translate(box.x + box.w, box.y); ctx.scale(-1, 1);
@@ -343,7 +348,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
         ? content
         : { x: content.x + rect.x * content.w, y: content.y + rect.y * content.h, w: rect.w * content.w, h: rect.h * content.h };
       if (box.w < 1 || box.h < 1) return;
-      const crop = coverCrop(cam.videoWidth, cam.videoHeight, box.w, box.h);
+      const crop = coverCrop(cam.videoWidth, cam.videoHeight, box.w, box.h, s.pan);
       const r = mode === "full" ? 0 : bubbleRadius(box.w, box.h);
       ctx.save(); ctx.globalAlpha = alpha; ctx.clip(roundedPath(box.x, box.y, box.w, box.h, r));
       if (track.mirror) { ctx.translate(box.x + box.w, box.y); ctx.scale(-1, 1); ctx.drawImage(cam, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, box.w, box.h); }
