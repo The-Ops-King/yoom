@@ -150,8 +150,18 @@ const MAX_RAMP_S = 2;
 export const MAX_CAMERA_OFFSET_MS = 5000;
 /** Smallest a normalised rect's width/height may shrink to when clamped into the frame. */
 const MIN_RECT_SIZE = 0.001;
-/** Longest an overlay image `src` may be; anything longer is dropped rather than stored. */
+/**
+ * Longest a non-`data:` overlay image `src` may be (a `blob:` or an http URL);
+ * anything longer is dropped rather than stored.
+ */
 export const MAX_OVERLAY_SRC = 2048;
+/**
+ * Longest a `data:` overlay image `src` may be. A data URL IS the picture, so
+ * it cannot be held to a URL-length cap and still survive a round trip — this
+ * is a size limit on the embedded image (~1.5 MB of bytes at base64's 4/3
+ * expansion), not an address limit.
+ */
+export const MAX_OVERLAY_DATA_SRC = 2 * 1024 * 1024;
 /** Stroke width as a fraction of the frame height — a fat but still sane ceiling. */
 export const MAX_OVERLAY_THICKNESS = 0.1;
 /** The stroke width an ellipse/arrow/underline is drawn with when it carries none. */
@@ -327,16 +337,18 @@ export function parseEdits(input: unknown): VideoEdits {
   for (const raw of asArray(input.overlays)) {
     if (overlays.length >= MAX_OVERLAYS) break;
     if (!isRecord(raw)) continue;
-    const raw_type = raw.type;
-    if (typeof raw_type !== "string") continue;
-    const type = LEGACY_OVERLAY_TYPES[raw_type] ?? (raw_type as OverlayType);
+    const rawType = raw.type;
+    if (typeof rawType !== "string") continue;
+    const type = LEGACY_OVERLAY_TYPES[rawType] ?? (rawType as OverlayType);
     if (!OVERLAY_TYPES.includes(type)) continue;
     const span = parseSpan(raw);
     const rect = parseRect(raw.rect);
     if (!span || !rect) continue;
     const overlay: Overlay = { type, ...span, rect: clampRect(rect) };
     const n = num(raw.n);
-    if (n !== null) overlay.n = n;
+    // A step badge is a counting number: it is drawn as text, so a 0, a -2 or
+    // a 3.7 would all render as themselves.
+    if (n !== null) overlay.n = Math.max(1, Math.round(n));
     if (typeof raw.color === "string") overlay.color = raw.color;
     if (type === "arrow") {
       // The endpoints are the arrow; an old or hand-written entry with only a
@@ -348,7 +360,10 @@ export function parseEdits(input: unknown): VideoEdits {
       overlay.to = to;
       overlay.rect = arrowRect(from, to);
     }
-    if (typeof raw.src === "string" && raw.src.length <= MAX_OVERLAY_SRC) overlay.src = raw.src;
+    if (typeof raw.src === "string") {
+      const cap = raw.src.startsWith("data:") ? MAX_OVERLAY_DATA_SRC : MAX_OVERLAY_SRC;
+      if (raw.src.length <= cap) overlay.src = raw.src;
+    }
     const thickness = num(raw.thickness);
     if (thickness !== null) overlay.thickness = clamp(thickness, 0, MAX_OVERLAY_THICKNESS);
     const opacity = num(raw.opacity);

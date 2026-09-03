@@ -4,6 +4,7 @@ import {
   EMPTY_EDITS,
   hasDrawableEdits,
   isEmptyEdits,
+  MAX_OVERLAY_DATA_SRC,
   MAX_OVERLAY_SRC,
   MAX_OVERLAY_THICKNESS,
   parseEdits,
@@ -458,12 +459,29 @@ describe("parseEdits overlay fields", () => {
     expect(o.to).toBeUndefined();
   });
 
-  it("keeps a blob: src as-is and drops one over the length cap", () => {
+  it("keeps a blob: src as-is and drops a URL over the length cap", () => {
+    const rect = { x: 0, y: 0, w: 0.5, h: 0.5 };
     const src = "blob:http://localhost/abc";
-    expect(one({ type: "image", start: 0, end: 1, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, src }).src).toBe(src);
-    const huge = `data:image/png;base64,${"A".repeat(MAX_OVERLAY_SRC)}`;
-    expect(one({ type: "image", start: 0, end: 1, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, src: huge }).src).toBeUndefined();
-    expect(one({ type: "image", start: 0, end: 1, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, src: 7 }).src).toBeUndefined();
+    expect(one({ type: "image", start: 0, end: 1, rect, src }).src).toBe(src);
+    const long = `blob:http://localhost/${"a".repeat(MAX_OVERLAY_SRC)}`;
+    expect(one({ type: "image", start: 0, end: 1, rect, src: long }).src).toBeUndefined();
+    expect(one({ type: "image", start: 0, end: 1, rect, src: 7 }).src).toBeUndefined();
+  });
+
+  it("holds a data: src to the much larger image cap, not the URL cap", () => {
+    const rect = { x: 0, y: 0, w: 0.5, h: 0.5 };
+    // A data URL IS the picture, so a URL-length cap would drop every real one.
+    const embedded = `data:image/png;base64,${"A".repeat(MAX_OVERLAY_SRC)}`;
+    expect(one({ type: "image", start: 0, end: 1, rect, src: embedded }).src).toBe(embedded);
+    const huge = `data:image/png;base64,${"A".repeat(MAX_OVERLAY_DATA_SRC)}`;
+    expect(one({ type: "image", start: 0, end: 1, rect, src: huge }).src).toBeUndefined();
+  });
+
+  it("rounds a step number up into a counting number", () => {
+    const rect = { x: 0, y: 0, w: 0.5, h: 0.5 };
+    expect(one({ type: "step", start: 0, end: 1, rect, n: 3.7 }).n).toBe(4);
+    expect(one({ type: "step", start: 0, end: 1, rect, n: 0 }).n).toBe(1);
+    expect(one({ type: "step", start: 0, end: 1, rect, n: -2 }).n).toBe(1);
   });
 
   it("clamps thickness and opacity, and drops non-numbers", () => {
