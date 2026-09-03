@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Poin
 import { clampRect, type Rect, type VideoEdits } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
 import { toOutput, zoomAt } from "@/lib/editor/zoom";
-import { contentRect } from "./content-rect";
 import type { StagingContext } from "./types";
+import { fractionOf, toSource, viewBox } from "./view-map";
 
 /** A band smaller than this in either axis is a click, not a draw. */
 const MIN_DRAW = 0.005;
@@ -39,32 +39,17 @@ type Grab = {
 };
 
 /**
- * View-space rect from a band. A zoom's rect must keep the source aspect or
- * the zoomed frame is stretched, and in frame-normalised units that means
- * equal width and height — so `h` is derived from `w` rather than tracked.
+ * View-space rect from a band. Free aspect for every tool, zoom included: a
+ * zoom rect no longer has to keep the source aspect, because `drawFrame` fits
+ * the view inside the content box (letterboxing) rather than stretching it.
  */
-function bandRect(b: Band, square: boolean): Rect {
-  if (!square) {
-    return {
-      x: Math.min(b.ax, b.bx),
-      y: Math.min(b.ay, b.by),
-      w: Math.abs(b.bx - b.ax),
-      h: Math.abs(b.by - b.ay),
-    };
-  }
-  // The derived height can run off the edge the drag is heading for. Shrink
-  // the square rather than let `clampRect` squash one axis and stretch the
-  // zoom — and anchor both axes at the grab point, since `w` may now be
-  // narrower than the pointer travelled.
-  const right = b.bx >= b.ax;
-  const down = b.by >= b.ay;
-  const w = Math.min(Math.abs(b.bx - b.ax), down ? 1 - b.ay : b.ay);
-  return { x: right ? b.ax : b.ax - w, y: down ? b.ay : b.ay - w, w, h: w };
-}
-
-/** Inverse of `toOutput`: a rect the user drew on the zoomed frame, in source space. */
-function toSource(r: Rect, view: Rect): Rect {
-  return { x: view.x + r.x * view.w, y: view.y + r.y * view.h, w: r.w * view.w, h: r.h * view.h };
+function bandRect(b: Band): Rect {
+  return {
+    x: Math.min(b.ax, b.bx),
+    y: Math.min(b.ay, b.by),
+    w: Math.abs(b.bx - b.ax),
+    h: Math.abs(b.by - b.ay),
+  };
 }
 
 export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
@@ -77,14 +62,21 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
   const drawing = tool !== "select";
   const frame = edits.frame;
 
-  /** Cache the geometry for the drag about to start; a layout read per move thrashes. */
-  const measure = useCallback(() => {
-    const r = rootRef.current?.getBoundingClientRect();
-    if (!r || r.width <= 0 || r.height <= 0) return (boxRef.current = null);
-    const c = contentRect(r.width, r.height, frame);
-    boxRef.current = c.w > 0 && c.h > 0 ? { left: r.left, top: r.top, ...c } : null;
-    return boxRef.current;
-  }, [frame]);
+  /**
+   * Cache the geometry for the drag about to start; a layout read per move
+   * thrashes. Points are normalised to the *fitted view* box — where the
+   * zoomed picture landed — so `toSource` maps them back onto source pixels.
+   */
+  const measure = useCallback(
+    (view: Rect) => {
+      const r = rootRef.current?.getBoundingClientRect();
+      if (!r || r.width <= 0 || r.height <= 0) return (boxRef.current = null);
+      const c = viewBox(r.width, r.height, frame, view, ctx.mode === "camera");
+      boxRef.current = c.w > 0 && c.h > 0 ? { left: r.left, top: r.top, ...c } : null;
+      return boxRef.current;
+    },
+    [ctx.mode, frame],
+  );
 
   const pointAt = useCallback((clientX: number, clientY: number) => {
     const b = boxRef.current;
@@ -101,7 +93,7 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
     };
     const onUp = () => {
       setBand(null);
-      const r = bandRect(band, tool === "zoom");
+      const r = bandRect(band);
       if (r.w < MIN_DRAW || r.h < MIN_DRAW) return;
       // Drawn on the zoomed frame, stored against source pixels, so it stays
       // on what the user pointed at once the zoom ramps out.
@@ -150,20 +142,22 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
   }, [ctx, grab, pointAt]);
 
   const startBand = (e: ReactPointerEvent) => {
-    if (!drawing || !measure()) return;
+    // Read the live playhead, not the 10 Hz mirror: the zoom on screen is the
+    // one the band has to be measured and mapped through.
+    const view = zoomAt(edits.zooms, player.timeRef.current);
+    if (!drawing || !measure(view)) return;
     const p = pointAt(e.clientX, e.clientY);
     if (!p) return;
     e.preventDefault();
     player.pause();
     const x = clamp01(p.x);
     const y = clamp01(p.y);
-    // Read the live playhead, not the 10 Hz mirror: the zoom on screen is the
-    // one the band has to be mapped through.
-    setBand({ ax: x, ay: y, bx: x, by: y, view: zoomAt(edits.zooms, player.timeRef.current) });
+    setBand({ ax: x, ay: y, bx: x, by: y, view });
   };
 
   const startGrab = (e: ReactPointerEvent, index: number, mode: "move" | "resize") => {
-    if (!measure()) return;
+    const view = zoomAt(edits.zooms, player.timeRef.current);
+    if (!measure(view)) return;
     const p = pointAt(e.clientX, e.clientY);
     const o = edits.overlays[index];
     if (!p || !o) return;
@@ -171,25 +165,8 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
     e.stopPropagation();
     player.pause();
     ctx.setSelected({ kind: "overlay", index });
-    setGrab({
-      index,
-      mode,
-      ox: p.x,
-      oy: p.y,
-      rect: o.rect,
-      view: zoomAt(edits.zooms, player.timeRef.current),
-      from: edits,
-    });
+    setGrab({ index, mode, ox: p.x, oy: p.y, rect: o.rect, view, from: edits });
   };
-
-  // The layer element covers the canvas, so the content box as a fraction of
-  // the output size is also its fraction of the element.
-  const { width: ow, height: oh } = player.size;
-  const c = contentRect(ow, oh, frame);
-  const cf: Rect =
-    ow > 0 && oh > 0 && c.w > 0 && c.h > 0
-      ? { x: c.x / ow, y: c.y / oh, w: c.w / ow, h: c.h / oh }
-      : { x: 0, y: 0, w: 1, h: 1 };
 
   /** A rect normalised to its containing box, as CSS percentages. */
   const pctBox = (r: Rect): CSSProperties => ({
@@ -202,6 +179,11 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
   const t = player.time;
   const view = zoomAt(edits.zooms, t);
 
+  // The layer element covers the canvas, so the fitted view box as a fraction
+  // of the output size is also its fraction of the element.
+  const { width: ow, height: oh } = player.size;
+  const cf = fractionOf(viewBox(ow, oh, frame, view, ctx.mode === "camera"), ow, oh);
+
   return (
     <div
       ref={rootRef}
@@ -209,8 +191,8 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
       className={`absolute inset-0 z-10 touch-none ${drawing ? "cursor-crosshair" : "pointer-events-none"}`}
     >
       {/*
-        Everything is positioned inside the content box and clipped to it: a
-        zoom can push an overlay's mapped rect off the frame, and it must not
+        Everything is positioned inside the fitted view box and clipped to it:
+        a zoom can push an overlay's mapped rect off the frame, and it must not
         appear over the frame padding or the letterbox — the same reason
         `render.ts` clips its own overlay pass.
       */}
@@ -220,7 +202,7 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
             className={`absolute border-2 border-dashed ${
               tool === "zoom" ? "border-sky-300 bg-sky-400/15" : "border-emerald-300 bg-emerald-400/15"
             }`}
-            style={pctBox(bandRect(band, tool === "zoom"))}
+            style={pctBox(bandRect(band))}
           />
         )}
 
