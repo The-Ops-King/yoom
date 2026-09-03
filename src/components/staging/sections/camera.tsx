@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatElapsed } from "@/components/recorder/preview-stage";
 import {
   MAX_CAMERA_OFFSET_MS,
@@ -44,6 +44,15 @@ const MODE_LABEL: Record<CameraMode, string> = {
 
 const fmt = (t: number) => `${t.toFixed(1)}s`;
 
+/**
+ * How far the bubble's aspect must differ from the camera's before that axis
+ * counts as having crop slack. Below it the slider could not move anything.
+ */
+const SLACK_EPSILON = 0.001;
+
+/** One slider gesture: the edits it started from, and the keyframe time it writes. */
+type Gesture = { from: VideoEdits; t: number };
+
 /** Fit `rect` back inside 0..1 after its size changed. */
 function refit(rect: Rect, w: number, h: number): Rect {
   return {
@@ -58,13 +67,19 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
   const { edits, player } = ctx;
   const track = edits.camera ?? null;
 
-  /** Set for the length of one slider gesture, so it lands as a single undo step. */
-  const [syncFrom, setSyncFrom] = useState<VideoEdits | null>(null);
+  /**
+   * Set for the length of one slider gesture (sync or pan), so the whole drag
+   * lands as a single undo step. Mirrored into a ref because `onChange` needs
+   * the gesture's own `from`/`t` in the same tick it starts them.
+   */
+  const [gesture, setGesture] = useState<Gesture | null>(null);
+  const gestureRef = useRef<Gesture | null>(null);
   useEffect(() => {
-    if (!syncFrom) return;
+    if (!gesture) return;
     const end = () => {
-      ctx.commit(syncFrom);
-      setSyncFrom(null);
+      ctx.commit(gesture.from);
+      gestureRef.current = null;
+      setGesture(null);
     };
     window.addEventListener("pointerup", end);
     window.addEventListener("keyup", end);
@@ -72,7 +87,7 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
       window.removeEventListener("pointerup", end);
       window.removeEventListener("keyup", end);
     };
-  }, [syncFrom, ctx]);
+  }, [gesture, ctx]);
 
   if (!track) return <p className="text-[11px] text-muted-dim">This take has no camera.</p>;
 
@@ -86,6 +101,38 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
   // the same clock or a button can look off while it is on. (`player.time`
   // still drives the re-render that gets us here.)
   const sample = cameraAt(track, player.timeRef.current);
+
+  /**
+   * Start (or continue) a slider gesture. The pan sliders write a keyframe at
+   * a fixed `t`, so the playhead is stopped first: a moving one would spray a
+   * keyframe per input event instead of re-patching the one being dragged.
+   */
+  const beginGesture = (pauseFirst: boolean): Gesture => {
+    if (gestureRef.current) return gestureRef.current;
+    if (pauseFirst) player.pause();
+    const g: Gesture = { from: edits, t: player.timeRef.current };
+    gestureRef.current = g;
+    setGesture(g);
+    return g;
+  };
+
+  // Which axes the cover-crop actually has slack on. The bubble's pixel aspect
+  // is what `coverCrop` fits the camera into: a camera wider than the box is
+  // cropped at the sides (so pan.x bites), a taller one at top and bottom.
+  const cam = player.cameraSize;
+  const camAspect = cam && cam.height > 0 ? cam.width / cam.height : null;
+  const bubbleAspect =
+    sample.mode === "full" ? aspect : (sample.rect.w * box.w) / (sample.rect.h * box.h);
+  const pannable = camAspect !== null && sample.mode !== "hidden" && Number.isFinite(bubbleAspect);
+  const canPanX = pannable && camAspect > bubbleAspect + SLACK_EPSILON;
+  const canPanY = pannable && camAspect < bubbleAspect - SLACK_EPSILON;
+
+  /** Write the pan at the gesture's keyframe, rebuilding from its pre-gesture edits. */
+  const setPan = (axis: "x" | "y", value: number) => {
+    const g = beginGesture(true);
+    const pan = { ...sample.pan, [axis]: value };
+    ctx.applyLive(() => ops.upsertCameraKeyframe(g.from, g.t, { pan }));
+  };
 
   /**
    * Every "at the playhead" control writes one keyframe at `t` so the change
@@ -216,6 +263,52 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
       </div>
 
       <div className="space-y-1">
+        <span className="text-[11px] uppercase tracking-wider text-muted-dim">Framing</span>
+        {/*
+          One axis at a time has slack: the cover-crop only trims the axis the
+          camera has too much of. The dead axis stays visible but disabled, so
+          the control does not appear and disappear as the bubble is reshaped.
+        */}
+        <label htmlFor="camera-pan-x" className="flex items-center gap-2 text-[11px] text-muted">
+          <span className="w-10 shrink-0">Pan ↔</span>
+          <input
+            id="camera-pan-x"
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={sample.pan.x}
+            disabled={!canPanX}
+            className="w-full disabled:opacity-30"
+            onPointerDown={() => beginGesture(true)}
+            onKeyDown={() => beginGesture(true)}
+            onChange={(e) => setPan("x", Number(e.target.value))}
+          />
+        </label>
+        <label htmlFor="camera-pan-y" className="flex items-center gap-2 text-[11px] text-muted">
+          <span className="w-10 shrink-0">Pan ↕</span>
+          <input
+            id="camera-pan-y"
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={sample.pan.y}
+            disabled={!canPanY}
+            className="w-full disabled:opacity-30"
+            onPointerDown={() => beginGesture(true)}
+            onKeyDown={() => beginGesture(true)}
+            onChange={(e) => setPan("y", Number(e.target.value))}
+          />
+        </label>
+        <p className="text-[11px] text-muted-dim">
+          {canPanX || canPanY
+            ? "Shift-drag the bubble to pan."
+            : "This bubble matches the camera's shape, so there is nothing to pan."}
+        </p>
+      </div>
+
+      <div className="space-y-1">
         <span className="text-[11px] uppercase tracking-wider text-muted-dim">
           Keyframes ({track.keyframes.length})
         </span>
@@ -272,11 +365,11 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
           step={10}
           value={offset}
           className="w-full"
-          onPointerDown={() => setSyncFrom((f) => f ?? edits)}
-          onKeyDown={() => setSyncFrom((f) => f ?? edits)}
+          onPointerDown={() => beginGesture(false)}
+          onKeyDown={() => beginGesture(false)}
           onChange={(e) => {
             const ms = Number(e.target.value);
-            setSyncFrom((f) => f ?? edits);
+            beginGesture(false);
             ctx.applyLive((ed) => ops.setCameraOffset(ed, ms));
           }}
         />

@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Rect, VideoEdits } from "@/lib/edits";
+import type { Point, Rect, VideoEdits } from "@/lib/edits";
 import { bubbleHeightFor, cameraAt, type CameraSample } from "@/lib/editor/camera-track";
 import * as ops from "@/lib/editor/edit-ops";
-import { shapeRadius } from "@/lib/recording/geometry";
+import { coverCrop, shapeRadius } from "@/lib/recording/geometry";
 import type { BubbleShape } from "@/lib/recording/types";
 import { contentRect, type Box } from "./content-rect";
 import type { StagingContext } from "./types";
@@ -23,7 +23,7 @@ function sampleRadius(s: CameraSample, w: number, h: number): number {
 }
 
 type Drag = {
-  kind: "move" | "resize";
+  kind: "move" | "resize" | "pan";
   /** Playhead when the gesture started; the keyframe the drag writes. */
   t: number;
   /** Pre-drag edits: every move re-derives from these, so a drag never accumulates. */
@@ -35,7 +35,29 @@ type Drag = {
   /** The content box in client coordinates, so pointer math needs no re-measure. */
   content: Box;
   shape: BubbleShape;
+  /** The displayed pan at `t`; a pan drag offsets this. Pan drags only. */
+  pan?: Point;
+  /**
+   * How many client pixels of drag equal a full 0→1 sweep of the pan, per axis
+   * — the on-screen size of the cropped-away slack. 0 on an axis with no slack,
+   * which then simply does not move. Pan drags only.
+   */
+  slack?: { x: number; y: number };
+  /** Mirrored draw, which flips what a rightward drag has to do to `pan.x`. */
+  mirror?: boolean;
 };
+
+/**
+ * Client pixels of slack on each axis for a `camW`×`camH` camera cover-cropped
+ * into a `w`×`h` box: the source pixels the crop throws away, scaled up by how
+ * far the crop is magnified to fill the box. Dragging the picture by that many
+ * pixels sweeps the whole pan range.
+ */
+function panSlack(camW: number, camH: number, w: number, h: number): { x: number; y: number } {
+  const crop = coverCrop(camW, camH, w, h);
+  if (crop.sw <= 0 || crop.sh <= 0) return { x: 0, y: 0 };
+  return { x: ((camW - crop.sw) * w) / crop.sw, y: ((camH - crop.sh) * h) / crop.sh };
+}
 
 /**
  * The camera bubble's direct-manipulation layer: a dashed box over the preview
@@ -77,6 +99,31 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
   const frame = ctx.edits.frame;
   const { timeRef } = ctx.player;
 
+  /**
+   * Whether Shift is down, which swaps the box's cursor from "move" to "grab".
+   * A ref written by window listeners rather than state: the rAF loop below
+   * already touches the box's style every frame, and tapping Shift must not
+   * re-render the staging tree.
+   */
+  const shiftRef = useRef(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      shiftRef.current = e.shiftKey;
+    };
+    // Blur too: a Shift-tabbed-away window never delivers the keyup.
+    const onBlur = () => {
+      shiftRef.current = false;
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKey);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKey);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
   useEffect(() => {
     const layer = layerRef.current;
     const box = boxRef.current;
@@ -110,6 +157,7 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
       box.style.width = `${w}px`;
       box.style.height = `${h}px`;
       box.style.borderRadius = `${sampleRadius(sample, w, h)}px`;
+      box.style.cursor = shiftRef.current ? "grab" : "move";
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -120,6 +168,22 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
     const onMove = (e: PointerEvent) => {
       const c = drag.content;
       const base = drag.rect;
+      if (drag.kind === "pan") {
+        const p = drag.pan ?? { x: 0.5, y: 0.5 };
+        const slack = drag.slack ?? { x: 0, y: 0 };
+        const dx = e.clientX - drag.startX;
+        const dy = e.clientY - drag.startY;
+        // Drag the PICTURE, not the window: pushing right must move what you
+        // see right. Raising `pan.x` slides the crop window right in source
+        // space, which moves the picture LEFT — unless the draw is mirrored,
+        // which flips it back. Y is never mirrored, so it always inverts.
+        const pan = {
+          x: slack.x > 0 ? clamp(p.x + (drag.mirror ? dx : -dx) / slack.x, 0, 1) : p.x,
+          y: slack.y > 0 ? clamp(p.y - dy / slack.y, 0, 1) : p.y,
+        };
+        ctxRef.current.applyLive(() => ops.upsertCameraKeyframe(drag.from, drag.t, { pan }));
+        return;
+      }
       let rect: Rect;
       if (drag.kind === "move") {
         rect = {
@@ -170,8 +234,15 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
     const c = contentRect(r.width, r.height, frame);
     const t = timeRef.current;
     const sample = cameraAt(track, t);
+    const cam = ctx.player.cameraSize;
+    const slack = cam ? panSlack(cam.width, cam.height, sample.rect.w * c.w, sample.rect.h * c.h) : null;
+    // Shift turns a body drag into a pan — but only once the camera's own size
+    // is known and the cover-crop actually has slack to slide through. Without
+    // slack the gesture would write a keyframe (and an undo entry) for a pan
+    // that cannot move; it stays a plain move instead.
+    const panning = kind === "move" && e.shiftKey && !!slack && (slack.x > 0 || slack.y > 0);
     setDrag({
-      kind,
+      kind: panning ? "pan" : kind,
       t,
       from: ctx.edits,
       startX: e.clientX,
@@ -181,6 +252,7 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
       // The shape in force at `t`, which is what a resize must keep square /
       // 16:9 / whatever — not the track-wide default.
       shape: sample.shape,
+      ...(panning && slack ? { pan: sample.pan, slack, mirror: track.mirror } : null),
     });
   };
 
@@ -202,7 +274,8 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
         role="presentation"
         style={{ display: "none" }}
         onPointerDown={(e) => begin(e, "move")}
-        className={`${grabbable} absolute cursor-move touch-none border-2 border-dashed border-white/70 shadow-[0_0_0_1px_rgba(0,0,0,0.45)]`}
+        // The cursor is set from the rAF loop (move, or grab while Shift is held).
+        className={`${grabbable} absolute touch-none border-2 border-dashed border-white/70 shadow-[0_0_0_1px_rgba(0,0,0,0.45)]`}
       >
         <div
           aria-label="Resize the camera bubble"
