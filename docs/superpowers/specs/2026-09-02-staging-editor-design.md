@@ -271,3 +271,34 @@ signal) → Promise<Blob>`.
 - Real-time export means a long take waits its own length before upload. Accepted
   for v1; WebCodecs later.
 - Safari lacks `ctx.filter`; blur falls back to solid redact (fail closed).
+
+## Addendum 2026-09-02 (evening): Tyler's second test pass
+
+**Recording screen.** No mode picker and no bubble controls before a take. Every take is
+screen + camera (the camera can be hidden in post). One button, "Choose what to share",
+opens the picker; the page then shows the live preview on the left and the controls
+(mic, system audio, camera device, Start, Cancel) on the right, with no page scroll.
+Hotkeys unchanged.
+
+**Defaults.** Framed capture on, padding 2 %, background preset `mint` (green gradient).
+
+**Zoom.**
+- A zoom rect may have any aspect. The zoomed region is fitted inside the content box
+  preserving its aspect; the remaining space is frame background (i.e. the frame's
+  padding grows on the top/bottom or sides as needed). Overlays map through the zoom as
+  before; the bubble stays anchored to the output frame.
+- When a zoom is selected, its rect is shown on the preview and can be moved (drag body)
+  and resized (corner handle, free aspect). Timeline edits unchanged.
+- Adjacent zooms (next.start − prev.end ≤ ramp) transition rect-to-rect over the ramp
+  instead of easing out to full frame and back in.
+
+**Camera framing.** Each keyframe may carry `pan: { x, y }` (0..1, default 0.5/0.5): which
+part of the camera feed the cover-crop shows. Exposed as a pan control in the Camera
+section (most useful for the portrait shape) and by shift-dragging inside the bubble.
+
+**Overlays.** Types become: `blur`, `ellipse` (free width/height outline, colour, thickness),
+`step` (numbered circle badge, auto-increments, number editable), `underline`,
+`highlight`, `arrow` (from → to, drawn by dragging; head at the end; colour/thickness),
+`image` (uploaded PNG/JPG placed and resized; the blob URL lives only in the session and
+the pixels are burned in at export), `click` (reserved). Legacy `callout` parses as
+`step`. Each overlay keeps its own timeline row.
