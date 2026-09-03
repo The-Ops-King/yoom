@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_EDITS, hasDrawableEdits, isEmptyEdits, parseEdits } from "@/lib/edits";
+import {
+  arrowRect,
+  EMPTY_EDITS,
+  hasDrawableEdits,
+  isEmptyEdits,
+  MAX_OVERLAY_SRC,
+  MAX_OVERLAY_THICKNESS,
+  parseEdits,
+} from "@/lib/edits";
 
 describe("parseEdits", () => {
   it("returns the empty list for junk input", () => {
@@ -48,7 +56,7 @@ describe("parseEdits", () => {
       version: 1,
       overlays: [
         { type: "blur", start: 0, end: 1, rect: { x: 0, y: 0, w: 1, h: 1 } },
-        { type: "callout", start: 1, end: 2, rect: { x: 0, y: 0, w: 1, h: 1 }, n: 3 },
+        { type: "step", start: 1, end: 2, rect: { x: 0, y: 0, w: 1, h: 1 }, n: 3 },
         { type: "sparkle", start: 0, end: 1, rect: { x: 0, y: 0, w: 1, h: 1 } },
         {
           type: "highlight",
@@ -61,11 +69,21 @@ describe("parseEdits", () => {
     });
     expect(parsed.overlays.map((o) => o.type)).toEqual([
       "blur",
-      "callout",
+      "step",
       "highlight",
     ]);
     expect(parsed.overlays[1].n).toBe(3);
     expect(parsed.overlays[2].color).toBe("#ff0");
+  });
+
+  it("maps the legacy `callout` type onto `step`", () => {
+    const parsed = parseEdits({
+      version: 1,
+      overlays: [{ type: "callout", start: 1, end: 2, rect: { x: 0, y: 0, w: 1, h: 1 }, n: 3 }],
+    });
+    expect(parsed.overlays).toEqual([
+      { type: "step", start: 1, end: 2, rect: { x: 0, y: 0, w: 1, h: 1 }, n: 3 },
+    ]);
   });
 
   it("clamps overlay rects into the 0..1 frame", () => {
@@ -356,5 +374,86 @@ describe("parseEdits staging fields", () => {
     });
     expect(parsed.camera?.keyframes).toHaveLength(1);
     expect(parsed.camera?.keyframes[0].t).toBe(0);
+  });
+});
+
+describe("parseEdits overlay fields", () => {
+  const base = { version: 1, cuts: [], crop: null, zooms: [], overlays: [], markers: [] };
+  const one = (o: Record<string, unknown>) => parseEdits({ ...base, overlays: [o] }).overlays[0];
+
+  it("keeps every new overlay type", () => {
+    const types = ["blur", "ellipse", "step", "underline", "highlight", "arrow", "image", "click"];
+    const parsed = parseEdits({
+      ...base,
+      overlays: types.map((type) => ({ type, start: 0, end: 1, rect: { x: 0, y: 0, w: 0.5, h: 0.5 } })),
+    });
+    expect(parsed.overlays.map((o) => o.type)).toEqual(types);
+  });
+
+  it("clamps an arrow's from/to into 0..1 and derives the rect as their bounding box", () => {
+    const o = one({
+      type: "arrow",
+      start: 0,
+      end: 1,
+      rect: { x: 0, y: 0, w: 1, h: 1 },
+      from: { x: -3, y: 0.25 },
+      to: { x: 0.75, y: 4 },
+    });
+    expect(o.from).toEqual({ x: 0, y: 0.25 });
+    expect(o.to).toEqual({ x: 0.75, y: 1 });
+    expect(o.rect).toEqual(arrowRect({ x: 0, y: 0.25 }, { x: 0.75, y: 1 }));
+  });
+
+  it("gives an arrow with no points the rect's diagonal", () => {
+    const o = one({ type: "arrow", start: 0, end: 1, rect: { x: 0.1, y: 0.2, w: 0.4, h: 0.3 } });
+    expect(o.from).toEqual({ x: 0.1, y: 0.2 });
+    expect(o.to).toEqual({ x: 0.5, y: 0.5 });
+  });
+
+  it("drops from/to from every non-arrow overlay", () => {
+    const o = one({
+      type: "ellipse",
+      start: 0,
+      end: 1,
+      rect: { x: 0, y: 0, w: 0.5, h: 0.5 },
+      from: { x: 0.1, y: 0.1 },
+      to: { x: 0.2, y: 0.2 },
+    });
+    expect(o.from).toBeUndefined();
+    expect(o.to).toBeUndefined();
+  });
+
+  it("keeps a blob: src as-is and drops one over the length cap", () => {
+    const src = "blob:http://localhost/abc";
+    expect(one({ type: "image", start: 0, end: 1, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, src }).src).toBe(src);
+    const huge = `data:image/png;base64,${"A".repeat(MAX_OVERLAY_SRC)}`;
+    expect(one({ type: "image", start: 0, end: 1, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, src: huge }).src).toBeUndefined();
+    expect(one({ type: "image", start: 0, end: 1, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, src: 7 }).src).toBeUndefined();
+  });
+
+  it("clamps thickness and opacity, and drops non-numbers", () => {
+    const r = { x: 0, y: 0, w: 0.5, h: 0.5 };
+    expect(one({ type: "ellipse", start: 0, end: 1, rect: r, thickness: 9 }).thickness).toBe(MAX_OVERLAY_THICKNESS);
+    expect(one({ type: "ellipse", start: 0, end: 1, rect: r, thickness: -1 }).thickness).toBe(0);
+    expect(one({ type: "highlight", start: 0, end: 1, rect: r, opacity: 5 }).opacity).toBe(1);
+    expect(one({ type: "highlight", start: 0, end: 1, rect: r, opacity: -5 }).opacity).toBe(0);
+    expect(one({ type: "highlight", start: 0, end: 1, rect: r, opacity: "x" }).opacity).toBeUndefined();
+    expect(one({ type: "ellipse", start: 0, end: 1, rect: r, thickness: NaN }).thickness).toBeUndefined();
+  });
+});
+
+describe("arrowRect", () => {
+  it("is the bounding box of the two points, whatever their order", () => {
+    const r = arrowRect({ x: 0.8, y: 0.6 }, { x: 0.2, y: 0.1 });
+    expect(r.x).toBeCloseTo(0.2);
+    expect(r.y).toBeCloseTo(0.1);
+    expect(r.w).toBeCloseTo(0.6);
+    expect(r.h).toBeCloseTo(0.5);
+  });
+
+  it("never collapses to zero for an axis-aligned arrow", () => {
+    const r = arrowRect({ x: 0.2, y: 0.5 }, { x: 0.8, y: 0.5 });
+    expect(r.w).toBeCloseTo(0.6);
+    expect(r.h).toBeGreaterThan(0);
   });
 });
