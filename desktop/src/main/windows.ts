@@ -174,7 +174,9 @@ export function createRecorderWindow(): BrowserWindow {
     show: false,
     title: "Yoom",
     backgroundColor: "#171717",
-    titleBarStyle: "hiddenInset",
+    // A real title bar: the web page defines no `-webkit-app-region: drag`
+    // strip, so a hidden title bar left the window impossible to move.
+    titleBarStyle: "default",
     webPreferences: {
       session: ses,
       preload: join(__dirname, "../preload/app.js"),
