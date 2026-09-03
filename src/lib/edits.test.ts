@@ -312,6 +312,41 @@ describe("parseEdits staging fields", () => {
     expect(parsed.camera?.keyframes.map((k) => k.shape)).toEqual([undefined, "square", undefined]);
   });
 
+  it("keeps a per-keyframe pan, clamped into 0..1", () => {
+    const kf = (t: number, pan: unknown) => ({ t, mode: "bubble", rect: { x: 0, y: 0, w: 0.2, h: 0.2 }, pan });
+    const parsed = parseEdits({
+      ...base,
+      camera: {
+        shape: "circle",
+        mirror: true,
+        keyframes: [kf(0, { x: 0.25, y: 0.75 }), kf(1, { x: -4, y: 9 }), kf(2, { x: 0.3 })],
+      },
+    });
+    expect(parsed.camera?.keyframes.map((k) => k.pan)).toEqual([
+      { x: 0.25, y: 0.75 },
+      { x: 0, y: 1 },
+      // A half-written pan fills the missing axis in at centred rather than
+      // dropping the axis the author did set.
+      { x: 0.3, y: 0.5 },
+    ]);
+  });
+
+  it("leaves pan absent when a keyframe has none or an unusable one", () => {
+    const parsed = parseEdits({
+      ...base,
+      camera: {
+        shape: "circle",
+        mirror: true,
+        keyframes: [
+          { t: 0, mode: "bubble", rect: { x: 0, y: 0, w: 0.2, h: 0.2 } },
+          { t: 1, mode: "bubble", rect: { x: 0, y: 0, w: 0.2, h: 0.2 }, pan: "middle" },
+          { t: 2, mode: "bubble", rect: { x: 0, y: 0, w: 0.2, h: 0.2 }, pan: { x: Number.NaN, y: null } },
+        ],
+      },
+    });
+    expect(parsed.camera?.keyframes.map((k) => k.pan)).toEqual([undefined, undefined, undefined]);
+  });
+
   it("accepts the hidden camera mode and rejects any other string", () => {
     const parsed = parseEdits({
       ...base,

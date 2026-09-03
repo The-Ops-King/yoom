@@ -80,6 +80,13 @@ export type CameraKeyframe = {
   rect: Rect;
   /** Bubble shape from this keyframe on; falls back to the track's `shape`. */
   shape?: BubbleShape;
+  /**
+   * Which part of the camera feed the cover-crop shows, 0..1 per axis, in
+   * SOURCE space (0 = the source's left/top edge, 1 = its right/bottom, 0.5 =
+   * the centred crop everything did before this existed). Absent means 0.5/0.5;
+   * `cameraAt` lerps it like `rect` and always reports a value.
+   */
+  pan?: Point;
 };
 export type CameraTrack = {
   /** The default shape, for keyframes that do not carry their own. */
@@ -220,6 +227,20 @@ function parsePoint(value: unknown): Point | null {
   return { x: clamp(x, 0, 1), y: clamp(y, 0, 1) };
 }
 
+/**
+ * A camera keyframe's `pan`, clamped into 0..1. Unlike `parsePoint` a
+ * half-written pan survives: the axis the author did set is kept and the other
+ * fills in at centred, which is what an absent pan means anyway. Only a value
+ * with no usable axis at all is dropped (returns null → the field stays absent).
+ */
+function parsePan(value: unknown): Point | null {
+  if (!isRecord(value)) return null;
+  const x = num(value.x);
+  const y = num(value.y);
+  if (x === null && y === null) return null;
+  return { x: clamp(x ?? 0.5, 0, 1), y: clamp(y ?? 0.5, 0, 1) };
+}
+
 function parseCamera(value: unknown): CameraTrack | null | undefined {
   if (value === null) return null;
   if (!isRecord(value)) return undefined;
@@ -239,6 +260,8 @@ function parseCamera(value: unknown): CameraTrack | null | undefined {
     if (typeof raw.shape === "string" && (SHAPES as string[]).includes(raw.shape)) {
       kf.shape = pick(raw.shape, SHAPES, shape);
     }
+    const pan = parsePan(raw.pan);
+    if (pan) kf.pan = pan;
     keyframes.push(kf);
   }
   keyframes.sort((a, b) => a.t - b.t);

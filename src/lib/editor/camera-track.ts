@@ -1,5 +1,5 @@
 import { MAX_KEYFRAMES } from "@/lib/edits";
-import type { CameraKeyframe, CameraMode, CameraTrack, Rect } from "@/lib/edits";
+import type { CameraKeyframe, CameraMode, CameraTrack, Point, Rect } from "@/lib/edits";
 import { easeInOutCubic, lerpRect, SIZE_FRACTION } from "@/lib/recording/geometry";
 import type { BubbleShape, BubbleSize } from "@/lib/recording/types";
 
@@ -41,7 +41,22 @@ export type CameraSample = {
    * sample, so a renderer can use it unconditionally.
    */
   shapeFade: number;
+  /**
+   * The cover-crop pan in force, in the camera's own source space. Always
+   * present — a keyframe with no `pan` reads as the centred `CENTRED_PAN` —
+   * so `render.ts` can hand it straight to `coverCrop` unconditionally.
+   */
+  pan: Point;
 };
+
+/** What an absent keyframe `pan` means: the historical centred cover-crop. */
+export const CENTRED_PAN: Point = { x: 0.5, y: 0.5 };
+
+const panOf = (k: CameraKeyframe): Point => k.pan ?? CENTRED_PAN;
+
+function lerpPan(a: Point, b: Point, e: number): Point {
+  return { x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e };
+}
 
 function normalizedAspect(screenAspect: number): number {
   return Number.isFinite(screenAspect) && screenAspect > 0 ? screenAspect : 16 / 9;
@@ -83,7 +98,7 @@ const startOf = (k: CameraKeyframe): number => Math.max(0, k.t - CAMERA_ANIM_S);
 
 /** A keyframe as a fully settled sample. */
 function settled(k: CameraKeyframe, fallbackShape: BubbleShape): CameraSample {
-  return { mode: k.mode, fade: 1, rect: { ...k.rect }, shape: k.shape ?? fallbackShape, shapeFade: 1 };
+  return { mode: k.mode, fade: 1, rect: { ...k.rect }, shape: k.shape ?? fallbackShape, shapeFade: 1, pan: { ...panOf(k) } };
 }
 
 /**
@@ -121,10 +136,13 @@ function advanceTo(from: CameraSample, target: CameraKeyframe, t: number, fallba
   const p = span > 0 ? Math.min(1, Math.max(0, 1 + (t - target.t) / span)) : 1;
   const e = easeInOutCubic(p);
   const shape = target.shape ?? fallbackShape;
-  if (p >= 1) return { mode: target.mode, fade: 1, rect: { ...target.rect }, shape, shapeFade: 1 };
+  if (p >= 1) return { mode: target.mode, fade: 1, rect: { ...target.rect }, shape, shapeFade: 1, pan: { ...panOf(target) } };
 
   const rect: Rect = lerpRect(from.rect, target.rect, e);
-  const out: CameraSample = { mode: target.mode, fade: 1, rect, shape, shapeFade: 1 };
+  // Pan rides the same eased `e` as the rect, so a keyframe that both moves
+  // the bubble and re-frames the face does the two as one motion.
+  const pan = lerpPan(from.pan, panOf(target), e);
+  const out: CameraSample = { mode: target.mode, fade: 1, rect, shape, shapeFade: 1, pan };
   if (from.mode !== target.mode) {
     out.fromMode = from.mode;
     out.fade = carry(from.fromMode === target.mode, from.fade, e);

@@ -50,6 +50,33 @@ describe("bubbleHeightFor", () => {
 describe("cameraAt", () => {
   const two = upsertKeyframe(track, 5, { mode: "full", rect: { x: 0, y: 0, w: 1, h: 1 } });
 
+  it("always reports a pan, centred when no keyframe carries one", () => {
+    expect(cameraAt(two, 0).pan).toEqual({ x: 0.5, y: 0.5 });
+    expect(cameraAt(two, 5).pan).toEqual({ x: 0.5, y: 0.5 });
+  });
+
+  it("lerps pan with the same easing as the rect", () => {
+    const panned = upsertKeyframe(track, 5, { pan: { x: 1, y: 0 } });
+    // Before the transition starts, the t=0 keyframe's implicit centre.
+    expect(cameraAt(panned, 5 - CAMERA_ANIM_S - 0.01).pan).toEqual({ x: 0.5, y: 0.5 });
+    // Halfway through the window, easeInOutCubic(0.5) === 0.5.
+    const mid = cameraAt(panned, 5 - CAMERA_ANIM_S / 2);
+    expect(mid.pan.x).toBeCloseTo(0.75, 6);
+    expect(mid.pan.y).toBeCloseTo(0.25, 6);
+    // Settled at the keyframe's own t.
+    expect(cameraAt(panned, 5).pan).toEqual({ x: 1, y: 0 });
+  });
+
+  it("folds pan forward through a re-target that lands mid-animation", () => {
+    const a = upsertKeyframe(track, 5, { pan: { x: 1, y: 1 } });
+    const b = upsertKeyframe(a, 5.1, { pan: { x: 0, y: 0 } });
+    // The second keyframe starts from what was actually on screen (still near
+    // centred), not from the first keyframe's settled 1/1.
+    const s = cameraAt(b, 5.1 - CAMERA_ANIM_S);
+    expect(s.pan.x).toBeGreaterThan(0.5);
+    expect(s.pan.x).toBeLessThan(1);
+  });
+
   it("returns the first keyframe before the next transition begins", () => {
     const s = cameraAt(two, 5 - CAMERA_ANIM_S - 0.01);
     expect(s.mode).toBe("bubble");
@@ -189,6 +216,14 @@ describe("upsertKeyframe / removeKeyframe", () => {
     const a = upsertKeyframe(track, 2, { shape: "square" });
     const b = upsertKeyframe(a, 4, { mode: "full" });
     expect(b.keyframes[2].shape).toBe("square");
+  });
+  it("inherits pan like every other field", () => {
+    const a = upsertKeyframe(track, 2, { pan: { x: 0.2, y: 0.8 } });
+    const b = upsertKeyframe(a, 4, { mode: "full" });
+    expect(b.keyframes[2].pan).toEqual({ x: 0.2, y: 0.8 });
+    // ...and a patch still wins over what it inherited.
+    const c = upsertKeyframe(a, 6, { pan: { x: 1, y: 0 } });
+    expect(c.keyframes[2].pan).toEqual({ x: 1, y: 0 });
   });
   it("never removes t=0", () => {
     expect(removeKeyframe(track, 0).keyframes).toHaveLength(1);
