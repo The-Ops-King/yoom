@@ -62,6 +62,12 @@ export interface StagingPlayer {
   step(frames: number): void;
   /** The output size for the current edits (for the preview's aspect box). */
   size: { width: number; height: number };
+  /**
+   * The camera stream's own pixel size, or null until its metadata lands (and
+   * always, for a take with no camera). The camera framing controls need it to
+   * know which axis the cover-crop actually has slack on.
+   */
+  cameraSize: { width: number; height: number } | null;
 }
 
 export interface StagingPlayerOptions {
@@ -124,6 +130,7 @@ export function useStagingPlayer(
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [size, setSize] = useState<Size>({ width: 16, height: 9 });
+  const [cameraSize, setCameraSize] = useState<Size | null>(null);
 
   const duration = Number.isFinite(durationMs) && durationMs > 0 ? durationMs / 1000 : 0;
   const ranges = useMemo(() => keptRanges(edits, duration), [edits, duration]);
@@ -181,10 +188,21 @@ export function useStagingPlayer(
     }
     cameraRef.current = camera;
 
+    // In camera-only mode the primary element IS the camera, so both sizes come
+    // off it; in screen+camera the bubble decoder reports its own.
+    const trackCameraSize = (el: HTMLVideoElement) => {
+      const next: Size = { width: el.videoWidth, height: el.videoHeight };
+      if (next.width <= 0 || next.height <= 0) return;
+      setCameraSize((prev) => (prev && sameSize(prev, next) ? prev : next));
+    };
     const onMeta = () => {
       const next = outputSize(primary.videoWidth, primary.videoHeight, editsRef.current);
       setSize((prev) => (sameSize(prev, next) ? prev : next));
+      if (mode === "camera") trackCameraSize(primary);
       dirtyRef.current = true;
+    };
+    const onCamMeta = () => {
+      if (camera) trackCameraSize(camera);
     };
     const onEnded = () => setPlaying(false);
     const onPause = () => {
@@ -203,6 +221,7 @@ export function useStagingPlayer(
     primary.addEventListener("playing", onPlaying);
     primary.addEventListener("seeked", onSeeked);
     camera?.addEventListener("seeked", onSeeked);
+    camera?.addEventListener("loadedmetadata", onCamMeta);
 
     // An EXTRA dirty source, never the only one: rVFC fires when a frame is
     // presented for composition, which is a useful nudge while paused (a seek
@@ -225,11 +244,15 @@ export function useStagingPlayer(
       primary.removeEventListener("playing", onPlaying);
       primary.removeEventListener("seeked", onSeeked);
       camera?.removeEventListener("seeked", onSeeked);
+      camera?.removeEventListener("loadedmetadata", onCamMeta);
       if (vfc && supportsVfc) primary.cancelVideoFrameCallback(vfc);
       release(primary);
       release(camera);
       primaryRef.current = null;
       cameraRef.current = null;
+      // The next source may be a different camera (or none) — a stale size
+      // here would frame the pan controls against the wrong stream.
+      setCameraSize(null);
       setPlaying(false);
     };
   }, [screenUrl, cameraUrl, mode, pushTime]);
@@ -429,6 +452,7 @@ export function useStagingPlayer(
     seekEdited,
     step,
     size,
+    cameraSize,
     editedTime: sourceToEditedIn(ranges, time),
     editedDuration: editedDurationIn(ranges),
   };
