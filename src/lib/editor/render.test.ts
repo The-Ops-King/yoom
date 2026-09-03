@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseEdits, type CameraTrack } from "@/lib/edits";
 import { defaultCameraTrack } from "./camera-track";
-import { drawFrame, outputSize, type RenderInputs } from "./render";
+import { drawFrame, outputSize, preloadOverlayImages, type RenderInputs } from "./render";
 
 /**
  * `Path2D` only exists in a browser; `render.ts` builds clip paths with it, so
@@ -204,5 +204,103 @@ describe("drawFrame", () => {
     const draw = ctx.calls.find((c) => c[0] === "drawImage")!;
     // The 640×720 zoom region is cover-cropped to 16:9, not squeezed into it.
     expect(draw[1].slice(1, 5)).toEqual([0, 180, 640, 360]);
+  });
+});
+
+describe("drawOverlay", () => {
+  const src = video(1920, 1080);
+  const inputs = (overlays: RenderInputs["edits"]["overlays"]): RenderInputs => ({
+    screen: src, camera: null, mode: "screen",
+    edits: { ...base, camera: null, overlays }, background: null,
+  });
+  /** Args of the last call to `name`, or undefined. */
+  const last = (ctx: ReturnType<typeof fakeCtx>, name: string) =>
+    [...ctx.calls].reverse().find((c) => c[0] === name)?.[1];
+
+  it("strokes an ellipse inscribed in the rect", () => {
+    const ctx = fakeCtx();
+    drawFrame(ctx, inputs([{ type: "ellipse", start: 0, end: 5, rect: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 } }]), 1, 1920, 1080);
+    const e = last(ctx, "ellipse") as number[];
+    // Centre of a half-size centred rect, with the rect's half-extents as radii.
+    expect(e.slice(0, 4)).toEqual([960, 540, 480, 270]);
+    expect(ctx.calls.some((c) => c[0] === "stroke")).toBe(true);
+  });
+
+  it("draws a step as a filled badge with its number", () => {
+    const ctx = fakeCtx();
+    drawFrame(ctx, inputs([{ type: "step", start: 0, end: 5, rect: { x: 0.4, y: 0.4, w: 0.2, h: 0.1 }, n: 3 }]), 1, 1920, 1080);
+    // The badge is a circle of diameter min(w, h) = 0.1 × 1080 = 108.
+    const arc = last(ctx, "arc") as number[];
+    expect(arc[2]).toBeCloseTo(54);
+    expect(last(ctx, "fillText")?.[0]).toBe("3");
+  });
+
+  it("draws an arrow from `from` to `to` with a filled head", () => {
+    const ctx = fakeCtx();
+    drawFrame(
+      ctx,
+      inputs([{ type: "arrow", start: 0, end: 5, rect: { x: 0.2, y: 0.5, w: 0.6, h: 0.001 }, from: { x: 0.2, y: 0.5 }, to: { x: 0.8, y: 0.5 } }]),
+      1,
+      1920,
+      1080,
+    );
+    const moves = ctx.calls.filter((c) => c[0] === "moveTo").map((c) => c[1] as number[]);
+    // The shaft starts at `from`, and the head's first point is the tip at `to`.
+    expect(moves[0]).toEqual([384, 540]);
+    expect(moves[1]).toEqual([1536, 540]);
+    expect(ctx.calls.some((c) => c[0] === "fill")).toBe(true);
+  });
+
+  it("maps an arrow's endpoints through the active zoom", () => {
+    const ctx = fakeCtx();
+    const e = {
+      ...base, camera: null,
+      zooms: [{ start: 0, end: 10, rect: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, ramp: 0 }],
+      overlays: [{ type: "arrow" as const, start: 0, end: 10, rect: { x: 0.35, y: 0.35, w: 0.1, h: 0.1 }, from: { x: 0.35, y: 0.35 }, to: { x: 0.45, y: 0.45 } }],
+    };
+    drawFrame(ctx, { screen: src, camera: null, mode: "screen", edits: e, background: null }, 5, 1920, 1080);
+    // (0.35 - 0.25) / 0.5 = 0.2 of the content box.
+    expect((ctx.calls.filter((c) => c[0] === "moveTo")[0][1] as number[])[0]).toBeCloseTo(384, 6);
+  });
+
+  it("skips an image until it is decoded, then draws it contain-fitted", async () => {
+    const loaded: StubImage[] = [];
+    class StubImage {
+      complete = false;
+      naturalWidth = 0;
+      naturalHeight = 0;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      #src = "";
+      constructor() { loaded.push(this); }
+      get src() { return this.#src; }
+      set src(v: string) {
+        this.#src = v;
+        queueMicrotask(() => {
+          this.complete = true;
+          this.naturalWidth = 200;
+          this.naturalHeight = 100;
+          this.onload?.();
+        });
+      }
+    }
+    vi.stubGlobal("Image", StubImage);
+    const overlays = [{ type: "image" as const, start: 0, end: 5, rect: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, src: "blob:test-1" }];
+
+    // First frame: the decode has only just been kicked off, so nothing is drawn.
+    const cold = fakeCtx();
+    drawFrame(cold, inputs(overlays), 1, 1920, 1080);
+    expect(cold.calls.filter((c) => c[0] === "drawImage")).toHaveLength(1); // the screen only
+
+    await preloadOverlayImages({ ...base, overlays });
+    const warm = fakeCtx();
+    drawFrame(warm, inputs(overlays), 1, 1920, 1080);
+    const draws = warm.calls.filter((c) => c[0] === "drawImage");
+    expect(draws).toHaveLength(2);
+    // 960 × 540 box, 2:1 image → 960 × 480, centred vertically.
+    expect((draws[1][1] as unknown[]).slice(1)).toEqual([480, 300, 960, 480]);
+    // The element is decoded once and reused across frames.
+    expect(loaded).toHaveLength(1);
+    vi.stubGlobal("Image", undefined);
   });
 });
