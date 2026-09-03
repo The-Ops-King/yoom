@@ -22,4 +22,5 @@ export const IPC = {
   setCameraDevice: "yoom:bubble-camera",
   setHudState: "yoom:hud-state",
   cursor: "yoom:cursor",
+  input: "yoom:input",
 } as const;

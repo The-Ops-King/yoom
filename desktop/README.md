@@ -145,6 +145,81 @@ lives in memory in the recorder and is never persisted to `videos.edits`; the
 pure normalization and pause-clock logic is unit-tested in
 `main/cursor-track.test.ts`.
 
+### Input tracks
+
+Alongside the cursor track, `main/input.ts` records **global clicks and key
+presses** while the status is `recording` — clicks become ripples on the
+staging editor's Clicks lane, key presses feed the `keys` overlay's keycap
+badge ("⌘ ⇧ K"). Both are what turns a screen recording into a tutorial.
+
+The hook is [`uiohook-napi`](https://github.com/SnosMe/uiohook-napi) — an N-API
+addon, so it needs no rebuild against Electron's ABI (verified loading under
+Electron 44.1.1 / Node 24 on darwin-arm64 from its shipped prebuild).
+`electron-builder.yml` unpacks `node_modules/uiohook-napi/prebuilds/**` from the
+asar, because `process.dlopen` cannot open a `.node` from inside an archive.
+
+Batches ship every 250 ms on `yoom:input` as `InputSample[]` — one mixed,
+time-ordered array of `{ kind: "click", t, x, y, button }` and
+`{ kind: "key", t, key, mods }`. `t` is the same recorded-media clock as the
+cursor track (starts at 0 on `countdown → recording`, freezes across a pause).
+Clicks are normalized against the captured display's `bounds` exactly like a
+cursor sample, so a **window capture produces no clicks** — there is no fixed
+rectangle to normalize against. Keys have no coordinates, so they are recorded
+for every capture kind. The hook is stopped outright while paused and on
+`destroyHud()` (quit): a global keyboard tap is not something to leave running.
+
+**Permission.** The hook needs macOS **Input Monitoring** (Accessibility on
+older versions), which cannot be granted from inside an app. The authoritative
+signal is `uIOhook.start()` throwing `UIOHOOK_ERROR_AXAPI_DISABLED`;
+`systemPreferences.isTrustedAccessibilityClient(false)` is checked as a
+belt-and-braces second opinion (it checks without prompting). On failure the
+shell shows **one** dialog explaining what the permission buys you, with "Open
+System Settings" (deep-linked to `Privacy_ListenEvent`) and "Not now" — a "Not
+now" is remembered in `userData/input-hook.json` and re-asked at most once a
+week. Everything then **degrades silently to cursor-only**: the take records
+normally, there is just no Clicks lane and no `keys` overlay. Note that an
+unsigned build gets a new TCC identity on every rebuild, so every rebuild has to
+be re-granted (same caveat as Screen Recording, above).
+
+**Privacy.** Key tracking is deliberately narrow, and worth being precise about:
+
+- Only key **names** travel — `"K"`, `"Enter"`, `"ArrowLeft"`, `";"` — plus the
+  modifiers held with them. Never the character the key produced, never the
+  focused app, never a window title. The shell cannot tell a password field from
+  a search box, so it records nothing that could reconstruct typed text.
+- Modifier-only presses (a bare ⌘, ⇧, ⌥, ⌃, Caps Lock) are dropped; the chord
+  arrives on the next real key with the modifiers already in `mods`.
+- The raw track is held **in memory for the take only**. It is never written to
+  `videos.edits`, never uploaded, and never leaves this Mac — the only way a
+  keystroke reaches anyone else is as pixels burned into a rendered video.
+- Key tracking is **opt-in per range in the editor**: nothing is drawn unless
+  you add a `keys` overlay over a span you chose. Recording the track is not
+  publishing it.
+
+The pure parts — the `UiohookKey` reverse table, the modifier ordering, the
+button mapping — are unit-tested in `main/input-track.test.ts`.
+
+### Hiding the captured cursor
+
+The staging editor's `cursor.style: "smooth"` wants the real macOS cursor gone
+so it can draw a synthetic one. **This is not possible in Electron 44**, and the
+shell reports it rather than pretending:
+
+- `setDisplayMediaRequestHandler`'s request object carries only
+  `frame, securityOrigin, videoRequested, audioRequested, userGesture` — no
+  constraints at all, so the main process cannot even see what the page asked
+  for (`DisplayMediaRequestHandlerHandlerRequest`, electron.d.ts @ 44.1.1).
+- The `Streams` object handed back to the callback has only
+  `video`, `audio` and `enableLocalEcho` — there is no cursor option.
+- Chromium reports `navigator.mediaDevices.getSupportedConstraints().cursor ===
+  false`, so `getDisplayMedia({ video: { cursor: "never" } })` in the renderer is
+  ignored as an unknown constraint. Measured under Electron 44.1.1: the request
+  succeeds and the resulting track reports `getSettings().cursor === "always"`.
+
+So the cursor is **always composited into the capture**, and `smooth` has to
+render its synthetic arrow over the real one (or fall back to `"real"`). The
+spec's `cursorHidden` flag is therefore always `false` on this platform.
+
 ## Debugging
 
 There is no menu bar (`LSUIElement: true`), so the usual View → Toggle

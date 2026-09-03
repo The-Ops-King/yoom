@@ -10,6 +10,13 @@ files:
   - out/**/*
   - package.json
 
+# `uiohook-napi` is a native N-API addon. `node-gyp-build` picks the prebuild by
+# reading the `prebuilds/<platform>-<arch>/` directory at require time, and
+# `process.dlopen` cannot open a `.node` from inside an asar archive — so the
+# binaries have to sit on the real filesystem, under `app.asar.unpacked/`.
+asarUnpack:
+  - node_modules/uiohook-napi/prebuilds/**
+
 extraResources:
   # The tray template icons are loaded from process.resourcesPath at runtime.
   - from: build

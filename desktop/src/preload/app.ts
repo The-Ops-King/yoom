@@ -6,6 +6,7 @@ import type {
   CursorSample,
   DesktopShortcut,
   HudState,
+  InputSample,
   SurfacePref,
 } from "../shared/ipc";
 import { IPC } from "./app.channels";
@@ -91,6 +92,19 @@ export const bridge = {
     const handler = (_e: unknown, samples: CursorSample[]) => cb(samples);
     ipcRenderer.on(IPC.cursor, handler);
     return () => ipcRenderer.removeListener(IPC.cursor, handler);
+  },
+
+  /**
+   * Batched global clicks and key presses, for the staging editor's Clicks lane
+   * and `keys` overlay. Silent when macOS Input Monitoring is not granted, when
+   * the native hook could not load, and — for clicks specifically — for window
+   * captures, which have no display rectangle to normalize against. A page that
+   * never sees a batch simply has no input track.
+   */
+  onInput(cb: (samples: InputSample[]) => void): () => void {
+    const handler = (_e: unknown, samples: InputSample[]) => cb(samples);
+    ipcRenderer.on(IPC.input, handler);
+    return () => ipcRenderer.removeListener(IPC.input, handler);
   },
 };
 

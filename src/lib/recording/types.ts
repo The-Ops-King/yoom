@@ -166,6 +166,18 @@ export interface KeySample {
   mods: KeyMod[];
 }
 
+/**
+ * What the desktop shell actually puts on the wire: one mixed, time-ordered
+ * batch rather than two arrays, so a click and the key pressed with it keep
+ * their relative order without the page having to merge on `t`. Consumers
+ * split it by `kind` into `ClickSample[]` and `KeySample[]`.
+ *
+ * MUST stay identical to `InputSample` in `desktop/src/shared/ipc.ts`.
+ */
+export type InputSample =
+  | ({ kind: "click" } & ClickSample)
+  | ({ kind: "key" } & KeySample);
+
 export interface DesktopBridge {
   version: 1;
   isDesktop?: boolean;
@@ -206,6 +218,15 @@ export interface DesktopBridge {
    * whole feature is optional-chained through `onDesktopCursor`.
    */
   onCursor?(cb: (samples: CursorSample[]) => void): () => void;
+  /**
+   * Batched global clicks and key presses while a take is recording, ~4 batches
+   * a second. Absent on a shell that predates the input tracks, and silent on
+   * one where macOS Input Monitoring was never granted — which is why the whole
+   * feature is optional-chained through `onDesktopInput`. Clicks additionally
+   * need a display capture (a window capture has no rectangle to normalize
+   * against); keys arrive for every capture kind.
+   */
+  onInput?(cb: (samples: InputSample[]) => void): () => void;
 }
 
 // ---------- compositor ----------

@@ -3,10 +3,11 @@ import {
   getDesktopBridge,
   isDesktop,
   onDesktopCursor,
+  onDesktopInput,
   onDesktopShortcut,
   setDesktopHudState,
 } from "./desktop-bridge";
-import type { CursorSample } from "./types";
+import type { CursorSample, InputSample } from "./types";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -105,6 +106,51 @@ describe("onDesktopCursor", () => {
   it("returns a no-op unsubscribe in the browser", () => {
     vi.stubGlobal("window", {});
     expect(() => onDesktopCursor(() => {})()).not.toThrow();
+  });
+});
+
+describe("onDesktopInput", () => {
+  it("forwards every mixed batch the shell sends and unsubscribes", () => {
+    const seen: (InputSample[] | string)[] = [];
+    let emit: ((samples: InputSample[]) => void) | null = null;
+    vi.stubGlobal("window", {
+      __yoomDesktop: {
+        version: 1,
+        onInput: (cb: (samples: InputSample[]) => void) => {
+          emit = cb;
+          return () => seen.push("unsub");
+        },
+      },
+    });
+
+    const unsub = onDesktopInput((samples) => seen.push(samples));
+    // Clicks and keys share one time-ordered batch: the ⌘⇧K lands between the
+    // two clicks exactly where it was pressed.
+    emit!([
+      { kind: "click", t: 120, x: 0.25, y: 0.75, button: 0 },
+      { kind: "key", t: 340, key: "K", mods: ["shift", "meta"] },
+      { kind: "click", t: 480, x: 1.1, y: -0.1, button: 1 },
+    ]);
+    unsub();
+    expect(seen).toEqual([
+      [
+        { kind: "click", t: 120, x: 0.25, y: 0.75, button: 0 },
+        { kind: "key", t: 340, key: "K", mods: ["shift", "meta"] },
+        { kind: "click", t: 480, x: 1.1, y: -0.1, button: 1 },
+      ],
+      "unsub",
+    ]);
+  });
+
+  it("returns a no-op unsubscribe when the shell has no input support", () => {
+    // The permission-denied and pre-input-track shells both look like this.
+    vi.stubGlobal("window", { __yoomDesktop: { version: 1 } });
+    expect(() => onDesktopInput(() => {})()).not.toThrow();
+  });
+
+  it("returns a no-op unsubscribe in the browser", () => {
+    vi.stubGlobal("window", {});
+    expect(() => onDesktopInput(() => {})()).not.toThrow();
   });
 });
 

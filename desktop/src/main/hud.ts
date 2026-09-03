@@ -7,6 +7,7 @@ import {
   type HudStatus,
 } from "../shared/ipc";
 import { onRecorderStatus, stopCursorTracking } from "./cursor";
+import { stopInputTracking, updateInputTracking } from "./input";
 import { clampToWorkArea, hudDefaultBounds, recorderWindowVisibility } from "./mapping";
 import {
   hideRecorderWindow,
@@ -262,8 +263,11 @@ export function setHudState(next: HudState): void {
   state = next;
 
   // The HUD push is the shell's only view of the recorder's state machine, so
-  // it also drives the cursor sampler (no-ops unless the status moved).
+  // it also drives the cursor sampler and the native input hook (both no-op
+  // unless the status moved). Called back to back so the two clocks start from
+  // the same millisecond.
   onRecorderStatus(next.status);
+  updateInputTracking(next.status);
 
   if (statusChanged) {
     // A status change always un-suppresses the pill (wakeHud below re-arms).
@@ -285,6 +289,9 @@ export function setHudState(next: HudState): void {
 
 export function destroyHud(): void {
   stopCursorTracking();
+  // Must stop with the shell, not with the take: a global keyboard tap left
+  // running after quit would be exactly the thing nobody wants.
+  stopInputTracking();
   clearAutoHide();
   alive()?.destroy();
   hudWindow = null;

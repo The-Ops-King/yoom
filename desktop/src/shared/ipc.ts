@@ -113,6 +113,13 @@ export const IPC = {
    */
   cursor: "yoom:cursor",
 
+  /**
+   * main → app renderer. Payload: InputSample[]. Batched every ~250 ms while
+   * the take is `recording` and the native input hook is running. See
+   * `main/input.ts`. Absent entirely when Input Monitoring is not granted.
+   */
+  input: "yoom:input",
+
   /** main → HUD renderer. Payload: HudState. */
   hudApply: "yoom:hud:apply",
   /** HUD renderer → main. Payload: DesktopShortcut. */
@@ -178,6 +185,47 @@ export interface CursorSample {
   x: number;
   y: number;
 }
+
+/**
+ * One global mouse click, for the staging editor's Clicks lane.
+ *
+ * MUST stay identical to `ClickSample` in `src/lib/recording/types.ts` (and to
+ * the copy in `main/input-track.ts`).
+ */
+export interface ClickSample {
+  /** Milliseconds of RECORDED material since the take started, paused time excluded. */
+  t: number;
+  /** 0..1 across the captured display, clamped to [-0.1, 1.1] — same space as `CursorSample`. */
+  x: number;
+  y: number;
+  /** 0 = left, 1 = right, 2 = middle. */
+  button: number;
+}
+
+/** MUST stay identical to `KeyMod` in `src/lib/recording/types.ts`. */
+export type KeyMod = "meta" | "ctrl" | "alt" | "shift";
+
+/**
+ * One global key press. `key` is a NAME ("K", "Enter", "ArrowLeft"), never the
+ * character the key produced — see the privacy note in `main/input.ts`.
+ *
+ * MUST stay identical to `KeySample` in `src/lib/recording/types.ts`.
+ */
+export interface KeySample {
+  t: number;
+  key: string;
+  mods: KeyMod[];
+}
+
+/**
+ * What travels on `IPC.input`: one mixed, time-ordered batch, so a click and
+ * the key pressed with it keep their relative order.
+ *
+ * MUST stay identical to `InputSample` in `src/lib/recording/types.ts`.
+ */
+export type InputSample =
+  | ({ kind: "click" } & ClickSample)
+  | ({ kind: "key" } & KeySample);
 
 export interface PickerPayload {
   sources: SourceInfo[];

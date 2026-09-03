@@ -1,4 +1,6 @@
-import { dialog, shell, systemPreferences } from "electron";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { app, dialog, shell, systemPreferences } from "electron";
 
 /**
  * macOS privacy panes. `x-apple.systempreferences:` URLs open System Settings
@@ -12,6 +14,11 @@ const PANE = {
   // macOS 14.2+ splits system-audio capture into its own entry.
   audio:
     "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture",
+  // The native input hook (`main/input.ts`). `Privacy_ListenEvent` is the
+  // Input Monitoring pane; libuiohook's CGEventTap needs it, and on older
+  // macOS it is Accessibility (`Privacy_Accessibility`) instead — the dialog
+  // below names both because the pane that matters varies by version.
+  input: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
 } as const;
 
 export type PaneKey = keyof typeof PANE;
@@ -160,5 +167,116 @@ export async function showPermissionsDialog(): Promise<boolean> {
     await requestMediaAccess();
     return true;
   }
+  return false;
+}
+
+// ---------- Input Monitoring (the global input hook) ----------
+
+/**
+ * Where "Not now" is remembered. `app.getPath('userData')` survives rebuilds,
+ * which matters: an unsigned build gets a new TCC identity every time, so the
+ * hook fails on every fresh build and without this the dialog would greet the
+ * user at the top of every take.
+ */
+function inputHookPrefsPath(): string {
+  return join(app.getPath("userData"), "input-hook.json");
+}
+
+/** One week. The permission is genuinely useful, so ask again — but rarely. */
+const ASK_AGAIN_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+
+interface InputHookPrefs {
+  /** Epoch ms of the last "Not now". */
+  declinedAt?: number;
+}
+
+function readInputHookPrefs(): InputHookPrefs {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(inputHookPrefsPath(), "utf8"));
+    if (!raw || typeof raw !== "object") return {};
+    const declinedAt = (raw as InputHookPrefs).declinedAt;
+    return typeof declinedAt === "number" && Number.isFinite(declinedAt)
+      ? { declinedAt }
+      : {};
+  } catch {
+    // Missing (the common case, first run) or corrupt. Either way: never asked.
+    return {};
+  }
+}
+
+function writeInputHookPrefs(prefs: InputHookPrefs): void {
+  try {
+    writeFileSync(inputHookPrefsPath(), JSON.stringify(prefs), "utf8");
+  } catch (err) {
+    // A read-only userData directory must not take a take down. The only cost
+    // is being asked again next time.
+    console.warn("[yoom] could not remember the input-hook choice", err);
+  }
+}
+
+/**
+ * True when macOS considers this process trusted for Accessibility.
+ *
+ * `isTrustedAccessibilityClient(false)` CHECKS without prompting (passing true
+ * raises the system prompt — electron.d.ts @ 44.1.1). It is a proxy, not the
+ * answer: libuiohook's listen-only event tap is gated on Input Monitoring on
+ * modern macOS and on Accessibility on older ones, and the two are separate
+ * TCC entries. So this is only ever used to explain a hook that ALREADY
+ * failed — the authoritative signal is `uIOhook.start()` throwing
+ * `UIOHOOK_ERROR_AXAPI_DISABLED`.
+ */
+export function isTrustedForInput(): boolean {
+  if (process.platform !== "darwin") return true;
+  return systemPreferences.isTrustedAccessibilityClient(false);
+}
+
+/**
+ * Explain the input hook once (at most once a week if declined) and deep-link
+ * the pane. Returns true when the user chose to open System Settings.
+ *
+ * Called only after the hook has actually failed to start, so the user never
+ * sees this unless the feature is really unavailable. Everything degrades to
+ * cursor-only either way — the click and key tracks simply do not exist, and
+ * the staging editor hides the lanes that depend on them.
+ */
+export async function explainInputMonitoring(): Promise<boolean> {
+  if (process.platform !== "darwin") return false;
+
+  const { declinedAt } = readInputHookPrefs();
+  if (declinedAt && Date.now() - declinedAt < ASK_AGAIN_AFTER_MS) return false;
+
+  const { response } = await dialog.showMessageBox({
+    type: "info",
+    title: "Yoom can track clicks and keystrokes",
+    message: "Input Monitoring is not granted yet",
+    detail: [
+      "With it, Yoom marks where you clicked and which keys you pressed while",
+      "recording, so the editor can add click ripples and keystroke badges",
+      "(⌘ ⇧ K) to your video. Both are opt-in per range in the editor.",
+      "",
+      "The track stays on this Mac: it is held in memory for the take, never",
+      "uploaded, and only ever leaves as pixels inside the rendered video.",
+      "Yoom records key NAMES, never the text a key produced — so it cannot",
+      "know, and cannot capture, what you type into a password field.",
+      "",
+      "Grant Yoom under Privacy & Security → Input Monitoring (Accessibility",
+      "on older macOS), then start a new recording.",
+      "",
+      "Without it, recording still works — you just get the mouse-follow zoom",
+      "and no click or key tracks.",
+    ].join("\n"),
+    buttons: ["Open System Settings", "Not now"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+
+  if (response === 0) {
+    openPrivacyPane("input");
+    // Deliberately NOT remembered: they went to grant it, so the next failure
+    // is worth explaining again (they may have granted the wrong pane).
+    return true;
+  }
+
+  writeInputHookPrefs({ declinedAt: Date.now() });
   return false;
 }
