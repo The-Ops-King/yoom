@@ -6,7 +6,6 @@ import type {
   BubbleSize,
   FrameConfig,
   RecorderSettings,
-  RecordingMode,
   SurfacePref,
 } from "./types";
 
@@ -27,11 +26,11 @@ export const DEFAULT_BUBBLE: BubbleConfig = {
 };
 
 export const DEFAULT_FRAME: FrameConfig = {
-  enabled: false,
-  padding: 0.05,
+  enabled: true,
+  padding: 0.02,
   radius: 0.012,
   shadow: true,
-  background: { kind: "color", color: "#1a1a1e" },
+  background: { kind: "image", src: "/backgrounds/mint.svg", presetId: "mint" },
 };
 
 export const DEFAULT_SETTINGS: RecorderSettings = {
@@ -47,7 +46,6 @@ export const DEFAULT_SETTINGS: RecorderSettings = {
   frame: DEFAULT_FRAME,
 };
 
-const MODES: RecordingMode[] = ["screen", "camera", "screen+camera"];
 const SURFACES: SurfacePref[] = ["monitor", "window", "browser"];
 export const SHAPES: BubbleShape[] = ["circle", "rounded", "square", "portrait", "full"];
 const SIZES: BubbleSize[] = ["small", "medium", "large"];
@@ -116,7 +114,9 @@ function sanitize(raw: unknown): RecorderSettings {
   const posRaw = (bubbleRaw.pos ?? {}) as Record<string, unknown>;
 
   return {
-    mode: pick(r.mode, MODES, DEFAULT_SETTINGS.mode),
+    // Every take is screen + camera now — there is no chooser, and the camera
+    // is hidden in post instead. A stored `mode` from an older build is dropped.
+    mode: DEFAULT_SETTINGS.mode,
     surfacePref: pick(r.surfacePref, SURFACES, DEFAULT_SETTINGS.surfacePref),
     micId: str(r.micId, DEFAULT_SETTINGS.micId),
     cameraId: str(r.cameraId, DEFAULT_SETTINGS.cameraId),
