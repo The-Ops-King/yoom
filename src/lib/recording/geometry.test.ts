@@ -48,6 +48,37 @@ describe("coverCrop", () => {
     expect(coverCrop(0, 0, 100, 100)).toEqual({ sx: 0, sy: 0, sw: 0, sh: 0 });
     expect(coverCrop(100, 100, 0, 0)).toEqual({ sx: 0, sy: 0, sw: 100, sh: 100 });
   });
+
+  it("slides the window along the excess axis for a wide source", () => {
+    // 16:9 into 4:3 crops the sides: 1920 - 1440 = 480 px of slack.
+    const at = (x: number) => coverCrop(1920, 1080, 400, 300, { x, y: 0.5 }).sx;
+    expect(at(0)).toBe(0);
+    expect(at(0.5)).toBe(240);
+    expect(at(1)).toBe(480);
+    // The default and an explicit 0.5 are the same centred crop.
+    expect(coverCrop(1920, 1080, 400, 300)).toEqual(coverCrop(1920, 1080, 400, 300, { x: 0.5, y: 0.5 }));
+  });
+
+  it("slides the window along the excess axis for a tall source", () => {
+    // 4:3 into 16:9 crops the top and bottom: 960 - 720 = 240 px of slack.
+    const at = (y: number) => coverCrop(1280, 960, 1600, 900, { x: 0.5, y }).sy;
+    expect(at(0)).toBe(0);
+    expect(at(0.5)).toBe(120);
+    expect(at(1)).toBe(240);
+  });
+
+  it("ignores pan on the axis with no slack", () => {
+    // 4:3 into 16:9 has no horizontal excess, so pan.x cannot move anything.
+    for (const x of [0, 0.5, 1]) {
+      expect(coverCrop(1280, 960, 1600, 900, { x, y: 0.5 })).toEqual({ sx: 0, sy: 120, sw: 1280, sh: 720 });
+    }
+  });
+
+  it("clamps a pan outside 0..1 and falls back to centred for NaN", () => {
+    expect(coverCrop(1920, 1080, 400, 300, { x: -3, y: 0.5 }).sx).toBe(0);
+    expect(coverCrop(1920, 1080, 400, 300, { x: 9, y: 0.5 }).sx).toBe(480);
+    expect(coverCrop(1920, 1080, 400, 300, { x: Number.NaN, y: 0.5 }).sx).toBe(240);
+  });
 });
 
 describe("clampNormalized", () => {

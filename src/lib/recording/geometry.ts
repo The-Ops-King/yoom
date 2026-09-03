@@ -29,25 +29,41 @@ function clampRange(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-/** `object-fit: cover` source rect for drawing srcW×srcH into dstW×dstH. */
+/**
+ * `object-fit: cover` source rect for drawing srcW×srcH into dstW×dstH.
+ *
+ * `pan` (0..1 per axis, default 0.5 = the historical centred crop) slides the
+ * window along whichever axis has excess: 0 pins it to the source's start edge
+ * (left / top), 1 to the far edge. The axis without excess has no slack, so its
+ * pan component is inert — a 4:3 source in a 16:9 box ignores `pan.x` entirely.
+ *
+ * Pan is in SOURCE space and is applied before any mirror transform: with the
+ * camera mirrored, `pan.x = 0` shows the source's left edge, which the viewer
+ * sees on the right. Callers that map a gesture to a pan therefore have to
+ * flip the sign when mirroring (see `camera-layer.tsx`).
+ */
 export function coverCrop(
   srcW: number,
   srcH: number,
   dstW: number,
   dstH: number,
+  pan?: { x: number; y: number },
 ): CropRect {
   if (srcW <= 0 || srcH <= 0) return { sx: 0, sy: 0, sw: 0, sh: 0 };
   if (dstW <= 0 || dstH <= 0) return { sx: 0, sy: 0, sw: srcW, sh: srcH };
 
+  // `clampNormalized` also turns a NaN pan back into a centred crop.
+  const px = pan ? clampNormalized(pan.x) : 0.5;
+  const py = pan ? clampNormalized(pan.y) : 0.5;
   const srcAspect = srcW / srcH;
   const dstAspect = dstW / dstH;
 
   if (srcAspect > dstAspect) {
     const sw = srcH * dstAspect;
-    return { sx: (srcW - sw) / 2, sy: 0, sw, sh: srcH };
+    return { sx: (srcW - sw) * px, sy: 0, sw, sh: srcH };
   }
   const sh = srcW / dstAspect;
-  return { sx: 0, sy: (srcH - sh) / 2, sw: srcW, sh };
+  return { sx: 0, sy: (srcH - sh) * py, sw: srcW, sh };
 }
 
 /**
