@@ -302,3 +302,12 @@ section (most useful for the portrait shape) and by shift-dragging inside the bu
 `image` (uploaded PNG/JPG placed and resized; the blob URL lives only in the session and
 the pixels are burned in at export), `click` (reserved). Legacy `callout` parses as
 `step`. Each overlay keeps its own timeline row.
+
+**Mouse-follow zoom (desktop only).** While a take is live the shell samples
+`screen.getCursorScreenPoint()` at 30 Hz and forwards `{ t, x, y }` normalized to the
+captured display's bounds (only for display captures; window captures produce no track).
+The recorder keeps the track in memory (not in `videos.edits`) and staging receives it as
+`cursor: CursorSample[]`. A zoom may set `follow: true`: its `rect` then gives only the
+window SIZE; the centre follows the cursor path through a low-pass filter (~250 ms time
+constant) and is clamped inside the frame. The Zoom section shows a "Follow mouse" toggle
+when a cursor track exists. Click ripples stay reserved (no global click hook yet).
