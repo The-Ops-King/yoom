@@ -45,8 +45,8 @@ describe("loadSettings", () => {
       JSON.stringify({ mode: "camera", micOn: false, bubble: { shape: "square" } }),
     );
     const s = loadSettings();
-    // `mode` is no longer user-selectable: a stored value is always dropped.
-    expect(s.mode).toBe("screen+camera");
+    // `mode` is user-selectable again (Screen vs Camera only).
+    expect(s.mode).toBe("camera");
     expect(s.micOn).toBe(false);
     expect(s.bubble.shape).toBe("square");
     // untouched nested fields keep their defaults
@@ -72,6 +72,20 @@ describe("loadSettings", () => {
     expect(s.frame.enabled).toBe(true);
     expect(s.frame.padding).toBe(0.2);
     expect(s.frame.radius).toBe(0);
+  });
+
+  it("keeps a stored camera-only mode but never bare screen", () => {
+    storage.map.set(SETTINGS_KEY, JSON.stringify({ mode: "camera" }));
+    expect(loadSettings().mode).toBe("camera");
+    // Bare `screen` is not offered by the picker: a take always carries the
+    // camera track, and the camera is hidden in post instead.
+    storage.map.set(SETTINGS_KEY, JSON.stringify({ mode: "screen" }));
+    expect(loadSettings().mode).toBe("screen+camera");
+  });
+
+  it("round-trips the selected mode through a save", () => {
+    saveSettings({ ...DEFAULT_SETTINGS, mode: "camera" });
+    expect(loadSettings().mode).toBe("camera");
   });
 
   it("survives corrupt JSON", () => {
@@ -157,7 +171,7 @@ describe("saveSettings", () => {
       }),
     );
     const s = loadSettings();
-    expect(s.mode).toBe("screen+camera");
+    expect(s.mode).toBe("camera");
     expect(s.bubble.shape).toBe("square");
     expect("background" in s).toBe(false);
   });

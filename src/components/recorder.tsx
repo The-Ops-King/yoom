@@ -8,6 +8,13 @@ import { AudioControls } from "./recorder/audio-controls";
 import { Countdown } from "./recorder/countdown";
 import { PreviewStage } from "./recorder/preview-stage";
 import { useRecorder } from "@/lib/recording/use-recorder";
+import type { RecordingMode } from "@/lib/recording/types";
+
+/** Bare `screen` is deliberately absent — see the picker below. */
+const MODE_OPTIONS: { id: RecordingMode; label: string }[] = [
+  { id: "screen+camera", label: "Screen" },
+  { id: "camera", label: "Camera only" },
+];
 
 // The editor tree is only worth its bundle once there is a take to stage.
 const Staging = dynamic(() => import("./staging/staging").then((m) => m.Staging), {
@@ -209,9 +216,38 @@ export function Recorder() {
             )}
 
           {/*
-            No mode picker: every take is screen + camera. The devices are
-            pickable before the share picker opens so the take starts right.
+            Two takes only: "Screen" is screen + camera (the camera is hidden
+            in post, never at capture), "Camera only" records the camera alone.
+            Bare screen is not offered.
           */}
+          {(state.status === "idle" || state.status === "error") && (
+            <div
+              role="radiogroup"
+              aria-label="What to record"
+              className="flex gap-1 rounded-lg border border-border bg-surface p-1"
+            >
+              {MODE_OPTIONS.map((option) => {
+                const on = state.mode === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    onClick={() => actions.setMode(option.id)}
+                    className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      on
+                        ? "bg-surface-raised text-foreground"
+                        : "text-muted hover:text-foreground"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {(state.status === "idle" || state.status === "error") && (
             <DeviceSelector
               kind="audioinput"
@@ -263,7 +299,7 @@ export function Recorder() {
                 onClick={actions.acquire}
                 className="rounded-lg bg-accent px-8 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition-all hover:bg-accent-hover hover:shadow-accent/30"
               >
-                Choose what to share
+                {state.mode === "camera" ? "Set up camera" : "Choose what to share"}
               </button>
             )}
 

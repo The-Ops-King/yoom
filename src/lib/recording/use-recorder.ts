@@ -29,6 +29,7 @@ import type {
   CursorSample,
   FrameConfig,
   HudStatus,
+  RecordingMode,
   SurfacePref,
 } from "./types";
 
@@ -98,6 +99,8 @@ export interface UseRecorderResult {
   } | null;
   getLevel: (id: "mic" | "system") => number;
   actions: {
+    /** Screen (screen + camera) or camera only. Idle/setup only. */
+    setMode(mode: RecordingMode): void;
     setSurfacePref(pref: SurfacePref): void;
     setDevice(kind: "mic" | "camera", deviceId: string): void;
     acquire(): void;
@@ -196,10 +199,9 @@ export function useRecorder(): UseRecorderResult {
 
   useEffect(() => {
     const settings = loadSettings();
-    // Mode is not user-selectable: every take is screen + camera, and the
-    // camera is hidden in post instead. `loadSettings` already forces it; this
-    // keeps the machine in step even if the reducer default ever drifts.
-    dispatch({ type: "SELECT_MODE", mode: "screen+camera" });
+    // `loadSettings` only ever returns a mode the picker offers, so this is
+    // safe to feed straight into the machine.
+    dispatch({ type: "SELECT_MODE", mode: settings.mode });
     dispatch({ type: "SET_SURFACE_PREF", pref: settings.surfacePref });
     dispatch({ type: "SET_DEVICE", kind: "mic", deviceId: settings.micId });
     dispatch({ type: "SET_DEVICE", kind: "camera", deviceId: settings.cameraId });
@@ -970,6 +972,7 @@ export function useRecorder(): UseRecorderResult {
 
   const actions = useMemo(
     () => ({
+      setMode: (mode: RecordingMode) => dispatch({ type: "SELECT_MODE", mode }),
       setSurfacePref: (pref: SurfacePref) =>
         reacquireWith(() => dispatch({ type: "SET_SURFACE_PREF", pref })),
       setDevice: (kind: "mic" | "camera", deviceId: string) =>

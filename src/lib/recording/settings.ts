@@ -6,6 +6,7 @@ import type {
   BubbleSize,
   FrameConfig,
   RecorderSettings,
+  RecordingMode,
   SurfacePref,
 } from "./types";
 
@@ -45,6 +46,13 @@ export const DEFAULT_SETTINGS: RecorderSettings = {
   bubble: DEFAULT_BUBBLE,
   frame: DEFAULT_FRAME,
 };
+
+/**
+ * The two modes the picker offers. Bare `screen` is deliberately absent: a
+ * screen take always carries the camera track, and the camera is hidden in
+ * post instead, so a stored `"screen"` falls back to the default.
+ */
+const MODES: RecordingMode[] = ["screen+camera", "camera"];
 
 const SURFACES: SurfacePref[] = ["monitor", "window", "browser"];
 export const SHAPES: BubbleShape[] = ["circle", "rounded", "square", "portrait", "full"];
@@ -114,9 +122,9 @@ function sanitize(raw: unknown): RecorderSettings {
   const posRaw = (bubbleRaw.pos ?? {}) as Record<string, unknown>;
 
   return {
-    // Every take is screen + camera now — there is no chooser, and the camera
-    // is hidden in post instead. A stored `mode` from an older build is dropped.
-    mode: DEFAULT_SETTINGS.mode,
+    // Screen (which always carries the camera) or camera only. A stored
+    // `"screen"` from an older build is not offered any more and falls back.
+    mode: pick(r.mode, MODES, DEFAULT_SETTINGS.mode),
     surfacePref: pick(r.surfacePref, SURFACES, DEFAULT_SETTINGS.surfacePref),
     micId: str(r.micId, DEFAULT_SETTINGS.micId),
     cameraId: str(r.cameraId, DEFAULT_SETTINGS.cameraId),
