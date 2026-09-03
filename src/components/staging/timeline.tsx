@@ -377,7 +377,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
       </div>
 
       <div className="flex items-center justify-between text-[11px] text-muted-dim">
-        <span>space play · , . frame · I/O in-out · C cut · ⌘Z undo</span>
+        <span>space play · ←/→ frame (⇧ 1s) · home/end · I/O in-out · C cut · ⌘Z undo</span>
         <span className="tabular-nums text-muted">
           {formatElapsed(player.editedTime * 1000)} / {formatElapsed(player.editedDuration * 1000)}
         </span>

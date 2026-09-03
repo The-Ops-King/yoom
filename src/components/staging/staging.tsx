@@ -22,6 +22,9 @@ export type { StagingProps } from "./types";
  * entry is keyed by duration and cleared on finish/discard.
  */
 const STORAGE_KEY = "yoom.staging.v1";
+
+/** `player.step` counts frames at the export rate; one second is 30 of them. */
+const SECOND_IN_FRAMES = 30;
 /** How long editing must pause before the draft is written back. */
 const PERSIST_DEBOUNCE_MS = 300;
 /** Mirrors the (unexported) `CAP` in `@/lib/editor/undo`; keep the two in step. */
@@ -196,6 +199,22 @@ export function Staging(props: StagingProps) {
       }
       if (e.key === ",") p.step(-1);
       if (e.key === ".") p.step(1);
+      // Arrows mirror `,`/`.` — one frame, or a second with Shift. `step`
+      // counts frames at the export rate, so a second is 30 of them.
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        const dir = e.key === "ArrowLeft" ? -1 : 1;
+        p.step(dir * (e.shiftKey ? SECOND_IN_FRAMES : 1));
+        return;
+      }
+      // Home/End land on the EDITED timeline, so a cut at either end does not
+      // strand the playhead on material the viewer never sees.
+      if (e.key === "Home" || e.key === "End") {
+        e.preventDefault();
+        p.pause();
+        p.seekEdited(e.key === "Home" ? 0 : p.editedDuration);
+        return;
+      }
       if (e.key.toLowerCase() === "i") setInPoint(now);
       if (e.key.toLowerCase() === "o") setOutPoint(now);
       if (e.key.toLowerCase() === "c" && inPoint !== null && outPoint !== null) {
