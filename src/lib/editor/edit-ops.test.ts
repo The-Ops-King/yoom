@@ -240,6 +240,13 @@ describe("edit-ops: clicks, cursor and motion blur", () => {
     expect(ops.setCursor(e, { style: "none", size: 0.2 })).toBe(e);
   });
 
+  it("setCursor falls back to the default size for a non-finite one", () => {
+    // A half-typed number field hands over NaN, and Math.min/max would pass it
+    // straight through into the stored config.
+    expect(ops.setCursor(start(), { style: "smooth", size: NaN }).cursor).toEqual({ style: "smooth", size: 1 });
+    expect(ops.setCursor(start(), { style: "real", size: Infinity }).cursor?.size).toBe(1);
+  });
+
   it("setMotionBlur toggles the flag and no-ops when unchanged", () => {
     const e = ops.setMotionBlur(start(), false);
     expect(e.motionBlur).toBe(false);

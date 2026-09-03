@@ -296,7 +296,12 @@ export function setCursor(e: VideoEdits, cursor: CursorConfig): VideoEdits {
   const styles: CursorStyle[] = ["none", "real", "smooth"];
   const next: CursorConfig = {
     style: styles.includes(cursor.style) ? cursor.style : DEFAULT_CURSOR.style,
-    size: Math.min(MAX_CURSOR_SIZE, Math.max(MIN_CURSOR_SIZE, cursor.size)),
+    // A half-typed number field hands over `NaN`, and `Math.min`/`Math.max`
+    // propagate it straight into the edits, where it would poison every
+    // cursor draw from then on. A non-finite size is no size at all.
+    size: Number.isFinite(cursor.size)
+      ? Math.min(MAX_CURSOR_SIZE, Math.max(MIN_CURSOR_SIZE, cursor.size))
+      : DEFAULT_CURSOR.size,
   };
   if (e.cursor && e.cursor.style === next.style && e.cursor.size === next.size) return e;
   return { ...e, cursor: next };

@@ -6,6 +6,7 @@ import {
   isEmptyEdits,
   MAX_CLICKS,
   MAX_DRAW_POINTS,
+  MAX_MARKERS,
   MAX_OVERLAY_DATA_SRC,
   MAX_OVERLAY_SRC,
   MAX_OVERLAY_THICKNESS,
@@ -550,6 +551,29 @@ describe("parseEdits clicks", () => {
 
     const many = Array.from({ length: MAX_CLICKS + 40 }, (_, i) => ({ t: i, x: 0.5, y: 0.5, on: true }));
     expect(parseEdits({ ...base, clicks: many }).clicks).toHaveLength(MAX_CLICKS);
+  });
+
+  it("sorts before capping, so an unordered list is thinned rather than truncated", () => {
+    // Newest first: capping before the sort would keep the END of the take and
+    // throw the beginning away, which is the opposite of what the cap means.
+    const many = Array.from({ length: MAX_CLICKS + 40 }, (_, i) => ({
+      t: MAX_CLICKS + 40 - i,
+      x: 0.5,
+      y: 0.5,
+      on: true,
+    }));
+    const clicks = parseEdits({ ...base, clicks: many }).clicks!;
+    expect(clicks).toHaveLength(MAX_CLICKS);
+    expect(clicks[0].t).toBe(1);
+    expect(clicks[MAX_CLICKS - 1].t).toBe(MAX_CLICKS);
+  });
+
+  it("sorts markers before capping them too", () => {
+    const many = Array.from({ length: MAX_MARKERS + 20 }, (_, i) => ({ t: MAX_MARKERS + 20 - i }));
+    const markers = parseEdits({ ...base, markers: many }).markers;
+    expect(markers).toHaveLength(MAX_MARKERS);
+    expect(markers[0].t).toBe(1);
+    expect(markers[MAX_MARKERS - 1].t).toBe(MAX_MARKERS);
   });
 });
 

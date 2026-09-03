@@ -540,13 +540,17 @@ export function parseEdits(input: unknown): VideoEdits {
     overlays.push(overlay);
   }
 
+  // Sorted BEFORE the cap, not after: capping first keeps whichever marks
+  // happened to come first in the blob and silently drops everything past
+  // them, so an unsorted (or reversed) list would lose the end of the take
+  // rather than thinning it. Sorting first makes the cap "the first N by time".
   const markers: Marker[] = [];
   for (const raw of asArray(input.markers)) {
-    if (markers.length >= MAX_MARKERS) break;
     const marker = parseMarker(raw);
     if (marker) markers.push(marker);
   }
   markers.sort((a, b) => a.t - b.t);
+  markers.length = Math.min(markers.length, MAX_MARKERS);
 
   const out: VideoEdits = { version: 1, cuts, crop: parseRect(input.crop), zooms, overlays, markers };
   const trim = parseSpan(input.trim);
@@ -560,11 +564,12 @@ export function parseEdits(input: unknown): VideoEdits {
   if (Array.isArray(input.clicks)) {
     const clicks: ClickMark[] = [];
     for (const raw of input.clicks) {
-      if (clicks.length >= MAX_CLICKS) break;
       const click = parseClick(raw);
       if (click) clicks.push(click);
     }
+    // Same rule as `markers` above: sort, then cap.
     clicks.sort((a, b) => a.t - b.t);
+    clicks.length = Math.min(clicks.length, MAX_CLICKS);
     if (clicks.length > 0) out.clicks = clicks;
   }
   const cursor = parseCursor(input.cursor);
