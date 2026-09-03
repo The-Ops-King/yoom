@@ -16,27 +16,54 @@ export type Rect = { x: number; y: number; w: number; h: number };
 export type Cut = { start: number; end: number };
 
 /**
- * `follow` (desktop takes with a cursor track only): `rect` gives the window
- * SIZE and its position is ignored — the centre rides the smoothed cursor path
- * instead, clamped inside the frame. See `lib/editor/cursor-path`.
+ * How a zoom picks the region it shows. `follow` (desktop takes with a cursor
+ * track only): `rect` gives the window SIZE and its position is ignored — the
+ * centre rides the smoothed cursor path instead, clamped inside the frame. See
+ * `lib/editor/cursor-path`. Absent means `static`.
  */
-export type Zoom = { start: number; end: number; rect: Rect; ramp?: number; follow?: boolean };
+export type ZoomKind = "static" | "follow";
+
+export type Zoom = {
+  start: number;
+  end: number;
+  rect: Rect;
+  ramp?: number;
+  kind?: ZoomKind;
+  /**
+   * @deprecated The pre-addendum spelling of `kind: "follow"`. `parseEdits`
+   * migrates it and never emits it again; the field survives on the type for
+   * one release so stored rows and older callers still type-check. Read
+   * `kind === "follow"`, never this.
+   */
+  follow?: boolean;
+};
 
 export type OverlayType =
   | "blur"
+  | "blackout"
   | "ellipse"
+  | "rect"
+  | "line"
+  | "arrow"
   | "step"
   | "underline"
   | "highlight"
-  | "arrow"
+  | "text"
+  | "emoji"
+  | "draw"
   | "image"
+  | "keys"
   | "click";
+
+/** How an `arrow` is drawn. `curved` bends through the overlay's `ctrl` point. */
+export type ArrowStyle = "standard" | "double" | "curved" | "fancy";
 
 /** A normalised point on the source frame (0..1 in each axis). */
 export type Point = { x: number; y: number };
 
 /**
- * ARROW REPRESENTATION (one representation, chosen once, relied on everywhere):
+ * ARROW REPRESENTATION (one representation, chosen once, relied on everywhere;
+ * `line` shares it):
  * `from` and `to` are the arrow's endpoints in normalised **source** coordinates
  * — the same space as `rect` — and they are the single source of truth. `rect`
  * is their axis-aligned BOUNDING BOX, derived and kept in step by `parseEdits`
@@ -53,10 +80,33 @@ export type Overlay = {
   n?: number;
   /** CSS colour for everything but blur and image. */
   color?: string;
-  /** Arrow tail; see the arrow note above. Arrows only. */
+  /** Arrow tail; see the arrow note above. Arrows and lines only. */
   from?: Point;
-  /** Arrow head; see the arrow note above. Arrows only. */
+  /** Arrow head; see the arrow note above. Arrows and lines only. */
   to?: Point;
+  /**
+   * The control point a `curved` arrow bends through, in the same normalised
+   * source space as `from`/`to`. Arrows and lines only; absent means the
+   * renderer's default (the midpoint pushed 15 % along the perpendicular).
+   */
+  ctrl?: Point;
+  /** Draw the shape filled rather than stroked (`rect`, `ellipse`). */
+  fill?: boolean;
+  /** Arrow head/shaft style; absent means `standard`. Arrows only. */
+  style?: ArrowStyle;
+  /** The string a `text` overlay shows, or the emoji an `emoji` overlay is. Capped at `MAX_TEXT`. */
+  text?: string;
+  /** Text size, normalised to the frame HEIGHT (`MIN_TEXT_SIZE`..`MAX_TEXT_SIZE`). */
+  size?: number;
+  /** CSS colour painted behind a `text` overlay; absent means no plate. */
+  bg?: string;
+  /**
+   * A freehand stroke's path in normalised source coordinates, capped at
+   * `MAX_DRAW_POINTS`. `draw` only, and — exactly like an arrow's endpoints —
+   * the truth: `rect` is their bounding box, re-derived by `parseEdits` and by
+   * `edit-ops.addOverlay` / `updateOverlay`.
+   */
+  points?: Point[];
   /**
    * Image source: an object URL minted during staging, or a data URL. Kept
    * verbatim, `blob:` included — the client export needs it, and a `blob:`
@@ -96,6 +146,24 @@ export type CameraTrack = {
   keyframes: CameraKeyframe[];
 };
 
+/**
+ * One captured mouse click on the "Clicks" lane. `t` is source seconds, `x`/`y`
+ * are normalised to the source frame, and `on` is the user's own toggle — an
+ * `on` click draws the ripple over `t..t + 0.5 s`, an off one draws nothing but
+ * stays on the lane so it can be switched back.
+ */
+export type ClickMark = { t: number; x: number; y: number; on: boolean };
+
+/**
+ * How the cursor is drawn. `none` hides it, `real` keeps the captured one, and
+ * `smooth` hides the capture and draws a synthetic arrow along the low-pass
+ * cursor path. `size` scales that arrow (`MIN_CURSOR_SIZE`..`MAX_CURSOR_SIZE`,
+ * 1 = life-size). Click ripples are expressed per-mark by `clicks[].on`, so
+ * there is deliberately no ripple field here.
+ */
+export type CursorStyle = "none" | "real" | "smooth";
+export type CursorConfig = { style: CursorStyle; size: number };
+
 export type VideoEdits = {
   version: 1;
   cuts: Cut[];
@@ -107,6 +175,12 @@ export type VideoEdits = {
   frame?: FrameConfig;
   camera?: CameraTrack | null;
   cameraOffsetMs?: number;
+  /** The clicks lane; absent on a take with no click track. Sorted by `t`, capped at `MAX_CLICKS`. */
+  clicks?: ClickMark[];
+  /** Cursor rendering; absent means the renderer's default (`real` at size 1). */
+  cursor?: CursorConfig;
+  /** Directional blur while the zoom view is moving fast; absent means on. */
+  motionBlur?: boolean;
 };
 
 function deepFreezeEmptyEdits(edits: VideoEdits): VideoEdits {
@@ -144,6 +218,22 @@ export const MAX_CUTS = 64;
 export const MAX_KEYFRAMES = 64;
 export const MAX_ZOOMS = 32;
 export const MAX_MARKERS = 200;
+/** Clicks kept on the lane; a long take generates far more than anyone edits. */
+export const MAX_CLICKS = 500;
+/** Points in one freehand stroke; enough for a long scribble, small enough to store. */
+export const MAX_DRAW_POINTS = 2000;
+/** Characters in a `text`/`emoji` overlay. */
+export const MAX_TEXT = 500;
+/** Text size bounds, normalised to the frame height. */
+export const MIN_TEXT_SIZE = 0.01;
+export const MAX_TEXT_SIZE = 0.3;
+/** The text size a `text`/`emoji` overlay is drawn at when it carries none. */
+export const DEFAULT_TEXT_SIZE = 0.05;
+/** Synthetic-cursor scale bounds; 1 is life-size. */
+export const MIN_CURSOR_SIZE = 0.5;
+export const MAX_CURSOR_SIZE = 2;
+/** The cursor config a take gets when it carries none. */
+export const DEFAULT_CURSOR: CursorConfig = Object.freeze({ style: "real", size: 1 });
 /** Seconds the zoom's ease-in/ease-out ramp may span. */
 const MAX_RAMP_S = 2;
 /** Milliseconds the camera track may be shifted from the screen track, either direction. */
@@ -168,14 +258,25 @@ export const MAX_OVERLAY_THICKNESS = 0.1;
 export const DEFAULT_OVERLAY_THICKNESS = 0.006;
 const OVERLAY_TYPES: OverlayType[] = [
   "blur",
+  "blackout",
   "ellipse",
+  "rect",
+  "line",
+  "arrow",
   "step",
   "underline",
   "highlight",
-  "arrow",
+  "text",
+  "emoji",
+  "draw",
   "image",
+  "keys",
   "click",
 ];
+const ARROW_STYLES: ArrowStyle[] = ["standard", "double", "curved", "fancy"];
+const CURSOR_STYLES: CursorStyle[] = ["none", "real", "smooth"];
+/** The overlay types whose geometry is `from`/`to` with `rect` as the derived bounding box. */
+const POINT_PAIR_TYPES: OverlayType[] = ["arrow", "line"];
 /** Pre-addendum names that still have to parse. `callout` is today's `step`. */
 const LEGACY_OVERLAY_TYPES: Record<string, OverlayType> = { callout: "step" };
 
@@ -226,6 +327,23 @@ export function arrowRect(from: Point, to: Point): Rect {
     w: Math.abs(to.x - from.x),
     h: Math.abs(to.y - from.y),
   });
+}
+
+/**
+ * The bounding box of a freehand stroke, clamped into the frame — the `draw`
+ * counterpart to `arrowRect`, and never zero-area for the same reason. Null for
+ * an empty path, which means "keep whatever rect you already had".
+ */
+export function pointsRect(points: readonly Point[]): Rect | null {
+  if (points.length === 0) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return clampRect({ x: minX, y: minY, w: maxX - minX, h: maxY - minY });
 }
 
 /** A normalised point, clamped into 0..1, or null when either axis is missing. */
@@ -289,6 +407,26 @@ function parseSpan(value: unknown): { start: number; end: number } | null {
   return { start, end };
 }
 
+function parseClick(value: unknown): ClickMark | null {
+  if (!isRecord(value)) return null;
+  const t = num(value.t);
+  const x = num(value.x);
+  const y = num(value.y);
+  if (t === null || t < 0 || x === null || y === null) return null;
+  // An absent `on` reads as on: the lane is seeded from the click track with
+  // every mark live, and only a deliberate toggle writes `false`.
+  return { t, x: clamp(x, 0, 1), y: clamp(y, 0, 1), on: value.on !== false };
+}
+
+function parseCursor(value: unknown): CursorConfig | undefined {
+  if (!isRecord(value)) return undefined;
+  const size = num(value.size);
+  return {
+    style: pick(value.style, CURSOR_STYLES, DEFAULT_CURSOR.style),
+    size: size === null ? DEFAULT_CURSOR.size : clamp(size, MIN_CURSOR_SIZE, MAX_CURSOR_SIZE),
+  };
+}
+
 function parseMarker(value: unknown): Marker | null {
   if (!isRecord(value)) return null;
   const t = num(value.t);
@@ -327,9 +465,13 @@ export function parseEdits(input: unknown): VideoEdits {
     const zoom: Zoom = { ...span, rect: clampRect(rect) };
     const ramp = isRecord(raw) ? num(raw.ramp) : null;
     if (ramp !== null) zoom.ramp = clamp(ramp, 0, MAX_RAMP_S);
-    // Only `true` is worth storing: a stored take without a cursor track falls
-    // back to the rect anyway, so `follow: false` and absent mean the same.
-    if (isRecord(raw) && raw.follow === true) zoom.follow = true;
+    // `follow: true` is the pre-addendum spelling; it migrates to `kind` here
+    // and is never written back out. `follow: false` and an absent flag both
+    // mean static, which is also what an absent `kind` means.
+    if (isRecord(raw)) {
+      if (raw.kind === "follow" || raw.follow === true) zoom.kind = "follow";
+      else if (raw.kind === "static") zoom.kind = "static";
+    }
     zooms.push(zoom);
   }
 
@@ -350,16 +492,43 @@ export function parseEdits(input: unknown): VideoEdits {
     // a 3.7 would all render as themselves.
     if (n !== null) overlay.n = Math.max(1, Math.round(n));
     if (typeof raw.color === "string") overlay.color = raw.color;
-    if (type === "arrow") {
-      // The endpoints are the arrow; an old or hand-written entry with only a
-      // rect becomes that rect's diagonal, and the rect is then re-derived so
-      // the two can never disagree.
+    if (POINT_PAIR_TYPES.includes(type)) {
+      // The endpoints are the arrow (or line); an old or hand-written entry
+      // with only a rect becomes that rect's diagonal, and the rect is then
+      // re-derived so the two can never disagree.
       const from = parsePoint(raw.from) ?? { x: overlay.rect.x, y: overlay.rect.y };
       const to = parsePoint(raw.to) ?? { x: overlay.rect.x + overlay.rect.w, y: overlay.rect.y + overlay.rect.h };
       overlay.from = from;
       overlay.to = to;
       overlay.rect = arrowRect(from, to);
+      const ctrl = parsePoint(raw.ctrl);
+      if (ctrl) overlay.ctrl = ctrl;
     }
+    if (type === "draw") {
+      const points: Point[] = [];
+      for (const rawPoint of asArray(raw.points)) {
+        if (points.length >= MAX_DRAW_POINTS) break;
+        const point = parsePoint(rawPoint);
+        if (point) points.push(point);
+      }
+      // Same invariant as an arrow's endpoints: the path is the truth and the
+      // rect is its bounding box. A stroke with no usable points keeps the
+      // stored rect rather than collapsing to a dot.
+      const bounds = pointsRect(points);
+      if (bounds) {
+        overlay.points = points;
+        overlay.rect = bounds;
+      }
+    }
+    if (typeof raw.fill === "boolean") overlay.fill = raw.fill;
+    if (typeof raw.style === "string" && (ARROW_STYLES as string[]).includes(raw.style)) {
+      overlay.style = raw.style as ArrowStyle;
+    }
+    // Truncated, not dropped: a caption that ran long is still worth keeping.
+    if (typeof raw.text === "string") overlay.text = raw.text.slice(0, MAX_TEXT);
+    if (typeof raw.bg === "string") overlay.bg = raw.bg;
+    const size = num(raw.size);
+    if (size !== null) overlay.size = clamp(size, MIN_TEXT_SIZE, MAX_TEXT_SIZE);
     if (typeof raw.src === "string") {
       const cap = raw.src.startsWith("data:") ? MAX_OVERLAY_DATA_SRC : MAX_OVERLAY_SRC;
       if (raw.src.length <= cap) overlay.src = raw.src;
@@ -387,6 +556,20 @@ export function parseEdits(input: unknown): VideoEdits {
   if (camera !== undefined) out.camera = camera;
   const offset = num(input.cameraOffsetMs);
   if (offset !== null) out.cameraOffsetMs = clamp(offset, -MAX_CAMERA_OFFSET_MS, MAX_CAMERA_OFFSET_MS);
+
+  if (Array.isArray(input.clicks)) {
+    const clicks: ClickMark[] = [];
+    for (const raw of input.clicks) {
+      if (clicks.length >= MAX_CLICKS) break;
+      const click = parseClick(raw);
+      if (click) clicks.push(click);
+    }
+    clicks.sort((a, b) => a.t - b.t);
+    if (clicks.length > 0) out.clicks = clicks;
+  }
+  const cursor = parseCursor(input.cursor);
+  if (cursor) out.cursor = cursor;
+  if (typeof input.motionBlur === "boolean") out.motionBlur = input.motionBlur;
   return out;
 }
 

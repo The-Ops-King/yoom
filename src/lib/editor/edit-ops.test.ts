@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrowRect, EMPTY_EDITS, MAX_CUTS, parseEdits } from "@/lib/edits";
+import { arrowRect, EMPTY_EDITS, MAX_CLICKS, MAX_CUTS, parseEdits, pointsRect } from "@/lib/edits";
 import { cameraAt, defaultCameraTrack } from "./camera-track";
 import * as ops from "./edit-ops";
 
@@ -162,12 +162,128 @@ describe("edit-ops", () => {
     expect(e.cuts.some((c) => c.start === newCut.start && c.end === newCut.end)).toBe(true);
     expect(e.cuts.some((c) => c.start === 0)).toBe(false);
   });
-  it("updateZoom preserves ramp and follow when the patch doesn't override them", () => {
-    let e = ops.addZoom(start(), { start: 1, end: 4, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, ramp: 0.7, follow: true });
+  it("updateZoom preserves ramp and kind when the patch doesn't override them", () => {
+    let e = ops.addZoom(start(), { start: 1, end: 4, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, ramp: 0.7, kind: "follow" });
     e = ops.updateZoom(e, 0, { end: 5 });
     expect(e.zooms[0].ramp).toBe(0.7);
-    expect(e.zooms[0].follow).toBe(true);
+    expect(e.zooms[0].kind).toBe("follow");
     // …and drops it when the patch does.
-    expect(ops.updateZoom(e, 0, { follow: false }).zooms[0].follow).toBe(false);
+    expect(ops.updateZoom(e, 0, { kind: "static" }).zooms[0].kind).toBe("static");
+  });
+});
+
+describe("edit-ops: zoom kind", () => {
+  const zoom = { start: 1, end: 4, rect: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 }, ramp: 0.7 };
+
+  it("sets the kind while preserving every other field", () => {
+    const e = ops.setZoomKind(ops.addZoom(start(), zoom), 0, "follow");
+    expect(e.zooms[0]).toEqual({ ...zoom, kind: "follow" });
+    expect(ops.setZoomKind(e, 0, "static").zooms[0]).toEqual({ ...zoom, kind: "static" });
+  });
+
+  it("migrates a legacy `follow` zoom rather than leaving both fields", () => {
+    const legacy = ops.addZoom(start(), { ...zoom, follow: true });
+    const e = ops.setZoomKind(legacy, 0, "static");
+    expect(e.zooms[0].kind).toBe("static");
+    expect(e.zooms[0].follow).toBeUndefined();
+  });
+
+  it("is a reference no-op for an out-of-range index or an unchanged kind", () => {
+    const e = ops.setZoomKind(ops.addZoom(start(), zoom), 0, "follow");
+    expect(ops.setZoomKind(e, 0, "follow")).toBe(e);
+    expect(ops.setZoomKind(e, 5, "static")).toBe(e);
+    expect(ops.setZoomKind(e, -1, "static")).toBe(e);
+  });
+});
+
+describe("edit-ops: clicks, cursor and motion blur", () => {
+  const marks = [
+    { t: 3, x: 1.5, y: 0.5, on: true },
+    { t: 1, x: 0.2, y: 0.2, on: true },
+  ];
+
+  it("setClicks sorts by t, clamps x/y and caps the list", () => {
+    const e = ops.setClicks(start(), marks);
+    expect(e.clicks).toEqual([
+      { t: 1, x: 0.2, y: 0.2, on: true },
+      { t: 3, x: 1, y: 0.5, on: true },
+    ]);
+    const many = Array.from({ length: MAX_CLICKS + 10 }, (_, i) => ({ t: i, x: 0.5, y: 0.5, on: true }));
+    expect(ops.setClicks(start(), many).clicks).toHaveLength(MAX_CLICKS);
+    // Writing the same list back changes nothing.
+    expect(ops.setClicks(e, marks)).toBe(e);
+  });
+
+  it("toggleClick flips one mark and no-ops out of range", () => {
+    const e = ops.setClicks(start(), marks);
+    const t = ops.toggleClick(e, 0);
+    expect(t.clicks?.map((c) => c.on)).toEqual([false, true]);
+    expect(ops.toggleClick(t, 0).clicks?.map((c) => c.on)).toEqual([true, true]);
+    expect(ops.toggleClick(e, 9)).toBe(e);
+    const empty = start();
+    expect(ops.toggleClick(empty, 0)).toBe(empty);
+  });
+
+  it("setAllClicks turns the whole lane on or off, and no-ops when it already is", () => {
+    const e = ops.setClicks(start(), marks);
+    const off = ops.setAllClicks(e, false);
+    expect(off.clicks?.every((c) => !c.on)).toBe(true);
+    expect(ops.setAllClicks(off, false)).toBe(off);
+    expect(ops.setAllClicks(e, true)).toBe(e);
+  });
+
+  it("setCursor validates the style and clamps the size", () => {
+    let e = ops.setCursor(start(), { style: "smooth", size: 9 });
+    expect(e.cursor).toEqual({ style: "smooth", size: 2 });
+    e = ops.setCursor(e, { style: "none", size: 0 });
+    expect(e.cursor).toEqual({ style: "none", size: 0.5 });
+    expect(ops.setCursor(e, { style: "none", size: 0.2 })).toBe(e);
+  });
+
+  it("setMotionBlur toggles the flag and no-ops when unchanged", () => {
+    const e = ops.setMotionBlur(start(), false);
+    expect(e.motionBlur).toBe(false);
+    expect(ops.setMotionBlur(e, false)).toBe(e);
+    expect(ops.setMotionBlur(e, true).motionBlur).toBe(true);
+  });
+});
+
+describe("edit-ops: draw and line overlays", () => {
+  const rect = { x: 0, y: 0, w: 0.5, h: 0.5 };
+
+  it("updateOverlay re-derives a draw overlay's rect from its points", () => {
+    let e = ops.addOverlay(start(), { type: "draw", start: 0, end: 2, rect });
+    e = ops.updateOverlay(e, 0, { points: [{ x: 0.2, y: 0.8 }, { x: 0.6, y: 0.1 }, { x: 2, y: -1 }] });
+    expect(e.overlays[0].points).toEqual([{ x: 0.2, y: 0.8 }, { x: 0.6, y: 0.1 }, { x: 1, y: 0 }]);
+    expect(e.overlays[0].rect).toEqual(pointsRect(e.overlays[0].points!));
+  });
+
+  it("addOverlay derives a draw overlay's rect from its points too", () => {
+    const e = ops.addOverlay(start(), {
+      type: "draw",
+      start: 0,
+      end: 2,
+      rect,
+      points: [{ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.7 }],
+    });
+    expect(e.overlays[0].rect).toEqual(arrowRect({ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.7 }));
+  });
+
+  it("clamps a curved arrow's ctrl point", () => {
+    let e = ops.addOverlay(start(), { type: "arrow", start: 0, end: 2, rect, style: "curved" });
+    e = ops.updateOverlay(e, 0, { ctrl: { x: 3, y: -2 } });
+    expect(e.overlays[0].ctrl).toEqual({ x: 1, y: 0 });
+  });
+
+  it("keeps a line's rect as its endpoints' bounding box", () => {
+    const e = ops.addOverlay(start(), {
+      type: "line",
+      start: 0,
+      end: 2,
+      rect,
+      from: { x: 0.2, y: 0.7 },
+      to: { x: 0.9, y: 0.3 },
+    });
+    expect(e.overlays[0].rect).toEqual(arrowRect({ x: 0.2, y: 0.7 }, { x: 0.9, y: 0.3 }));
   });
 });

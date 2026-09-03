@@ -98,7 +98,7 @@ describe("zoomAt chaining", () => {
 
 describe("follow zooms", () => {
   /** A follow zoom: a 0.4 × 0.4 window whose stored position is ignored. */
-  const f: Zoom = { start: 0, end: 10, rect: { x: 0, y: 0, w: 0.4, h: 0.4 }, ramp: 0, follow: true };
+  const f: Zoom = { start: 0, end: 10, rect: { x: 0, y: 0, w: 0.4, h: 0.4 }, ramp: 0, kind: "follow" };
   /** The cursor at the middle of the frame, then hard against the top-left. */
   const at = (t: number) => (t < 5 ? { x: 0.5, y: 0.5 } : { x: 0, y: 0 });
 
@@ -132,14 +132,14 @@ describe("follow zooms", () => {
 
   it("chains between two zooms using their effective rects", () => {
     const a: Zoom = { start: 0, end: 3, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, ramp: 0.4 };
-    const b: Zoom = { start: 3, end: 6, rect: { x: 0, y: 0, w: 0.4, h: 0.4 }, ramp: 0.4, follow: true };
+    const b: Zoom = { start: 3, end: 6, rect: { x: 0, y: 0, w: 0.4, h: 0.4 }, ramp: 0.4, kind: "follow" };
     // b follows to (0.3, 0.3); the shared frame is the midpoint of the two.
     const mid = zoomAt([a, b], 3, () => ({ x: 0.5, y: 0.5 }));
     expect(mid.x).toBeCloseTo(0.15, 9);
     expect(mid.w).toBeCloseTo(0.45, 9);
   });
 
-  it("insertZoom keeps `follow` when it trims a zoom", () => {
+  it("insertZoom keeps `kind` when it trims a zoom", () => {
     const out = insertZoom([{ ...f, end: 4 }], { start: 2, end: 8, rect: z.rect });
     expect(out[0]).toEqual({ ...f, end: 2 });
   });

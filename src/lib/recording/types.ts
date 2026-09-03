@@ -128,6 +128,44 @@ export interface CursorSample {
   y: number;
 }
 
+/**
+ * One global mouse click, forwarded by the desktop shell's native input hook
+ * while a take is live. Same `t` clock and same normalised `x`/`y` space as
+ * `CursorSample`; the staging editor seeds `edits.clicks` from these with every
+ * mark on, and each on mark draws a ripple at `t..t + 0.5 s`.
+ *
+ * Kept in memory only — the raw track is never persisted, just the edited
+ * `ClickMark[]` in `videos.edits`.
+ *
+ * MUST stay identical to `ClickSample` in `desktop/src/shared/ipc.ts`.
+ */
+export interface ClickSample {
+  t: number;
+  x: number;
+  y: number;
+  /** 0 = left, 1 = right, 2 = middle; anything else is whatever the hook reported. */
+  button: number;
+}
+
+/** The modifier keys a `KeySample` may be held with. */
+export type KeyMod = "meta" | "ctrl" | "alt" | "shift";
+
+/**
+ * One global key press, forwarded alongside `ClickSample` on the same `t`
+ * clock. `key` is the printable key or a named one ("Enter", "Escape", "F5");
+ * `mods` are the modifiers held with it, which the `keys` overlay combines into
+ * a single keycap badge ("⌘ ⇧ K").
+ *
+ * Kept in memory only; nothing about the key track is persisted.
+ *
+ * MUST stay identical to `KeySample` in `desktop/src/shared/ipc.ts`.
+ */
+export interface KeySample {
+  t: number;
+  key: string;
+  mods: KeyMod[];
+}
+
 export interface DesktopBridge {
   version: 1;
   isDesktop?: boolean;
@@ -196,6 +234,12 @@ export interface BackgroundConfig {
   src?: string;
   /** Set when `src` came from the preset catalogue; used to re-select on reload. */
   presetId?: string;
+  /**
+   * Set when `src` came from a saved wallpaper (`src/lib/wallpapers.ts`). The
+   * blob: URL in `src` dies with its document, so this — not the URL — is what
+   * persists; `loadBackground` re-mints the URL from the stored bytes.
+   */
+  wallpaperId?: string;
 }
 
 export interface FrameConfig {

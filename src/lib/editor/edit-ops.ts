@@ -1,16 +1,26 @@
 import {
+  DEFAULT_CURSOR,
   MAX_CAMERA_OFFSET_MS,
+  MAX_CLICKS,
+  MAX_CURSOR_SIZE,
   MAX_CUTS,
+  MAX_DRAW_POINTS,
   MAX_OVERLAYS,
+  MIN_CURSOR_SIZE,
   arrowRect,
   clampRect,
+  pointsRect,
   type CameraKeyframe,
   type CameraTrack,
+  type ClickMark,
+  type CursorConfig,
+  type CursorStyle,
   type Cut,
   type Overlay,
   type Point,
   type VideoEdits,
   type Zoom,
+  type ZoomKind,
 } from "@/lib/edits";
 import { insertZoom } from "./zoom";
 import type { FrameConfig } from "@/lib/recording/types";
@@ -81,23 +91,35 @@ function nextStepNumber(overlays: readonly Overlay[]): number {
 }
 
 /**
- * Restore the arrow invariant from `edits.ts`: `from`/`to` are the truth and
- * `rect` is their bounding box. An arrow that arrives with no points takes the
- * rect's diagonal; everything else just re-derives the rect.
+ * Restore the derived-`rect` invariants from `edits.ts`.
+ *
+ * An arrow or line: `from`/`to` are the truth and `rect` is their bounding box
+ * (one arriving with no endpoints takes the rect's diagonal), and a curved
+ * arrow's `ctrl` is clamped into the frame alongside them. A `draw`: `points`
+ * are the truth and `rect` is *their* bounding box — an empty path keeps the
+ * rect it came with rather than collapsing to a dot. Everything else passes
+ * through untouched, by reference.
  */
-function withArrowRect(o: Overlay): Overlay {
-  if (o.type !== "arrow") return o;
+function withDerivedRect(o: Overlay): Overlay {
+  if (o.type === "draw") {
+    if (!o.points || o.points.length === 0) return o;
+    const points = o.points.slice(0, MAX_DRAW_POINTS).map(clampPoint);
+    return { ...o, points, rect: pointsRect(points) ?? o.rect };
+  }
+  if (o.type !== "arrow" && o.type !== "line") return o;
   const from = clampPoint(o.from ?? { x: o.rect.x, y: o.rect.y });
   const to = clampPoint(o.to ?? { x: o.rect.x + o.rect.w, y: o.rect.y + o.rect.h });
-  return { ...o, from, to, rect: arrowRect(from, to) };
+  const next: Overlay = { ...o, from, to, rect: arrowRect(from, to) };
+  if (next.ctrl) next.ctrl = clampPoint(next.ctrl);
+  return next;
 }
 
 /**
  * Append an overlay, clamped into range (`start >= 0`, `end > start` by
  * `MIN_SPAN`, `rect` clamped into the 0..1 frame via `clampRect`). A step with
- * no explicit `n` is numbered by `nextStepNumber`; an arrow's `rect` is
- * re-derived from its endpoints. Returns `e` unchanged once `MAX_OVERLAYS` is
- * reached.
+ * no explicit `n` is numbered by `nextStepNumber`; an arrow's or line's `rect`
+ * is re-derived from its endpoints and a draw's from its `points`. Returns `e`
+ * unchanged once `MAX_OVERLAYS` is reached.
  */
 export function addOverlay(e: VideoEdits, overlay: Overlay): VideoEdits {
   if (e.overlays.length >= MAX_OVERLAYS) return e;
@@ -106,7 +128,7 @@ export function addOverlay(e: VideoEdits, overlay: Overlay): VideoEdits {
   if (next.end <= next.start) next.end = next.start + MIN_SPAN;
   next.rect = clampRect(next.rect);
   if (next.type === "step" && next.n === undefined) next.n = nextStepNumber(e.overlays);
-  return { ...e, overlays: [...e.overlays, withArrowRect(next)] };
+  return { ...e, overlays: [...e.overlays, withDerivedRect(next)] };
 }
 
 /**
@@ -114,10 +136,11 @@ export function addOverlay(e: VideoEdits, overlay: Overlay): VideoEdits {
  * (`start >= 0`, `end > start` by `MIN_SPAN`, `rect` clamped into range). An
  * out-of-range index returns `e` unchanged (same reference).
  *
- * Arrows keep the `edits.ts` invariant: patching `from`/`to` re-derives the
- * bounding box, and patching only `rect` (the box drag the preview does for
- * every other type) TRANSLATES both endpoints by the origin delta rather than
- * letting the two representations drift apart.
+ * Arrows and lines keep the `edits.ts` invariant: patching `from`/`to`
+ * re-derives the bounding box, and patching only `rect` (the box drag the
+ * preview does for every other type) TRANSLATES both endpoints by the origin
+ * delta rather than letting the two representations drift apart. A `draw`
+ * overlay's `rect` is re-derived from its `points` the same way.
  */
 export function updateOverlay(e: VideoEdits, index: number, patch: Partial<Overlay>): VideoEdits {
   if (index < 0 || index >= e.overlays.length) return e;
@@ -129,7 +152,7 @@ export function updateOverlay(e: VideoEdits, index: number, patch: Partial<Overl
       merged.start = Math.max(0, merged.start);
       if (merged.end <= merged.start) merged.end = merged.start + MIN_SPAN;
       merged.rect = clampRect(merged.rect);
-      if (merged.type === "arrow" && patch.rect && !patch.from && !patch.to) {
+      if ((merged.type === "arrow" || merged.type === "line") && patch.rect && !patch.from && !patch.to) {
         const a = o.from ?? { x: o.rect.x, y: o.rect.y };
         const b = o.to ?? { x: o.rect.x + o.rect.w, y: o.rect.y + o.rect.h };
         // Clamp the TRANSLATION against both endpoints at once, not each
@@ -142,7 +165,7 @@ export function updateOverlay(e: VideoEdits, index: number, patch: Partial<Overl
         merged.from = { x: a.x + dx, y: a.y + dy };
         merged.to = { x: b.x + dx, y: b.y + dy };
       }
-      return withArrowRect(merged);
+      return withDerivedRect(merged);
     }),
   };
 }
@@ -210,4 +233,80 @@ export function updateZoom(e: VideoEdits, index: number, patch: Partial<Zoom>): 
   const next = { ...cur, ...patch };
   if (next.end <= next.start) next.end = next.start + MIN_SPAN;
   return { ...e, zooms: insertZoom(e.zooms.filter((_, i) => i !== index), next) };
+}
+
+/**
+ * Set the zoom's kind, re-inserting it so it stays disjoint from the rest of
+ * the list and preserving every other field. Also drops the legacy `follow`
+ * flag, so a migrated zoom can never carry two spellings at once. An
+ * out-of-range index, or a kind the zoom already has, returns `e` unchanged
+ * (same reference).
+ */
+export function setZoomKind(e: VideoEdits, index: number, kind: ZoomKind): VideoEdits {
+  const cur = e.zooms[index];
+  if (!cur) return e;
+  if ((cur.kind ?? "static") === kind && cur.follow === undefined) return e;
+  const next: Zoom = { ...cur, kind };
+  delete next.follow;
+  return { ...e, zooms: insertZoom(e.zooms.filter((_, i) => i !== index), next) };
+}
+
+/** One click mark, clamped into the frame. `t` is left alone — it indexes the source. */
+const normalizeClick = (c: ClickMark): ClickMark => ({ t: c.t, x: clamp01(c.x), y: clamp01(c.y), on: c.on === true });
+
+function sameClicks(a: readonly ClickMark[] | undefined, b: readonly ClickMark[]): boolean {
+  if (!a || a.length !== b.length) return false;
+  return a.every((c, i) => c.t === b[i].t && c.x === b[i].x && c.y === b[i].y && c.on === b[i].on);
+}
+
+/**
+ * Replace the clicks lane: sorted by `t`, `x`/`y` clamped into the frame and
+ * capped at `MAX_CLICKS`. Returns `e` unchanged (same reference) when the
+ * normalised list matches the one already stored.
+ */
+export function setClicks(e: VideoEdits, clicks: readonly ClickMark[]): VideoEdits {
+  const next = clicks.map(normalizeClick).sort((a, b) => a.t - b.t).slice(0, MAX_CLICKS);
+  return sameClicks(e.clicks, next) ? e : { ...e, clicks: next };
+}
+
+/** Flip one click's `on`. An out-of-range index (or no lane) returns `e` unchanged (same reference). */
+export function toggleClick(e: VideoEdits, index: number): VideoEdits {
+  const cur = e.clicks?.[index];
+  if (!cur) return e;
+  return { ...e, clicks: e.clicks!.map((c, i) => (i === index ? { ...c, on: !c.on } : c)) };
+}
+
+/**
+ * Turn every click on the lane on or off ("All on" / "All off"). Returns `e`
+ * unchanged (same reference) when the lane is empty or already all that way.
+ */
+export function setAllClicks(e: VideoEdits, on: boolean): VideoEdits {
+  const clicks = e.clicks;
+  if (!clicks || clicks.length === 0) return e;
+  if (clicks.every((c) => c.on === on)) return e;
+  return { ...e, clicks: clicks.map((c) => (c.on === on ? c : { ...c, on })) };
+}
+
+/**
+ * Set how the cursor is drawn: an unrecognised `style` falls back to the
+ * default and `size` is clamped into `MIN_CURSOR_SIZE..MAX_CURSOR_SIZE`.
+ * Returns `e` unchanged (same reference) when nothing moves.
+ */
+export function setCursor(e: VideoEdits, cursor: CursorConfig): VideoEdits {
+  const styles: CursorStyle[] = ["none", "real", "smooth"];
+  const next: CursorConfig = {
+    style: styles.includes(cursor.style) ? cursor.style : DEFAULT_CURSOR.style,
+    size: Math.min(MAX_CURSOR_SIZE, Math.max(MIN_CURSOR_SIZE, cursor.size)),
+  };
+  if (e.cursor && e.cursor.style === next.style && e.cursor.size === next.size) return e;
+  return { ...e, cursor: next };
+}
+
+/**
+ * Toggle the zoom-motion blur. Returns `e` unchanged (same reference) only
+ * when the flag is already stored at that value — an absent flag means "the
+ * default", so setting it writes the value out explicitly.
+ */
+export function setMotionBlur(e: VideoEdits, on: boolean): VideoEdits {
+  return e.motionBlur === on ? e : { ...e, motionBlur: on };
 }

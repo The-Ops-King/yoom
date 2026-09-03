@@ -49,13 +49,15 @@ function chained(a: Zoom, b: Zoom): boolean {
  * The rect a zoom actually shows at `t`.
  *
  * For an ordinary zoom that is its stored `rect` (by reference — callers must
- * not mutate it). A `follow` zoom takes only the SIZE from its rect and
+ * not mutate it). A `kind: "follow"` zoom takes only the SIZE from its rect and
  * centres that window on the smoothed cursor, clamped so it stays inside the
  * source; with no sampler, or before the cursor track starts, it falls back to
  * the stored rect so a take whose cursor track is missing still plays.
  */
 export function effectiveRect(z: Zoom, t: number, cursorAt?: CursorAt): Rect {
-  if (!z.follow || !cursorAt) return z.rect;
+  // `kind` is the only spelling read here; `parseEdits` migrates the legacy
+  // `follow` flag before a stored zoom ever reaches this.
+  if (z.kind !== "follow" || !cursorAt) return z.rect;
   const p = cursorAt(t);
   if (!p) return z.rect;
   const { w, h } = z.rect;
@@ -91,7 +93,7 @@ function gapEase(a: Zoom, b: Zoom, t: number, cursorAt?: CursorAt): Rect {
  * gap, `[A.end, B.start]`. Either way no full-frame sample happens in between.
  *
  * `cursorAt` (optional) is the take's smoothed cursor sampler: every rect
- * below is a zoom's EFFECTIVE rect, so a `follow` zoom's window rides the
+ * below is a zoom's EFFECTIVE rect, so a follow zoom's window rides the
  * cursor and the ramps and chains ease between the windows as they stand at
  * `t`. Without it, follow zooms behave exactly like ordinary ones.
  */

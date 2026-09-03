@@ -4,10 +4,16 @@ import {
   EMPTY_EDITS,
   hasDrawableEdits,
   isEmptyEdits,
+  MAX_CLICKS,
+  MAX_DRAW_POINTS,
   MAX_OVERLAY_DATA_SRC,
   MAX_OVERLAY_SRC,
   MAX_OVERLAY_THICKNESS,
+  MAX_TEXT,
+  MAX_TEXT_SIZE,
+  MIN_TEXT_SIZE,
   parseEdits,
+  pointsRect,
 } from "@/lib/edits";
 
 describe("parseEdits", () => {
@@ -508,5 +514,172 @@ describe("arrowRect", () => {
     const r = arrowRect({ x: 0.2, y: 0.5 }, { x: 0.8, y: 0.5 });
     expect(r.w).toBeCloseTo(0.6);
     expect(r.h).toBeGreaterThan(0);
+  });
+});
+
+describe("parseEdits clicks", () => {
+  const base = { version: 1, cuts: [], crop: null, zooms: [], overlays: [], markers: [] };
+
+  it("is absent when the row carries none", () => {
+    expect(parseEdits(base).clicks).toBeUndefined();
+    expect(parseEdits({ ...base, clicks: "nope" }).clicks).toBeUndefined();
+  });
+
+  it("sorts by t, clamps x/y into the frame and defaults `on` to true", () => {
+    const parsed = parseEdits({
+      ...base,
+      clicks: [
+        { t: 3, x: 1.4, y: -0.2, on: false },
+        { t: 1, x: 0.25, y: 0.75 },
+        { t: 2, x: 0.5, y: 0.5, on: true },
+      ],
+    });
+    expect(parsed.clicks).toEqual([
+      { t: 1, x: 0.25, y: 0.75, on: true },
+      { t: 2, x: 0.5, y: 0.5, on: true },
+      { t: 3, x: 1, y: 0, on: false },
+    ]);
+  });
+
+  it("drops malformed marks and caps the list at MAX_CLICKS", () => {
+    const parsed = parseEdits({
+      ...base,
+      clicks: [null, { t: "a", x: 0, y: 0 }, { t: -1, x: 0, y: 0 }, { t: 1, x: 0, y: "b" }, { t: 1, x: 0, y: 0 }],
+    });
+    expect(parsed.clicks).toEqual([{ t: 1, x: 0, y: 0, on: true }]);
+
+    const many = Array.from({ length: MAX_CLICKS + 40 }, (_, i) => ({ t: i, x: 0.5, y: 0.5, on: true }));
+    expect(parseEdits({ ...base, clicks: many }).clicks).toHaveLength(MAX_CLICKS);
+  });
+});
+
+describe("parseEdits cursor and motionBlur", () => {
+  const base = { version: 1, cuts: [], crop: null, zooms: [], overlays: [], markers: [] };
+
+  it("keeps a well-formed cursor config", () => {
+    expect(parseEdits({ ...base, cursor: { style: "smooth", size: 1.5 } }).cursor).toEqual({
+      style: "smooth",
+      size: 1.5,
+    });
+  });
+
+  it("falls back to the defaults and clamps size into 0.5..2", () => {
+    expect(parseEdits({ ...base, cursor: {} }).cursor).toEqual({ style: "real", size: 1 });
+    expect(parseEdits({ ...base, cursor: { style: "wat", size: 9 } }).cursor).toEqual({ style: "real", size: 2 });
+    expect(parseEdits({ ...base, cursor: { style: "none", size: 0 } }).cursor).toEqual({ style: "none", size: 0.5 });
+    expect(parseEdits({ ...base, cursor: 7 }).cursor).toBeUndefined();
+    expect(parseEdits(base).cursor).toBeUndefined();
+  });
+
+  it("keeps motionBlur only when it is a boolean", () => {
+    expect(parseEdits({ ...base, motionBlur: false }).motionBlur).toBe(false);
+    expect(parseEdits({ ...base, motionBlur: true }).motionBlur).toBe(true);
+    expect(parseEdits({ ...base, motionBlur: "yes" }).motionBlur).toBeUndefined();
+    expect(parseEdits(base).motionBlur).toBeUndefined();
+  });
+});
+
+describe("parseEdits zoom kind", () => {
+  const base = { version: 1, cuts: [], crop: null, zooms: [], overlays: [], markers: [] };
+  const rect = { x: 0, y: 0, w: 0.5, h: 0.5 };
+  const one = (z: Record<string, unknown>) => parseEdits({ ...base, zooms: [z] }).zooms[0];
+
+  it("migrates the legacy `follow` flag to `kind` and stops emitting it", () => {
+    const z = one({ start: 0, end: 1, rect, follow: true });
+    expect(z.kind).toBe("follow");
+    expect(z.follow).toBeUndefined();
+  });
+
+  it("keeps an explicit kind and leaves an ordinary zoom without one", () => {
+    expect(one({ start: 0, end: 1, rect, kind: "follow" }).kind).toBe("follow");
+    expect(one({ start: 0, end: 1, rect, kind: "static" }).kind).toBe("static");
+    expect(one({ start: 0, end: 1, rect }).kind).toBeUndefined();
+    expect(one({ start: 0, end: 1, rect, kind: "wat" }).kind).toBeUndefined();
+    expect(one({ start: 0, end: 1, rect, follow: false }).kind).toBeUndefined();
+  });
+});
+
+describe("parseEdits addendum overlay fields", () => {
+  const base = { version: 1, cuts: [], crop: null, zooms: [], overlays: [], markers: [] };
+  const rect = { x: 0, y: 0, w: 0.5, h: 0.5 };
+  const one = (o: Record<string, unknown>) => parseEdits({ ...base, overlays: [o] }).overlays[0];
+
+  it("keeps every overlay type in the full set", () => {
+    const types = [
+      "blur", "blackout", "ellipse", "rect", "line", "arrow", "step",
+      "underline", "highlight", "text", "emoji", "draw", "image", "keys", "click",
+    ];
+    const parsed = parseEdits({
+      ...base,
+      overlays: types.map((type) => ({ type, start: 0, end: 1, rect })),
+    });
+    expect(parsed.overlays.map((o) => o.type)).toEqual(types);
+  });
+
+  it("still maps the legacy `callout` type to `step`", () => {
+    expect(one({ type: "callout", start: 0, end: 1, rect }).type).toBe("step");
+  });
+
+  it("gives a line the same from/to/rect invariant as an arrow", () => {
+    const o = one({ type: "line", start: 0, end: 1, rect, from: { x: 0.1, y: 0.9 }, to: { x: 0.6, y: 0.2 } });
+    expect(o.from).toEqual({ x: 0.1, y: 0.9 });
+    expect(o.to).toEqual({ x: 0.6, y: 0.2 });
+    expect(o.rect).toEqual(arrowRect({ x: 0.1, y: 0.9 }, { x: 0.6, y: 0.2 }));
+  });
+
+  it("keeps fill, arrow style, bg and a clamped ctrl point", () => {
+    expect(one({ type: "rect", start: 0, end: 1, rect, fill: true }).fill).toBe(true);
+    expect(one({ type: "rect", start: 0, end: 1, rect, fill: "yes" }).fill).toBeUndefined();
+    expect(one({ type: "arrow", start: 0, end: 1, rect, style: "curved" }).style).toBe("curved");
+    expect(one({ type: "arrow", start: 0, end: 1, rect, style: "wobbly" }).style).toBeUndefined();
+    expect(one({ type: "arrow", start: 0, end: 1, rect, ctrl: { x: 2, y: -1 } }).ctrl).toEqual({ x: 1, y: 0 });
+    expect(one({ type: "arrow", start: 0, end: 1, rect, ctrl: { x: 0.5 } }).ctrl).toBeUndefined();
+    expect(one({ type: "text", start: 0, end: 1, rect, bg: "#000" }).bg).toBe("#000");
+  });
+
+  it("truncates text to MAX_TEXT and clamps size into the text-size range", () => {
+    expect(one({ type: "text", start: 0, end: 1, rect, text: "hi" }).text).toBe("hi");
+    expect(one({ type: "text", start: 0, end: 1, rect, text: "x".repeat(MAX_TEXT + 50) }).text).toHaveLength(MAX_TEXT);
+    expect(one({ type: "text", start: 0, end: 1, rect, text: 7 }).text).toBeUndefined();
+    expect(one({ type: "text", start: 0, end: 1, rect, size: 9 }).size).toBe(MAX_TEXT_SIZE);
+    expect(one({ type: "text", start: 0, end: 1, rect, size: 0 }).size).toBe(MIN_TEXT_SIZE);
+    expect(one({ type: "text", start: 0, end: 1, rect, size: NaN }).size).toBeUndefined();
+  });
+
+  it("clamps draw points, caps them at MAX_DRAW_POINTS and re-derives the rect", () => {
+    const o = one({
+      type: "draw",
+      start: 0,
+      end: 1,
+      rect,
+      points: [{ x: -1, y: 0.4 }, { x: 0.8, y: 2 }, null, { x: 0.3, y: "a" }],
+    });
+    expect(o.points).toEqual([{ x: 0, y: 0.4 }, { x: 0.8, y: 1 }]);
+    expect(o.rect).toEqual(pointsRect(o.points!));
+
+    const many = Array.from({ length: MAX_DRAW_POINTS + 100 }, () => ({ x: 0.5, y: 0.5 }));
+    expect(one({ type: "draw", start: 0, end: 1, rect, points: many }).points).toHaveLength(MAX_DRAW_POINTS);
+  });
+
+  it("drops points from every non-draw overlay", () => {
+    expect(one({ type: "ellipse", start: 0, end: 1, rect, points: [{ x: 0.1, y: 0.1 }] }).points).toBeUndefined();
+  });
+
+  it("leaves a draw overlay's stored rect alone when it has no usable points", () => {
+    const o = one({ type: "draw", start: 0, end: 1, rect, points: [] });
+    expect(o.points).toBeUndefined();
+    expect(o.rect).toEqual(rect);
+  });
+});
+
+describe("pointsRect", () => {
+  it("is the bounding box of every point, never zero-area", () => {
+    expect(pointsRect([{ x: 0.2, y: 0.8 }, { x: 0.6, y: 0.1 }, { x: 0.4, y: 0.5 }])).toEqual(
+      arrowRect({ x: 0.2, y: 0.1 }, { x: 0.6, y: 0.8 }),
+    );
+    const dot = pointsRect([{ x: 0.5, y: 0.5 }]);
+    expect(dot!.w).toBeGreaterThan(0);
+    expect(dot!.h).toBeGreaterThan(0);
+    expect(pointsRect([])).toBeNull();
   });
 });
