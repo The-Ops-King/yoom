@@ -2,7 +2,7 @@ import { DEFAULT_OVERLAY_THICKNESS, DEFAULT_TEXT_SIZE, type CameraMode, type Ove
 import { computeFrameLayout, coverCrop, shapeRadius } from "@/lib/recording/geometry";
 import type { BackgroundConfig, KeySample, RecordingMode } from "@/lib/recording/types";
 import { cameraAt } from "./camera-track";
-import { drawInputLayer } from "./render-input";
+import { MOTION_ALPHA, MOTION_DT, drawInputLayer, motionOffsets } from "./render-input";
 import { type CursorAt, FULL_RECT, fitView, toOutput, zoomAt } from "./zoom";
 
 export interface RenderInputs {
@@ -496,6 +496,25 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
   const dest = camOnly ? content : fitView(view, sw, sh, content);
   const letterboxed = dest.w < content.w - 0.5 || dest.h < content.h - 0.5;
 
+  // Motion blur: while the zoom view is travelling, the source is drawn three
+  // times along the motion vector at a third alpha each — a cheap directional
+  // smear that reads as speed instead of as a strobing crop. Below the
+  // threshold (`motionOffsets` returns nothing) it is one ordinary draw.
+  const prevView = inputs.edits.motionBlur === false
+    ? view
+    : zoomAt(inputs.edits.zooms, Math.max(0, t - MOTION_DT), inputs.cursorAt);
+  const smear = prevView === view ? [] : motionOffsets(view, prevView, W);
+  const drawSource = (box: Rect) => {
+    if (smear.length === 0) { drawPrimary(box); return; }
+    for (const o of smear) {
+      ctx.save();
+      ctx.globalAlpha = MOTION_ALPHA;
+      ctx.translate(o.dx, o.dy);
+      drawPrimary(box);
+      ctx.restore();
+    }
+  };
+
   if (framed && frame) {
     drawBackground(ctx, W, H, frame.background, inputs.background);
     if (frame.shadow) {
@@ -507,11 +526,11 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
     // background over it so the letterbox reads as the frame's padding
     // growing, not as black bars inside the screen.
     if (letterboxed) drawBackground(ctx, W, H, frame.background, inputs.background);
-    drawPrimary(dest); ctx.restore();
+    drawSource(dest); ctx.restore();
   } else {
     // Unframed, the letterbox is simply the black the canvas is cleared to.
     ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
-    drawPrimary(dest);
+    drawSource(dest);
   }
 
   // Camera (screen+camera only; camera-only mode already drew the camera as `src`).
