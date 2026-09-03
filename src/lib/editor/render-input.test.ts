@@ -1,19 +1,22 @@
 import { describe, expect, it } from "vitest";
-import type { ClickMark, Rect } from "@/lib/edits";
+import type { ClickMark, Rect, VideoEdits } from "@/lib/edits";
 import type { KeySample } from "@/lib/recording/types";
 import {
   CLICK_RIPPLE_S,
   KEY_FADE_S,
-  MOTION_MAX_PX,
+  MOTION_MAX_FRAC,
   MOTION_MIN_SPEED,
   activeClicks,
   createKeySampler,
   cursorHeightPx,
   cursorPath,
   keyBadgesAt,
+  drawInputLayer,
   keyLabel,
   motionOffsets,
+  motionTapAlpha,
 } from "./render-input";
+import type { RenderInputs } from "./render";
 
 const click = (t: number, on = true): ClickMark => ({ t, x: 0.5, y: 0.5, on });
 const key = (t: number, k: string, mods: KeySample["mods"] = []): KeySample => ({ t, key: k, mods });
@@ -72,6 +75,15 @@ describe("keyBadgesAt", () => {
   it("does not fold a key pressed too long after the modifier", () => {
     const keys = [key(1, "Meta"), key(1.5, "k")];
     expect(keyBadgesAt(keys, 1.5).map((b) => b.label)).toEqual(["⌘", "K"]);
+  });
+
+  it("folds a right-hand modifier like its left-hand twin", () => {
+    for (const mod of ["MetaRight", "ShiftRight", "CtrlRight", "AltRight"]) {
+      const badges = keyBadgesAt([key(1, mod), key(1.1, "k")], 1.15);
+      expect(badges).toHaveLength(1);
+      // The chord carries a modifier symbol, not a "MetaRight" badge of its own.
+      expect(badges[0].label).toMatch(/^[⌘⇧⌃⌥] K$/);
+    }
   });
 
   it("orders oldest first and drops a press once it has faded", () => {
@@ -139,6 +151,12 @@ describe("cursorPath", () => {
     expect(cursorHeightPx(2160, 1)).toBe(40);
     expect(cursorHeightPx(1080, 0.5)).toBe(10);
   });
+
+  it("grows with the zoom, like the captured cursor it covers", () => {
+    // A view half as tall is a 2x zoom.
+    expect(cursorHeightPx(1080, 1, 1 / 0.5)).toBe(40);
+    expect(cursorHeightPx(1080, 1, 1)).toBe(20);
+  });
 });
 
 describe("motionOffsets", () => {
@@ -167,7 +185,7 @@ describe("motionOffsets", () => {
   it("caps the smear length", () => {
     const offs = motionOffsets(rect(0.9, 0.2, 0.4, 0.4), still, 1920);
     expect(offs).toHaveLength(3);
-    expect(Math.hypot(offs[2].dx, offs[2].dy)).toBeCloseTo(MOTION_MAX_PX);
+    expect(Math.hypot(offs[2].dx, offs[2].dy)).toBeCloseTo(1920 * MOTION_MAX_FRAC);
   });
 
   it("ignores a pure zoom that does not move the centre", () => {
@@ -184,5 +202,100 @@ describe("motionOffsets", () => {
 
   it("is empty for a non-positive dt", () => {
     expect(motionOffsets(rect(0.9, 0.2, 0.4, 0.4), still, 1920, 0)).toEqual([]);
+  });
+
+  it("smears a slow pan less than a fast one", () => {
+    const at = (fw: number) => {
+      const offs = motionOffsets(rect(0.2 + fw, 0.2, 0.4, 0.4), still, 1920);
+      return offs.length === 0 ? 0 : Math.hypot(offs[2].dx, offs[2].dy);
+    };
+    // Both past the threshold, both under the cap.
+    const slow = at((MOTION_MIN_SPEED / 60) * 1.5);
+    const fast = at((MOTION_MIN_SPEED / 60) * 3);
+    expect(slow).toBeGreaterThan(0);
+    expect(fast).toBeGreaterThan(slow);
+    expect(fast).toBeLessThan(1920 * MOTION_MAX_FRAC);
+  });
+
+  it("scales the cap with the output width", () => {
+    const far = rect(0.9, 0.2, 0.4, 0.4);
+    expect(Math.hypot(...Object.values(motionOffsets(far, still, 960)[2]))).toBeCloseTo(960 * MOTION_MAX_FRAC);
+  });
+});
+
+describe("motionTapAlpha", () => {
+  it("weights the taps 1, 1/2, 1/3", () => {
+    expect([0, 1, 2].map(motionTapAlpha)).toEqual([1, 0.5, 1 / 3]);
+  });
+
+  it("composites to a fully opaque stack, each tap an equal third", () => {
+    // Painting `n` taps progressively at 1/(i+1): after tap i the newest
+    // contributes 1/(i+1) and everything before it keeps i/(i+1) of its
+    // weight — so all three end at exactly 1/3, and nothing bleeds through.
+    const weights = [0, 0, 0];
+    let covered = 0;
+    for (let i = 0; i < 3; i++) {
+      const a = motionTapAlpha(i);
+      for (let j = 0; j < i; j++) weights[j] *= 1 - a;
+      weights[i] = a;
+      covered = covered * (1 - a) + a;
+    }
+    expect(covered).toBeCloseTo(1);
+    for (const w of weights) expect(w).toBeCloseTo(1 / 3);
+  });
+});
+
+/** Records the text drawn, which is all the placeholder assertions need. */
+function textCtx() {
+  const texts: string[] = [];
+  const handler: ProxyHandler<object> = {
+    get(_t, prop) {
+      if (prop === "texts") return texts;
+      if (prop === "measureText") return () => ({ width: 40 });
+      if (prop === "fillText") return (s: string) => { texts.push(s); };
+      return () => undefined;
+    },
+    set: () => true,
+  };
+  return new Proxy({}, handler) as unknown as CanvasRenderingContext2D & { texts: string[] };
+}
+
+describe("drawInputLayer", () => {
+  const box = { box: rect(0, 0, 1920, 1080), view: rect(0, 0, 1, 1), W: 1920 };
+  const withKeysRange = (extra: Partial<RenderInputs> = {}): RenderInputs => ({
+    screen: null,
+    camera: null,
+    mode: "screen",
+    background: null,
+    edits: {
+      version: 1, cuts: [], crop: null, zooms: [], markers: [],
+      overlays: [{ type: "keys", start: 0, end: 5, rect: rect(0.35, 0.86, 0.3, 0.08) }],
+    } as VideoEdits,
+    ...extra,
+  });
+
+  it("ghosts an empty keys range on the preview so it is visible", () => {
+    const ctx = textCtx();
+    drawInputLayer(ctx, withKeysRange({ preview: true }), 1, box);
+    expect(ctx.texts).toEqual(["keys"]);
+  });
+
+  it("burns nothing in for the export", () => {
+    const ctx = textCtx();
+    drawInputLayer(ctx, withKeysRange(), 1, box);
+    expect(ctx.texts).toEqual([]);
+  });
+
+  it("draws the real chord instead of the ghost once a key is pressed", () => {
+    const keys = [key(0.9, "k", ["meta"])];
+    const ctx = textCtx();
+    drawInputLayer(ctx, withKeysRange({ preview: true, keysAt: () => keys }), 1, box);
+    expect(ctx.texts).toEqual(["\u2318 K"]);
+  });
+
+  it("leaves a range alone outside its span", () => {
+    const ctx = textCtx();
+    drawInputLayer(ctx, withKeysRange({ preview: true }), 9, box);
+    expect(ctx.texts).toEqual([]);
   });
 });

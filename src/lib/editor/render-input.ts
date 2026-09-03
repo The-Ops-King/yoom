@@ -36,13 +36,25 @@ export const CURSOR_BASE_PX = 20;
 const CURSOR_REF_H = 1080;
 
 /** Below this centre speed (frame-widths per second) the zoom is not "moving". */
-export const MOTION_MIN_SPEED = 0.5;
-/** Longest a single smear tap may reach, in output pixels. */
-export const MOTION_MAX_PX = 12;
+export const MOTION_MIN_SPEED = 0.2;
+/**
+ * Longest a single smear tap may reach, as a fraction of the output WIDTH.
+ * A fraction rather than a pixel count so the same edit looks the same at
+ * 720p and at 4K; ~23 px on a 1920-wide frame.
+ */
+export const MOTION_MAX_FRAC = 0.012;
 /** The frame the previous view is sampled at — `zoomAt(t)` vs `zoomAt(t - MOTION_DT)`. */
 export const MOTION_DT = 1 / 60;
-/** Each of the three taps carries a third of the source. */
-export const MOTION_ALPHA = 1 / 3;
+/**
+ * The alpha the `i`-th smear tap is drawn at. NOT a constant 1/3: three
+ * one-third draws composite to 1 - (2/3)^3 ≈ 70 % coverage, so ~30 % of the
+ * background bleeds through a moving frame. Painting progressively — 1, then
+ * ½ over it, then ⅓ over that — leaves each tap contributing exactly a third
+ * of the result and the stack fully opaque.
+ */
+export function motionTapAlpha(i: number): number {
+  return 1 / (i + 1);
+}
 
 // ---------- clicks ----------
 
@@ -93,17 +105,30 @@ const MOD_ORDER: KeyMod[] = ["meta", "ctrl", "alt", "shift"];
 /** The modifier a bare press names, or null for an ordinary key. */
 function modOf(key: string): KeyMod | null {
   switch (key) {
+    // Both hands, and both spellings: the native hook names a side ("MetaRight")
+    // where the DOM would say `code`, and an unmapped right-hand press would
+    // show as its own "MetaRight" badge instead of folding into the chord.
     case "Meta":
+    case "MetaLeft":
+    case "MetaRight":
     case "Command":
     case "Cmd":
       return "meta";
     case "Control":
+    case "ControlLeft":
+    case "ControlRight":
     case "Ctrl":
+    case "CtrlLeft":
+    case "CtrlRight":
       return "ctrl";
     case "Alt":
+    case "AltLeft":
+    case "AltRight":
     case "Option":
       return "alt";
     case "Shift":
+    case "ShiftLeft":
+    case "ShiftRight":
       return "shift";
     default:
       return null;
@@ -221,9 +246,17 @@ export function cursorPath(): readonly Point[] {
   return CURSOR_POINTS;
 }
 
-/** The synthetic cursor's height in output pixels for a frame `h` px tall. */
-export function cursorHeightPx(h: number, size: number): number {
-  return CURSOR_BASE_PX * (h / CURSOR_REF_H) * size;
+/**
+ * The synthetic cursor's height in output pixels for a frame `h` px tall.
+ *
+ * `zoom` is `1 / view.h` — the same factor an emoji or a step badge grows by,
+ * because those are sized off a rect that maps through the zoom. The drawn
+ * arrow sits ON TOP of the captured one, which is source pixels and therefore
+ * magnifies with the view; a cursor that stayed 20 px would slide out of its
+ * own shadow as soon as a zoom opened.
+ */
+export function cursorHeightPx(h: number, size: number, zoom = 1): number {
+  return CURSOR_BASE_PX * (h / CURSOR_REF_H) * size * zoom;
 }
 
 // ---------- motion blur ----------
@@ -243,8 +276,9 @@ export interface MotionOffset {
  * vertical pan and a horizontal one of the same visual length blur alike.
  *
  * The smear length is how far the view actually moved in one frame, in output
- * pixels, capped at `MOTION_MAX_PX`; the taps are −1, 0, +1 along the motion
- * vector and the caller draws each at `MOTION_ALPHA`.
+ * pixels — so a slow pan smears less than a fast one — capped at
+ * `MOTION_MAX_FRAC` of the width; the taps are −1, 0, +1 along the motion
+ * vector and the caller draws the `i`-th at `motionTapAlpha(i)`.
  */
 export function motionOffsets(view: Rect, prevView: Rect, W: number, dt = MOTION_DT): MotionOffset[] {
   if (dt <= 0) return [];
@@ -252,7 +286,7 @@ export function motionOffsets(view: Rect, prevView: Rect, W: number, dt = MOTION
   const dcy = view.y + view.h / 2 - (prevView.y + prevView.h / 2);
   const dist = Math.hypot(dcx, dcy);
   if (!Number.isFinite(dist) || dist / dt <= MOTION_MIN_SPEED) return [];
-  const px = Math.min(dist * W, MOTION_MAX_PX);
+  const px = Math.min(dist * W, W * MOTION_MAX_FRAC);
   if (px <= 0) return [];
   const ux = (dcx / dist) * px;
   const uy = (dcy / dist) * px;
@@ -317,6 +351,32 @@ function drawBadges(ctx: CanvasRenderingContext2D, badges: KeyBadge[], r: Rect):
     ctx.restore();
     x += w + gap;
   }
+}
+
+/**
+ * A faint "keys" ghost, drawn where the badges will appear. PREVIEW ONLY: a
+ * range with no press inside it must still be visible on the editing canvas
+ * (otherwise adding one looks like nothing happened), but it is a piece of
+ * editing chrome and has no business burned into the file.
+ */
+function drawKeysPlaceholder(ctx: CanvasRenderingContext2D, r: Rect): void {
+  if (r.h <= 0 || r.w <= 0) return;
+  const fontPx = Math.max(8, r.h * 0.55);
+  const w = Math.min(r.w, fontPx * 3.6);
+  ctx.save();
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = "rgba(18,18,22,0.82)";
+  pillPath(ctx, r.x + r.w - w, r.y, w, r.h, r.h * 0.28);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.3)";
+  ctx.lineWidth = Math.max(1, r.h * 0.04);
+  ctx.stroke();
+  ctx.fillStyle = "#fff";
+  ctx.font = `600 ${fontPx}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("keys", r.x + r.w - w / 2, r.y + r.h / 2);
+  ctx.restore();
 }
 
 /** The synthetic arrow, black with a white outline, its tip at `p`. */
@@ -387,14 +447,13 @@ export function drawInputLayer(
 
   // Key badges, for every `keys` overlay whose span contains `t`.
   const keysAt = inputs.keysAt;
-  if (keysAt) {
-    let badges: KeyBadge[] | null = null;
-    for (const o of inputs.edits.overlays as Overlay[]) {
-      if (o.type !== "keys" || t < o.start || t > o.end) continue;
-      // The track is the same for every span at this instant; sample once.
-      badges ??= keyBadgesAt(keysAt(t), t);
-      drawBadges(ctx, badges, mapRect(o.rect));
-    }
+  let badges: KeyBadge[] | null = null;
+  for (const o of inputs.edits.overlays as Overlay[]) {
+    if (o.type !== "keys" || t < o.start || t > o.end) continue;
+    // The track is the same for every span at this instant; sample once.
+    badges ??= keysAt ? keyBadgesAt(keysAt(t), t) : [];
+    if (badges.length > 0) drawBadges(ctx, badges, mapRect(o.rect));
+    else if (inputs.preview) drawKeysPlaceholder(ctx, mapRect(o.rect));
   }
 
   // The synthetic cursor. `real` keeps whatever the capture recorded and
@@ -402,7 +461,8 @@ export function drawInputLayer(
   const cursor = inputs.edits.cursor ?? DEFAULT_CURSOR;
   if (cursor.style === "smooth" && inputs.smoothCursorAt) {
     const p = inputs.smoothCursorAt(t);
-    if (p) drawCursor(ctx, map(p), cursorHeightPx(b.h, cursor.size));
+    // `1 / view.h`, exactly what an emoji or a step badge grows by.
+    if (p) drawCursor(ctx, map(p), cursorHeightPx(b.h, cursor.size, 1 / view.h));
   }
 
   ctx.restore();
