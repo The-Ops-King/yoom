@@ -1,4 +1,4 @@
-import { DEFAULT_OVERLAY_THICKNESS, type CameraMode, type Overlay, type Point, type Rect, type VideoEdits } from "@/lib/edits";
+import { DEFAULT_OVERLAY_THICKNESS, DEFAULT_TEXT_SIZE, type CameraMode, type Overlay, type Point, type Rect, type VideoEdits } from "@/lib/edits";
 import { computeFrameLayout, coverCrop, shapeRadius } from "@/lib/recording/geometry";
 import type { BackgroundConfig, RecordingMode } from "@/lib/recording/types";
 import { cameraAt } from "./camera-track";
@@ -153,6 +153,71 @@ export function preloadOverlayImages(edits: VideoEdits): Promise<void> {
   return Promise.all(pending).then(() => undefined);
 }
 
+/** How far a `curved` arrow bows out when it carries no `ctrl`, as a fraction of its length. */
+const CURVE_BOW = 0.15;
+/** The emoji a placed `emoji` overlay falls back to when its `text` went missing. */
+const FALLBACK_EMOJI = "👉";
+/** Line box, as a multiple of the font size: leading, and the padding inside a `bg` plate. */
+const TEXT_LINE_H = 1.25;
+const TEXT_PAD = 0.35;
+/** The stack a `text`/`emoji` overlay is set in — emoji last so glyphs resolve. */
+const TEXT_FONT = `system-ui, -apple-system, "Segoe UI", sans-serif, "Apple Color Emoji", "Segoe UI Emoji"`;
+
+/**
+ * The default control point for a `curved` arrow with no `ctrl` of its own:
+ * the midpoint of the shaft, pushed along the perpendicular by `CURVE_BOW` of
+ * the arrow's length. In output pixels, like everything else in `drawOverlay`.
+ */
+function defaultCtrl(a: Point, b: Point): Point {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return { x: (a.x + b.x) / 2 - dy * CURVE_BOW, y: (a.y + b.y) / 2 + dx * CURVE_BOW };
+}
+
+/** A filled arrowhead triangle whose tip is at `tip`, pointing along `angle`. */
+function arrowHead(ctx: CanvasRenderingContext2D, tip: Point, angle: number, head: number) {
+  ctx.beginPath();
+  ctx.moveTo(tip.x, tip.y);
+  ctx.lineTo(tip.x - Math.cos(angle - 0.4) * head, tip.y - Math.sin(angle - 0.4) * head);
+  ctx.lineTo(tip.x - Math.cos(angle + 0.4) * head, tip.y - Math.sin(angle + 0.4) * head);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/**
+ * `ctx.measureText` width, with a proportional estimate when the context has
+ * no text metrics (the node tests' stub, and any canvas that returns nothing).
+ * Wrapping has to be deterministic either way — a thrown `undefined.width`
+ * would take the whole frame down.
+ */
+function textWidth(ctx: CanvasRenderingContext2D, s: string, fontSize: number): number {
+  const m = ctx.measureText?.(s) as TextMetrics | undefined;
+  return m && Number.isFinite(m.width) ? m.width : s.length * fontSize * 0.55;
+}
+
+/**
+ * Greedy word wrap inside `maxW`, honouring the string's own newlines. A word
+ * longer than the box is left on its own line rather than broken mid-word:
+ * over-running the plate reads better than a caption chopped into fragments.
+ */
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number, fontSize: number): string[] {
+  const lines: string[] = [];
+  for (const para of text.split("\n")) {
+    let line = "";
+    for (const word of para.split(/\s+/).filter(Boolean)) {
+      const next = line ? `${line} ${word}` : word;
+      if (line && maxW > 0 && textWidth(ctx, next, fontSize) > maxW) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = next;
+      }
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
 /**
  * `zoom` is the current magnification (1 / view.w), so effects sized in output
  * pixels rather than source fractions still grow with the zoom. `strokeBase`
@@ -201,6 +266,14 @@ function drawOverlay(
     }
     case "highlight":
       ctx.globalAlpha = o.opacity ?? 0.35; ctx.fillStyle = color; ctx.fillRect(x, y, w, h); break;
+    case "blackout":
+      // Redact, not tint: opaque by default and its own near-black colour, so
+      // it never inherits the shared amber every other overlay defaults to.
+      ctx.globalAlpha = o.opacity ?? 1; ctx.fillStyle = o.color ?? "#0b0b0d"; ctx.fillRect(x, y, w, h); break;
+    case "rect":
+      if (o.fill) { ctx.globalAlpha = o.opacity ?? 0.35; ctx.fillStyle = color; ctx.fillRect(x, y, w, h); }
+      else { ctx.strokeStyle = color; ctx.lineWidth = stroke; ctx.lineJoin = "round"; ctx.strokeRect(x, y, w, h); }
+      break;
     case "underline":
       ctx.strokeStyle = color; ctx.lineWidth = stroke; ctx.lineCap = "round";
       ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x + w, y + h); ctx.stroke(); break;
@@ -222,6 +295,15 @@ function drawOverlay(
       ctx.fillText(String(o.n ?? 1), cx, cy);
       break;
     }
+    case "line": {
+      // A line shares the arrow's representation (see the note in `edits.ts`):
+      // `from`/`to` are the truth, the rect only their bounding box.
+      const a = at(o.from ?? { x: o.rect.x, y: o.rect.y });
+      const b = at(o.to ?? { x: o.rect.x + o.rect.w, y: o.rect.y + o.rect.h });
+      ctx.strokeStyle = color; ctx.lineWidth = stroke; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      break;
+    }
     case "arrow": {
       // `from`/`to` are the arrow (see the note in `edits.ts`); the rect is
       // only their bounding box, so fall back to its diagonal if they are gone.
@@ -229,19 +311,92 @@ function drawOverlay(
       const b = at(o.to ?? { x: o.rect.x + o.rect.w, y: o.rect.y + o.rect.h });
       const angle = Math.atan2(b.y - a.y, b.x - a.x);
       const head = stroke * 3.5;
+      const style = o.style ?? "standard";
       ctx.strokeStyle = color; ctx.lineWidth = stroke; ctx.lineCap = "round"; ctx.lineJoin = "round";
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      // Stop the shaft just short of the tip so the head is a clean triangle.
-      ctx.lineTo(b.x - Math.cos(angle) * head * 0.8, b.y - Math.sin(angle) * head * 0.8);
-      ctx.stroke();
       ctx.fillStyle = color;
+      if (style === "curved") {
+        // The head points along the tangent at the tip, which for a quadratic
+        // is the direction from the control point — not from the tail.
+        const c = o.ctrl ? at(o.ctrl) : defaultCtrl(a, b);
+        const tip = Math.atan2(b.y - c.y, b.x - c.x);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.quadraticCurveTo(c.x, c.y, b.x - Math.cos(tip) * head * 0.8, b.y - Math.sin(tip) * head * 0.8);
+        ctx.stroke();
+        arrowHead(ctx, b, tip, head);
+      } else if (style === "fancy") {
+        // A tapered body: a filled quad that is `stroke` wide at the tail and
+        // a hairline where the head takes over, so it reads as a brush stroke.
+        const nx = -Math.sin(angle), ny = Math.cos(angle);
+        const baseX = b.x - Math.cos(angle) * head * 0.8, baseY = b.y - Math.sin(angle) * head * 0.8;
+        const t0 = stroke, t1 = stroke * 0.15;
+        ctx.beginPath();
+        ctx.moveTo(a.x + nx * t0, a.y + ny * t0);
+        ctx.lineTo(baseX + nx * t1, baseY + ny * t1);
+        ctx.lineTo(baseX - nx * t1, baseY - ny * t1);
+        ctx.lineTo(a.x - nx * t0, a.y - ny * t0);
+        ctx.closePath();
+        ctx.fill();
+        arrowHead(ctx, b, angle, head * 1.15);
+      } else {
+        // `standard` and `double` share one shaft; `double` just pulls the tail
+        // end back as well and puts a second head on it.
+        const back = style === "double" ? head * 0.8 : 0;
+        ctx.beginPath();
+        // Stop the shaft just short of the tip so the head is a clean triangle.
+        ctx.moveTo(a.x + Math.cos(angle) * back, a.y + Math.sin(angle) * back);
+        ctx.lineTo(b.x - Math.cos(angle) * head * 0.8, b.y - Math.sin(angle) * head * 0.8);
+        ctx.stroke();
+        arrowHead(ctx, b, angle, head);
+        if (style === "double") arrowHead(ctx, a, angle + Math.PI, head);
+      }
+      break;
+    }
+    case "text": {
+      const size = Math.max(1, (o.size ?? DEFAULT_TEXT_SIZE) * strokeBase);
+      const pad = size * TEXT_PAD;
+      const lh = size * TEXT_LINE_H;
+      ctx.font = `${size}px ${TEXT_FONT}`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      // Wrapped inside the drawn rect's width, minus the plate's padding — the
+      // box the user dragged is what decides where the caption breaks.
+      const lines = wrapText(ctx, o.text ?? "", Math.max(0, w - pad * 2), size);
+      ctx.globalAlpha = o.opacity ?? 1;
+      if (o.bg) {
+        const widest = lines.reduce((m, l) => Math.max(m, textWidth(ctx, l, size)), 0);
+        ctx.fillStyle = o.bg;
+        ctx.fill(buildPath(x, y, widest + pad * 2, lines.length * lh + pad * 2, pad));
+      }
+      ctx.fillStyle = color;
+      for (const [i, line] of lines.entries()) ctx.fillText(line, x + pad, y + pad + i * lh);
+      break;
+    }
+    case "emoji": {
+      // The emoji IS the overlay's `text`, drawn at the rect's height and
+      // centred in it — so the drag that placed it is also what sizes it.
+      ctx.font = `${Math.max(1, h)}px ${TEXT_FONT}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.globalAlpha = o.opacity ?? 1;
+      ctx.fillText(o.text || FALLBACK_EMOJI, x + w / 2, y + h / 2);
+      break;
+    }
+    case "draw": {
+      const pts = (o.points ?? []).map(at);
+      if (pts.length < 2) break;
+      ctx.strokeStyle = color; ctx.lineWidth = stroke; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.globalAlpha = o.opacity ?? 1;
       ctx.beginPath();
-      ctx.moveTo(b.x, b.y);
-      ctx.lineTo(b.x - Math.cos(angle - 0.4) * head, b.y - Math.sin(angle - 0.4) * head);
-      ctx.lineTo(b.x - Math.cos(angle + 0.4) * head, b.y - Math.sin(angle + 0.4) * head);
-      ctx.closePath();
-      ctx.fill();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      // Light smoothing: curve THROUGH each sample to the midpoint of the next
+      // segment, which turns a polyline of pointer samples into a continuous
+      // path without moving it off the points the user actually drew.
+      for (let i = 1; i < pts.length - 1; i++) {
+        ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + pts[i + 1].x) / 2, (pts[i].y + pts[i + 1].y) / 2);
+      }
+      ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+      ctx.stroke();
       break;
     }
     case "image": {
@@ -389,7 +544,8 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
   for (const o of inputs.edits.overlays) {
     if (t < o.start || t > o.end) continue;
     // An arrow's endpoints live in the same source space as the rect, so they
-    // map through the zoom the same way (`toOutput` on a zero-size rect).
+    // map through the zoom the same way (`toOutput` on a zero-size rect) — and
+    // so do a curve's control point and a freehand stroke's whole path.
     const mapped =
       view === FULL_RECT
         ? o
@@ -398,6 +554,8 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
             rect: toOutput(o.rect, view),
             from: o.from && toPoint(o.from, view),
             to: o.to && toPoint(o.to, view),
+            ctrl: o.ctrl && toPoint(o.ctrl, view),
+            points: o.points?.map((p) => toPoint(p, view)),
           };
     drawOverlay(ctx, mapped, t, dest, W, zoom, content.h);
   }

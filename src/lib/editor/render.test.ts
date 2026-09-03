@@ -312,6 +312,175 @@ describe("drawOverlay", () => {
     expect((ctx.calls.filter((c) => c[0] === "moveTo")[0][1] as number[])[0]).toBeCloseTo(384, 6);
   });
 
+  it("fills a blackout opaquely in its own near-black, not the shared accent", () => {
+    const ctx = fakeCtx();
+    drawFrame(ctx, inputs([{ type: "blackout", start: 0, end: 5, rect: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } }]), 1, 1920, 1080);
+    expect(last(ctx, "fillRect")).toEqual([192, 108, 384, 216]);
+    expect(ctx.props.fillStyle).toBe("#0b0b0d");
+    expect(ctx.props.globalAlpha).toBe(1);
+  });
+
+  it("strokes a rect by default and fills it translucently when `fill` is set", () => {
+    const outline = fakeCtx();
+    const r = { x: 0.25, y: 0.25, w: 0.5, h: 0.5 };
+    drawFrame(outline, inputs([{ type: "rect", start: 0, end: 5, rect: r }]), 1, 1920, 1080);
+    expect(last(outline, "strokeRect")).toEqual([480, 270, 960, 540]);
+    expect(outline.calls.some((c) => c[0] === "fillRect" && (c[1] as number[])[2] === 960)).toBe(false);
+
+    const filled = fakeCtx();
+    drawFrame(filled, inputs([{ type: "rect", start: 0, end: 5, rect: r, fill: true, opacity: 0.4 }]), 1, 1920, 1080);
+    expect(last(filled, "fillRect")).toEqual([480, 270, 960, 540]);
+    expect(filled.props.globalAlpha).toBe(0.4);
+    expect(filled.calls.some((c) => c[0] === "strokeRect")).toBe(false);
+  });
+
+  it("draws a line end to end with no head", () => {
+    const ctx = fakeCtx();
+    drawFrame(
+      ctx,
+      inputs([{ type: "line", start: 0, end: 5, rect: { x: 0.2, y: 0.3, w: 0.6, h: 0.4 }, from: { x: 0.2, y: 0.3 }, to: { x: 0.8, y: 0.7 }, thickness: 0.01 }]),
+      1,
+      1920,
+      1080,
+    );
+    expect(last(ctx, "moveTo")).toEqual([384, 324]);
+    expect(last(ctx, "lineTo")).toEqual([1536, 756]);
+    expect(ctx.props.lineWidth).toBeCloseTo(10.8);
+    // No head: a line never fills.
+    expect(ctx.calls.some((c) => c[0] === "fill")).toBe(false);
+  });
+
+  describe("arrow styles", () => {
+    const arrow = (style: "standard" | "double" | "curved" | "fancy", extra: Record<string, unknown> = {}) => {
+      const ctx = fakeCtx();
+      drawFrame(
+        ctx,
+        inputs([{ type: "arrow", start: 0, end: 5, rect: { x: 0.2, y: 0.5, w: 0.6, h: 0.001 }, from: { x: 0.2, y: 0.5 }, to: { x: 0.8, y: 0.5 }, style, ...extra }]),
+        1,
+        1920,
+        1080,
+      );
+      return ctx;
+    };
+
+    it("puts a head on both ends of a `double` and pulls the shaft back off each", () => {
+      const ctx = arrow("double");
+      const moves = ctx.calls.filter((c) => c[0] === "moveTo").map((c) => c[1] as number[]);
+      // Shaft, then the head at `to`, then the head back at `from`.
+      expect(moves).toHaveLength(3);
+      expect(moves[1]).toEqual([1536, 540]);
+      expect(moves[2]).toEqual([384, 540]);
+      expect(ctx.calls.filter((c) => c[0] === "fill")).toHaveLength(2);
+      // The shaft no longer starts on the tail point — it clears the head.
+      expect(moves[0][0]).toBeGreaterThan(384);
+      expect(moves[0][0]).toBeLessThan(1536);
+    });
+
+    it("bows a `curved` arrow through the midpoint perpendicular when it has no ctrl", () => {
+      const q = arrow("curved").calls.find((c) => c[0] === "quadraticCurveTo")![1] as number[];
+      // Midpoint (960, 540) pushed 15 % of the 1152 px length along +y.
+      expect(q[0]).toBeCloseTo(960);
+      expect(q[1]).toBeCloseTo(540 + 1152 * 0.15);
+    });
+
+    it("bends a `curved` arrow through its own ctrl when it has one", () => {
+      const q = arrow("curved", { ctrl: { x: 0.5, y: 0.2 } }).calls.find((c) => c[0] === "quadraticCurveTo")![1] as number[];
+      expect(q.slice(0, 2)).toEqual([960, 216]);
+    });
+
+    it("draws a `fancy` arrow as a filled tapered body with no stroked shaft", () => {
+      const ctx = arrow("fancy", { thickness: 0.01 });
+      expect(ctx.calls.some((c) => c[0] === "stroke")).toBe(false);
+      // The body quad plus the head.
+      expect(ctx.calls.filter((c) => c[0] === "fill")).toHaveLength(2);
+      const moves = ctx.calls.filter((c) => c[0] === "moveTo").map((c) => c[1] as number[]);
+      // Thick at the tail: half a stroke width either side of `from`.
+      expect(moves[0][1]).toBeCloseTo(540 + 10.8);
+    });
+  });
+
+  it("wraps text inside the rect and plates it when a bg is set", () => {
+    const wide = fakeCtx();
+    drawFrame(wide, inputs([{ type: "text", start: 0, end: 5, rect: { x: 0.1, y: 0.1, w: 0.5, h: 0.2 }, text: "hello world" }]), 1, 1920, 1080);
+    const lines = wide.calls.filter((c) => c[0] === "fillText").map((c) => c[1] as [string, number, number]);
+    expect(lines.map((l) => l[0])).toEqual(["hello world"]);
+    // 0.05 of the 1080-tall frame, padded by 0.35 of that inside the rect.
+    expect(String(wide.props.font).startsWith("54px ")).toBe(true);
+    expect(lines[0][1]).toBeCloseTo(192 + 54 * 0.35);
+    // No bg: nothing is plated behind it.
+    expect(wide.calls.some((c) => c[0] === "fill")).toBe(false);
+
+    const narrow = fakeCtx();
+    drawFrame(
+      narrow,
+      inputs([{ type: "text", start: 0, end: 5, rect: { x: 0.1, y: 0.1, w: 0.1, h: 0.2 }, text: "hello world", bg: "#000" }]),
+      1,
+      1920,
+      1080,
+    );
+    const wrapped = narrow.calls.filter((c) => c[0] === "fillText").map((c) => (c[1] as string[])[0]);
+    expect(wrapped).toEqual(["hello", "world"]);
+    // The plate is one filled rounded path behind the two lines.
+    expect(narrow.calls.filter((c) => c[0] === "fill")).toHaveLength(1);
+  });
+
+  it("honours an explicit text size and keeps the string's own newlines", () => {
+    const ctx = fakeCtx();
+    drawFrame(
+      ctx,
+      inputs([{ type: "text", start: 0, end: 5, rect: { x: 0, y: 0, w: 0.8, h: 0.3 }, text: "one\ntwo", size: 0.1 }]),
+      1,
+      1920,
+      1080,
+    );
+    const lines = ctx.calls.filter((c) => c[0] === "fillText").map((c) => c[1] as [string, number, number]);
+    expect(lines.map((l) => l[0])).toEqual(["one", "two"]);
+    // 0.1 × 1080 = 108 px, one line box (1.25 ×) apart.
+    expect(String(ctx.props.font).startsWith("108px ")).toBe(true);
+    expect(lines[1][2] - lines[0][2]).toBeCloseTo(108 * 1.25);
+  });
+
+  it("draws an emoji centred in its rect at the rect's height", () => {
+    const ctx = fakeCtx();
+    drawFrame(ctx, inputs([{ type: "emoji", start: 0, end: 5, rect: { x: 0.4, y: 0.45, w: 0.1, h: 0.1 }, text: "🔥" }]), 1, 1920, 1080);
+    expect(last(ctx, "fillText")).toEqual(["🔥", 864, 540]);
+    expect(String(ctx.props.font).startsWith("108px ")).toBe(true);
+    expect(ctx.props.textAlign).toBe("center");
+    expect(ctx.props.textBaseline).toBe("middle");
+  });
+
+  it("smooths a freehand stroke through its points and needs at least two", () => {
+    const three = fakeCtx();
+    drawFrame(
+      three,
+      inputs([{ type: "draw", start: 0, end: 5, rect: { x: 0, y: 0, w: 1, h: 1 }, points: [{ x: 0, y: 0 }, { x: 0.5, y: 0.5 }, { x: 1, y: 1 }] }]),
+      1,
+      1920,
+      1080,
+    );
+    expect(last(three, "moveTo")).toEqual([0, 0]);
+    // Curve THROUGH the middle sample to the midpoint of the next segment.
+    expect(last(three, "quadraticCurveTo")).toEqual([960, 540, 1440, 810]);
+    expect(last(three, "lineTo")).toEqual([1920, 1080]);
+    expect(three.calls.some((c) => c[0] === "stroke")).toBe(true);
+
+    const one = fakeCtx();
+    drawFrame(one, inputs([{ type: "draw", start: 0, end: 5, rect: { x: 0, y: 0, w: 0.1, h: 0.1 }, points: [{ x: 0, y: 0 }] }]), 1, 1920, 1080);
+    expect(one.calls.some((c) => c[0] === "stroke")).toBe(false);
+  });
+
+  it("maps a freehand stroke's points through the active zoom", () => {
+    const ctx = fakeCtx();
+    const e = {
+      ...base, camera: null,
+      zooms: [{ start: 0, end: 10, rect: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, ramp: 0 }],
+      overlays: [{ type: "draw" as const, start: 0, end: 10, rect: { x: 0.35, y: 0.35, w: 0.1, h: 0.1 }, points: [{ x: 0.35, y: 0.35 }, { x: 0.45, y: 0.45 }] }],
+    };
+    drawFrame(ctx, { screen: src, camera: null, mode: "screen", edits: e, background: null }, 5, 1920, 1080);
+    // (0.35 - 0.25) / 0.5 = 0.2 of the content box.
+    expect((last(ctx, "moveTo") as number[])[0]).toBeCloseTo(384, 6);
+  });
+
   it("skips an image until it is decoded, then draws it contain-fitted", async () => {
     const loaded: StubImage[] = [];
     class StubImage {
