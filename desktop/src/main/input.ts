@@ -8,6 +8,7 @@ import {
   keyNameFor,
   modsOf,
   normalizeButton,
+  shouldExplainInputPermission,
   type InputSample,
   type KeyNames,
 } from "./input-track";
@@ -32,7 +33,7 @@ import { sendToRecorder } from "./windows";
  *  1. It can fail. The hook needs macOS Input Monitoring (Accessibility on
  *     older versions), which cannot be granted from inside the app. Every
  *     failure degrades SILENTLY to cursor-only; the one dialog it ever shows
- *     is rate-limited to once a week by `explainInputMonitoring`.
+ *     is capped at once per app run and, after a "Not now", once a week.
  *  2. Clicks need the captured display's bounds to normalize against, exactly
  *     like a cursor sample, so a WINDOW capture produces no clicks. Keys have
  *     no coordinates, so they are recorded for every capture kind.
@@ -64,6 +65,12 @@ let hookLoadable: boolean | null = null;
 let keyNames: KeyNames | null = null;
 let listenersBound = false;
 let hookRunning = false;
+/**
+ * One explainer per app run, at most. `explainInputMonitoring` already caps a
+ * declined dialog at one a week ACROSS runs; this caps it at one WITHIN a run,
+ * including the case where the user granted nothing and starts take after take.
+ */
+let explained = false;
 
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 let pending: InputSample[] = [];
@@ -175,13 +182,15 @@ function flush(): void {
 /**
  * Start the native hook. Every failure path ends in cursor-only behaviour.
  *
- * `uIOhook.start()` throwing is the AUTHORITATIVE permission signal: libuiohook
- * checks `AXIsProcessTrusted()` and the binding turns the failure into a
- * `UIOHOOK_ERROR_AXAPI_DISABLED` throw (uiohook-napi @ 1.5.5,
- * `src/lib/addon.c#AddonStart`). `isTrustedForInput()` is checked as well
- * because a tap that was created and then silently disabled by TCC reports no
- * error at all — there is no "did I get any events?" signal to wait for, since
- * a quiet three seconds is indistinguishable from a user who did not type.
+ * `uIOhook.start()` throwing is the ONLY permission signal acted on: libuiohook
+ * fails the tap and the binding turns it into a `UIOHOOK_ERROR_AXAPI_DISABLED`
+ * throw (uiohook-napi @ 1.5.5, `src/lib/addon.c#AddonStart`).
+ *
+ * `isTrustedForInput()` is logged as a diagnostic and NOTHING more. It reads
+ * the Accessibility TCC entry, and the listen-only event tap this hook uses is
+ * gated on **Input Monitoring** — a different entry. Gating the dialog on it
+ * meant a Mac with Input Monitoring granted but Accessibility not would get the
+ * explainer at the top of every single take, for a hook that was working fine.
  */
 function startHook(): void {
   if (hookRunning) return;
@@ -189,20 +198,23 @@ function startHook(): void {
   if (!hook) return;
   bindListeners(hook);
 
-  let started = true;
   try {
     hook.uIOhook.start();
   } catch (err) {
-    started = false;
-    console.warn("[yoom] uIOhook.start() failed; no click or key track", err);
+    console.warn(
+      `[yoom] uIOhook.start() failed; no click or key track (accessibility trusted: ${isTrustedForInput()})`,
+      err,
+    );
+    if (shouldExplainInputPermission({ started: false, alreadyExplained: explained })) {
+      // Latched BEFORE the await so two takes in quick succession cannot stack
+      // two dialogs; `explainInputMonitoring` adds the once-a-week memory on
+      // top, across runs. Fire-and-forget: a take must never wait on a dialog.
+      explained = true;
+      void explainInputMonitoring().catch(() => {});
+    }
+    return;
   }
 
-  if (!started || !isTrustedForInput()) {
-    // Fire-and-forget, and rate-limited to once a week after a "Not now" — a
-    // take must never wait on a dialog.
-    void explainInputMonitoring().catch(() => {});
-  }
-  if (!started) return;
   hookRunning = true;
 }
 

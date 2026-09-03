@@ -5,6 +5,7 @@ import {
   keyNameFor,
   modsOf,
   normalizeButton,
+  shouldExplainInputPermission,
   type KeyTable,
 } from "./input-track";
 
@@ -127,5 +128,33 @@ describe("normalizeButton", () => {
 
   it("parses a numeric string, which is what `unknown` allows through", () => {
     expect(normalizeButton("2")).toBe(1);
+  });
+});
+
+describe("shouldExplainInputPermission", () => {
+  it("explains a hook that failed to start", () => {
+    expect(
+      shouldExplainInputPermission({ started: false, alreadyExplained: false }),
+    ).toBe(true);
+  });
+
+  it("stays silent when the hook started", () => {
+    // The regression this guards: an earlier version also consulted the
+    // Accessibility TCC entry, which is NOT the entry the event tap needs. On a
+    // Mac with Input Monitoring granted and Accessibility not, the hook works
+    // and the dialog fired at the top of every single take.
+    expect(
+      shouldExplainInputPermission({ started: true, alreadyExplained: false }),
+    ).toBe(false);
+    expect(
+      shouldExplainInputPermission({ started: true, alreadyExplained: true }),
+    ).toBe(false);
+  });
+
+  it("shows at most one dialog per app run", () => {
+    // Take after take on a Mac that granted nothing: explained once, then quiet.
+    expect(
+      shouldExplainInputPermission({ started: false, alreadyExplained: true }),
+    ).toBe(false);
   });
 });

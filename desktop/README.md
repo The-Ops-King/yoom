@@ -202,14 +202,19 @@ for every capture kind. The hook is stopped outright while paused and on
 `destroyHud()` (quit): a global keyboard tap is not something to leave running.
 
 **Permission.** The hook needs macOS **Input Monitoring** (Accessibility on
-older versions), which cannot be granted from inside an app. The authoritative
-signal is `uIOhook.start()` throwing `UIOHOOK_ERROR_AXAPI_DISABLED`;
-`systemPreferences.isTrustedAccessibilityClient(false)` is checked as a
-belt-and-braces second opinion (it checks without prompting). On failure the
-shell shows **one** dialog explaining what the permission buys you, with "Open
-System Settings" (deep-linked to `Privacy_ListenEvent`) and "Not now" — a "Not
-now" is remembered in `userData/input-hook.json` and re-asked at most once a
-week. Everything then **degrades silently to cursor-only**: the take records
+older versions), which cannot be granted from inside an app. The only signal
+acted on is `uIOhook.start()` **throwing** `UIOHOOK_ERROR_AXAPI_DISABLED`.
+
+`systemPreferences.isTrustedAccessibilityClient(false)` is logged as a
+diagnostic and nothing more: it reads the **Accessibility** TCC entry, while the
+listen-only event tap is gated on **Input Monitoring** — a separate entry. A Mac
+that granted Input Monitoring but not Accessibility runs the hook happily, so
+gating the dialog on it put an explainer at the top of every take.
+
+On a real failure the shell shows **one** dialog explaining what the permission
+buys you, with "Open System Settings" (deep-linked to `Privacy_ListenEvent`) and
+"Not now". It is capped twice over: once per app run, and — after a "Not now",
+remembered in `userData/input-hook.json` — at most once a week across runs. Everything then **degrades silently to cursor-only**: the take records
 normally, there is just no Clicks lane and no `keys` overlay. Note that an
 unsigned build gets a new TCC identity on every rebuild, so every rebuild has to
 be re-granted (same caveat as Screen Recording, above).

@@ -163,3 +163,31 @@ export function normalizeButton(button: unknown): number {
   if (!Number.isFinite(n)) return 0;
   return Math.max(0, Math.round(n) - 1);
 }
+
+/** What `input.ts` knows after one attempt to start the native hook. */
+export interface HookStartOutcome {
+  /** True when `uIOhook.start()` returned without throwing. */
+  started: boolean;
+  /** True once the explainer has already been shown in this app run. */
+  alreadyExplained: boolean;
+}
+
+/**
+ * Whether to show the Input Monitoring explainer.
+ *
+ * Deliberately narrow, and the narrowness is the point. The only permission
+ * signal is `uIOhook.start()` THROWING. It is tempting to also consult
+ * `systemPreferences.isTrustedAccessibilityClient(false)` as a second opinion,
+ * and an earlier version did — but that reads the **Accessibility** TCC entry
+ * while libuiohook's listen-only event tap is gated on **Input Monitoring**,
+ * which is a separate entry. On a Mac that has granted Input Monitoring and not
+ * Accessibility, the hook starts and works, and the second opinion would have
+ * put a dialog at the top of every take forever.
+ *
+ * `alreadyExplained` then caps it at one dialog per app run: the explainer is
+ * async, so without a latch two takes in quick succession could stack two of
+ * them. `explainInputMonitoring` adds the once-a-week memory across runs.
+ */
+export function shouldExplainInputPermission(outcome: HookStartOutcome): boolean {
+  return !outcome.started && !outcome.alreadyExplained;
+}
