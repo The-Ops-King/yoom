@@ -68,6 +68,38 @@ warning and carries on; you then get the ordinary password gate. If the server
 has no `DESKTOP_TOKEN` set at all the header path is disabled outright, which is
 what keeps the public website password-gated.
 
+## Ready to record
+
+The app is armed the moment it opens: there is no picker between you and the
+first take. The shell remembers the source you last actually recorded in
+`~/Library/Application Support/yoom-desktop/last-source.json` and, in the
+default **auto** share mode, answers the page's `getDisplayMedia` with it
+outright — no sheet, no click.
+
+- **What is shared** is announced to the page on `yoom:share-source`
+  (`{ id, name, kind }`), so the recorder can print "Sharing · Display 1"
+  without a picker ever having been shown. `null` arrives when the take ends or
+  the request was denied.
+- **Change** — the page's button — sends `yoom:change-share`, a **one-shot**:
+  the next request opens the native picker, and the one after that is back to
+  auto. Cancelling the picker does not consume it, so pressing record again
+  still lets you choose rather than silently re-sharing the old source.
+- **The picker still opens by itself** when nothing is remembered (fresh
+  install), when the remembered source is gone (monitor unplugged, window
+  closed), or when the page has set the sticky mode to `"pick"` with
+  `yoom:set-share-mode`.
+
+Matching is by source id first. Screen ids are stable; window ids are handles
+and do not survive a relaunch of the captured app, so a window falls back to
+the same kind with the same title — "Slack" is "Slack". The kind is part of the
+match on purpose: a window is never allowed to resolve to a display, because
+the display branch is what drives cursor tracking and bubble self-occlusion.
+The rules are pure and tested in `src/main/share.ts` / `share.test.ts`.
+
+To go back to picking every time, set `"pick"` from the page; there is no
+environment variable, because this is a per-user preference and not a debug
+switch.
+
 ## Build
 
 ```sh
@@ -111,6 +143,7 @@ renderer) and puts a 320×48 pill at the top centre of the screen:
 | ⏸ / ▶ | Pause / resume | ⌘⇧P |
 | ■ | Stop and go to staging | ⌘⇧L |
 | ⚑ | Drop a marker | ⌘⇧M |
+| ↻ | Restart — throw the take away and count in again | ⌘⇧K |
 | 🗑 | Discard the take | ⌘⇧X |
 
 Drag the pill anywhere by its body. The recorder window comes back — shown and

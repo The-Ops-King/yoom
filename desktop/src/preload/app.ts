@@ -7,6 +7,8 @@ import type {
   DesktopShortcut,
   HudState,
   InputSample,
+  ShareMode,
+  ShareSource,
   SurfacePref,
 } from "../shared/ipc";
 import { IPC } from "./app.channels";
@@ -38,6 +40,33 @@ export const bridge = {
 
   setSurfacePref(pref: SurfacePref): void {
     ipcRenderer.send(IPC.setSurfacePref, pref);
+  },
+
+  /**
+   * `"auto"` (the default in main) answers `getDisplayMedia` with the source
+   * recorded last time and never shows the picker; `"pick"` always shows it.
+   * Sticky — send it once, not per request.
+   */
+  setShareMode(mode: ShareMode): void {
+    ipcRenderer.send(IPC.setShareMode, mode);
+  },
+
+  /**
+   * "Change" in the page: open the picker for the NEXT request only, leaving
+   * the sticky mode alone. Call it, then re-run `getDisplayMedia`.
+   */
+  changeShare(): void {
+    ipcRenderer.send(IPC.changeShare);
+  },
+
+  /**
+   * Which source is actually being shared — auto-shared or picked — so the
+   * page can name it. `null` when the take ends or the request was denied.
+   */
+  onShareSource(cb: (source: ShareSource | null) => void): () => void {
+    const handler = (_e: unknown, source: ShareSource | null) => cb(source);
+    ipcRenderer.on(IPC.shareSource, handler);
+    return () => ipcRenderer.removeListener(IPC.shareSource, handler);
   },
 
   onShortcut(cb: (action: DesktopShortcut) => void): () => void {

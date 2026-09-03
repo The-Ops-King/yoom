@@ -1,13 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  changeDesktopShare,
   getDesktopBridge,
   isDesktop,
   onDesktopCursor,
   onDesktopInput,
+  onDesktopShareSource,
   onDesktopShortcut,
   setDesktopHudState,
+  setDesktopShareMode,
 } from "./desktop-bridge";
-import type { CursorSample, InputSample } from "./types";
+import type { CursorSample, InputSample, ShareSource } from "./types";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -195,5 +198,61 @@ describe("setDesktopHudState", () => {
         markers: 0,
       }),
     ).not.toThrow();
+  });
+});
+
+describe("share mode", () => {
+  it("no-ops in the browser and against a shell without the feature", () => {
+    vi.stubGlobal("window", {});
+    expect(() => setDesktopShareMode("auto")).not.toThrow();
+    expect(changeDesktopShare()).toBe(false);
+    expect(onDesktopShareSource(() => {})()).toBeUndefined();
+
+    vi.stubGlobal("window", { __yoomDesktop: { version: 1, isDesktop: true } });
+    expect(() => setDesktopShareMode("pick")).not.toThrow();
+    expect(changeDesktopShare()).toBe(false);
+    expect(onDesktopShareSource(() => {})()).toBeUndefined();
+  });
+
+  it("forwards the mode to a version-1 bridge", () => {
+    const setShareMode = vi.fn();
+    vi.stubGlobal("window", {
+      __yoomDesktop: { version: 1, isDesktop: true, setShareMode },
+    });
+    setDesktopShareMode("pick");
+    expect(setShareMode).toHaveBeenCalledWith("pick");
+  });
+
+  it("reports that the shell took the one-shot Change", () => {
+    const changeShare = vi.fn();
+    vi.stubGlobal("window", {
+      __yoomDesktop: { version: 1, isDesktop: true, changeShare },
+    });
+    expect(changeDesktopShare()).toBe(true);
+    expect(changeShare).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers the shared source and the null that ends it", () => {
+    const seen: (ShareSource | null)[] = [];
+    let emit: ((s: ShareSource | null) => void) | null = null;
+    const unsubscribe = vi.fn();
+    vi.stubGlobal("window", {
+      __yoomDesktop: {
+        version: 1,
+        isDesktop: true,
+        onShareSource: (cb: (s: ShareSource | null) => void) => {
+          emit = cb;
+          return unsubscribe;
+        },
+      },
+    });
+
+    const unsub = onDesktopShareSource((s) => seen.push(s));
+    emit!({ id: "screen:1:0", name: "Display 1", kind: "screen" });
+    emit!(null);
+    unsub();
+
+    expect(seen).toEqual([{ id: "screen:1:0", name: "Display 1", kind: "screen" }, null]);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 });

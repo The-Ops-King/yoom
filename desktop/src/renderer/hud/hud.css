@@ -38,8 +38,11 @@ body.dragging #pill * {
   cursor: grabbing;
 }
 
-/* 300×64 window, 284×48 pill: the margin is where the shadow lives, because a
-   transparent window cannot paint outside its own bounds. */
+/* 336×64 window, 320×48 pill: the margin is where the shadow lives, because a
+   transparent window cannot paint outside its own bounds. The window size is
+   `HUD_SIZE` in `main/mapping.ts` and the two MUST agree — a pill wider than
+   its window is clipped, a narrower one leaves dead space that still eats
+   clicks. Each control is 32px wide with a 4px gap, so adding one is +36. */
 #pill {
   margin: 8px;
   height: 48px;
@@ -94,8 +97,8 @@ body.paused #dot {
   font-size: 11px;
 }
 
-/* The 3-2-1 replaces the whole pill: the recorder window is already hidden by
-   the time the countdown runs, so this is the only place it can be shown. */
+/* The countdown replaces the whole pill: the recorder window is already hidden
+   by the time it runs, so this is the only place it can be shown. */
 #countdown {
   flex: 1;
   text-align: center;
@@ -103,6 +106,12 @@ body.paused #dot {
   font-weight: 600;
   color: var(--accent);
   font-variant-numeric: tabular-nums;
+}
+
+/* "Ready?" / "Go!" — a word where a digit was. See `countdownLabel`. */
+#countdown.word {
+  font-size: 20px;
+  letter-spacing: 0.01em;
 }
 
 body.counting #status,
@@ -156,8 +165,9 @@ body.counting #controls {
   stroke: none;
 }
 
-/* The trash glyph is drawn as strokes, not fills. */
-#cancel svg {
+/* The trash and restart glyphs are drawn as strokes, not fills. */
+#cancel svg,
+#restart svg {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.3;

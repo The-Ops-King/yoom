@@ -10,6 +10,31 @@
  */
 
 export type SurfacePref = "monitor" | "window" | "browser";
+
+/**
+ * How the next `getDisplayMedia` request is answered.
+ *
+ * `"auto"` — the default — re-shares whatever was recorded last time without
+ * showing anything, which is what makes the app ready to record the moment it
+ * opens. `"pick"` always opens the native picker. The page can also ask for a
+ * one-shot pick with `IPC.changeShare` without leaving `"auto"` behind.
+ *
+ * MUST stay identical to `ShareMode` in `src/lib/recording/types.ts`.
+ */
+export type ShareMode = "auto" | "pick";
+
+/**
+ * The source the shell is currently sharing with the page, announced on
+ * `IPC.shareSource` so the page can name it ("Sharing: Display 1") and offer a
+ * "Change" button.
+ *
+ * MUST stay identical to `ShareSource` in `src/lib/recording/types.ts`.
+ */
+export interface ShareSource {
+  id: string;
+  name: string;
+  kind: "screen" | "window";
+}
 export type BubbleShape = "circle" | "rounded" | "square" | "portrait" | "full";
 export type BubbleSize = "small" | "medium" | "large";
 export type DesktopShortcut =
@@ -86,6 +111,24 @@ export interface SourceInfo {
 export const IPC = {
   /** app renderer → main. Fire-and-forget surface preference for the picker. */
   setSurfacePref: "yoom:set-surface-pref",
+  /**
+   * app renderer → main. Payload: ShareMode. Sticky, defaults to `"auto"`.
+   * See `main/capture.ts`.
+   */
+  setShareMode: "yoom:set-share-mode",
+  /**
+   * app renderer → main. No payload. "Let me choose the source again": forces
+   * the picker for the NEXT display-media request only, without changing the
+   * sticky mode. Consumed when a source is actually resolved, so cancelling
+   * the picker and pressing record again still opens it.
+   */
+  changeShare: "yoom:change-share",
+  /**
+   * main → app renderer. Payload: `ShareSource | null`. Sent after every
+   * resolved capture source — auto-shared or picked — and `null` when the take
+   * ends or the request is denied.
+   */
+  shareSource: "yoom:share-source",
   /** main → app renderer. A global hotkey fired. Payload: DesktopShortcut. */
   shortcut: "yoom:shortcut",
   /** main → app renderer. Bubble was dragged. Payload: { x, y } normalized. */

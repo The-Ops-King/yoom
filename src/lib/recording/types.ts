@@ -47,6 +47,31 @@ export type DesktopShortcut =
   | "cancel";
 
 /**
+ * How the shell answers the next `getDisplayMedia` request.
+ *
+ * `"auto"` — the default — re-shares whatever was recorded last time without
+ * showing anything, which is what makes the app ready to record the moment it
+ * opens. `"pick"` always opens the native picker. The page can also ask for a
+ * one-shot pick with `changeDesktopShare()` without leaving `"auto"` behind.
+ *
+ * MUST stay identical to `ShareMode` in `desktop/src/shared/ipc.ts`.
+ */
+export type ShareMode = "auto" | "pick";
+
+/**
+ * The source the shell is currently sharing with the page, so the ready panel
+ * can name it ("Sharing · Display 1") and offer a "Change" button. `null` when
+ * nothing is shared or the request was denied.
+ *
+ * MUST stay identical to `ShareSource` in `desktop/src/shared/ipc.ts`.
+ */
+export interface ShareSource {
+  id: string;
+  name: string;
+  kind: "screen" | "window";
+}
+
+/**
  * What the floating desktop camera bubble should look like. `visible` is the
  * user's own bubble toggle; the shell ALSO gates the window on
  * `setBubbleVisible`, which follows the recorder's status. The window is shown
@@ -191,6 +216,18 @@ export interface DesktopBridge {
    * across worlds.
    */
   setSurfacePref?(pref: SurfacePref): void;
+  /**
+   * Sticky: how every following `getDisplayMedia` request is answered. Sent
+   * once on boot, not per request.
+   */
+  setShareMode?(mode: ShareMode): void;
+  /**
+   * One-shot "Change": open the picker for the NEXT request only, leaving the
+   * sticky mode alone. Call it, then re-run `getDisplayMedia`.
+   */
+  changeShare?(): void;
+  /** Which source is actually being shared, so the page can name it. */
+  onShareSource?(cb: (source: ShareSource | null) => void): () => void;
   /** The user dragged the floating bubble; `pos` is normalized to the captured display. */
   onBubbleMove?(cb: (pos: { x: number; y: number }) => void): () => void;
   /** Shape / size / mirror / user-visibility of the floating bubble. */

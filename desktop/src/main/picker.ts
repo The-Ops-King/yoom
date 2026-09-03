@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BrowserWindow, app, desktopCapturer, ipcMain } from "electron";
 import { IPC, type PickerPayload, type SourceInfo } from "../shared/ipc";
+import { type LastSource, matchLastSource } from "./share";
 import {
   getRecorderWindow,
   registerShellWebContents,
@@ -38,16 +39,12 @@ export async function listSources(): Promise<SourceInfo[]> {
 /**
  * The last source the user actually recorded, remembered across launches.
  *
- * macOS still wants a deliberate choice for every capture, so the picker is
- * never skipped — but re-picking the same monitor from scratch every take is
- * the kind of friction Loom does not have. Remembering the pick makes Enter (or
- * one click) enough.
+ * This is what makes the app ready to record the moment it opens: in the
+ * default `"auto"` share mode `capture.ts` answers `getDisplayMedia` with this
+ * source and never shows the picker (see `main/share.ts`). When the picker
+ * does open — `"pick"` mode, the page's "Change" button, or nothing
+ * remembered — the same source is preselected and badged "Last time".
  */
-interface LastSource {
-  id: string;
-  name: string;
-  kind: "screen" | "window";
-}
 
 /** `undefined` = not read from disk yet; `null` = read, nothing stored. */
 let lastSource: LastSource | null | undefined;
@@ -87,20 +84,17 @@ export function rememberLastSource(source: LastSource): void {
 }
 
 /**
- * The id of the remembered source in TODAY's list, or null.
- *
- * Matched by id first. Window ids (`window:<handle>:0`) are handles, so they do
- * not survive the app being relaunched — for those, fall back to the same kind
- * with the same title, which is what "Slack" or "Chrome — Yoom" means to the
- * person looking at the grid. Screen ids are stable and hit the first branch.
+ * The remembered source as it appears in TODAY's list, or null. The matching
+ * rules — and why a window falls back to kind + title — live in
+ * `share.ts#matchLastSource`, which is where they are tested.
  */
+export function resolveLastSource(sources: SourceInfo[]): SourceInfo | null {
+  return matchLastSource(readLastSource(), sources);
+}
+
+/** The same answer as `resolveLastSource`, as the id the picker preselects. */
 export function resolveLastSourceId(sources: SourceInfo[]): string | null {
-  const last = readLastSource();
-  if (!last) return null;
-  const exact = sources.find((s) => s.id === last.id);
-  if (exact) return exact.id;
-  const byName = sources.find((s) => s.kind === last.kind && s.name === last.name);
-  return byName?.id ?? null;
+  return resolveLastSource(sources)?.id ?? null;
 }
 
 function rendererEntry(): { url?: string; file?: string } {

@@ -6,6 +6,7 @@ import {
   type HudState,
   type HudStatus,
 } from "../shared/ipc";
+import { updateShareStatus } from "./capture";
 import { onRecorderStatus, stopCursorTracking } from "./cursor";
 import { stopInputTracking, updateInputTracking } from "./input";
 import { clampToWorkArea, hudDefaultBounds, recorderWindowVisibility } from "./mapping";
@@ -268,6 +269,9 @@ export function setHudState(next: HudState): void {
   // the same millisecond.
   onRecorderStatus(next.status);
   updateInputTracking(next.status);
+  // Same reason: the end of a take is when the page drops the display track,
+  // and the page's "Sharing …" line must not outlive it.
+  updateShareStatus(next.status);
 
   if (statusChanged) {
     // A status change always un-suppresses the pill (wakeHud below re-arms).

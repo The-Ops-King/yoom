@@ -14,6 +14,9 @@
  */
 export const IPC = {
   setSurfacePref: "yoom:set-surface-pref",
+  setShareMode: "yoom:set-share-mode",
+  changeShare: "yoom:change-share",
+  shareSource: "yoom:share-source",
   shortcut: "yoom:shortcut",
   bubbleMoved: "yoom:bubble-moved",
   setBubbleAppearance: "yoom:bubble-appearance",

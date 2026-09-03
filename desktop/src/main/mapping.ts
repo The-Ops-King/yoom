@@ -138,10 +138,14 @@ export function cycleShape(shape: BubbleShape): BubbleShape {
 
 /**
  * The HUD window's size in device-independent pixels. The pill itself is
- * 284×48; the window is larger so the drop shadow and the transparent rounded
+ * 320×48; the window is larger so the drop shadow and the transparent rounded
  * corners have room, since a transparent window cannot paint outside itself.
+ *
+ * Five controls at 32px with a 4px gap. Adding or removing one is ±36 here AND
+ * in the pill's comment in `renderer/hud/hud.css`: a pill wider than its window
+ * is clipped by it.
  */
-export const HUD_SIZE = { width: 300, height: 64 } as const;
+export const HUD_SIZE = { width: 336, height: 64 } as const;
 
 /** Gap between the top of the work area and the top of the HUD window. */
 export const HUD_TOP_INSET = 12;

@@ -4,6 +4,8 @@ import type {
   DesktopShortcut,
   HudState,
   InputSample,
+  ShareMode,
+  ShareSource,
 } from "./types";
 
 declare global {
@@ -71,4 +73,46 @@ export function onDesktopInput(cb: (samples: InputSample[]) => void): () => void
  */
 export function setDesktopHudState(state: HudState): void {
   getDesktopBridge()?.setHudState?.(state);
+}
+
+/**
+ * Choose how the shell answers `getDisplayMedia`: `"auto"` re-shares the last
+ * source with no picker at all, `"pick"` always shows it. Sticky — send it
+ * once, not per request.
+ *
+ * No-op in the browser and against a shell that predates auto-share, where
+ * every request opens the picker as before.
+ */
+export function setDesktopShareMode(mode: ShareMode): void {
+  getDesktopBridge()?.setShareMode?.(mode);
+}
+
+/**
+ * "Change": open the native picker for the NEXT `getDisplayMedia` only,
+ * without leaving `"auto"` behind. Call it, then re-acquire the stream.
+ *
+ * Returns whether the shell accepted it, so a page whose shell predates the
+ * feature can fall back to its own source UI instead of re-acquiring the same
+ * source and looking broken.
+ */
+export function changeDesktopShare(): boolean {
+  const bridge = getDesktopBridge();
+  if (!bridge?.changeShare) return false;
+  bridge.changeShare();
+  return true;
+}
+
+/**
+ * Subscribe to which source the shell is sharing — auto-shared or picked —
+ * with `null` when the take ends or the request was denied. Returns a no-op
+ * unsubscribe in the browser and against a shell that predates the feature, so
+ * the caller can wire it unconditionally; in those cases nothing ever arrives
+ * and the page simply never names a source.
+ */
+export function onDesktopShareSource(
+  cb: (source: ShareSource | null) => void,
+): () => void {
+  const bridge = getDesktopBridge();
+  if (!bridge?.onShareSource) return () => {};
+  return bridge.onShareSource(cb);
 }

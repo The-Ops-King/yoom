@@ -25,6 +25,21 @@ const PAUSE_ICON =
 const PLAY_ICON =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3l8 5-8 5z"/></svg>';
 
+/**
+ * What the countdown shows. Purely presentational — the web app still counts
+ * in whole seconds, this only decides the wording.
+ *
+ * The initial start counts from 3, so it reads "3 · Ready? · Go!". A restart
+ * counts from 2 and reads "Ready? · Go!" — no number at all, because after a
+ * restart you are not waiting for the app, you are waiting for yourself.
+ */
+export function countdownLabel(seconds: number): string {
+  const n = Math.max(1, Math.round(seconds));
+  if (n === 1) return "Go!";
+  if (n === 2) return "Ready?";
+  return String(n);
+}
+
 function apply(state: HudState): void {
   const counting = state.status === "countdown";
   document.body.classList.toggle("counting", counting);
@@ -32,7 +47,10 @@ function apply(state: HudState): void {
 
   countdown.hidden = !counting;
   if (counting) {
-    countdown.textContent = String(Math.max(1, state.countdown));
+    const label = countdownLabel(state.countdown);
+    countdown.textContent = label;
+    // A word needs to fit where a single digit did.
+    countdown.classList.toggle("word", label.length > 1);
     return;
   }
 
@@ -52,6 +70,7 @@ const ACTIONS = [
   ["stop", "toggle"],
   ["pause", "pause"],
   ["mark", "mark"],
+  ["restart", "restart"],
   ["cancel", "cancel"],
 ] as const;
 
