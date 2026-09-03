@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { BrowserWindow, session, shell, type Session } from "electron";
+import { BrowserWindow, dialog, session, shell, type Session } from "electron";
 
 /**
  * The web app the shell wraps. `YOOM_APP_URL` overrides for staging;
@@ -201,11 +201,36 @@ export function createRecorderWindow(): BrowserWindow {
    *
    * Per the webContents docs, calling `event.preventDefault()` here "will
    * ignore the `beforeunload` event handler and allow the page to be unloaded".
-   * We only do that once a quit is actually under way (`before-quit` sets the
-   * flag), so closing or hiding the window mid-take still protects the take.
+   *
+   * A quit takes that path unconditionally — `before-quit` sets the flag, and
+   * the tray's Quit is already a deliberate "I am done" gesture.
+   *
+   * A plain window close does NOT. Electron shows nothing of its own for a
+   * prevented unload, so the traffic-light × just silently did nothing while a
+   * take or a staged blob was alive, which read as a broken button. Ask
+   * instead. `showMessageBoxSync` because this handler is synchronous: the
+   * answer has to be known before it returns.
+   *
+   * Closing is a real close for this window — there is no `close` handler
+   * turning it into a hide, and `window-all-closed` deliberately does not quit
+   * (the shell lives in the menu bar, and the tray reopens the recorder). So
+   * "Discard take" lets the window be destroyed, exactly as it would be with
+   * no guard armed.
    */
   win.webContents.on("will-prevent-unload", (event) => {
-    if (quitting) event.preventDefault();
+    if (quitting) {
+      event.preventDefault();
+      return;
+    }
+    const choice = dialog.showMessageBoxSync(win, {
+      type: "warning",
+      buttons: ["Discard take", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      message: "Discard the current take?",
+      detail: "The recording and any staging edits will be lost.",
+    });
+    if (choice === 0) event.preventDefault();
   });
 
   win.once("ready-to-show", () => win.show());
