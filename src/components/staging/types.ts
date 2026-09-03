@@ -4,8 +4,10 @@ import type { CursorAt } from "@/lib/editor/zoom";
 import type { FinishInput } from "@/lib/recording/use-recorder";
 import type {
   BubbleConfig,
+  ClickSample,
   CursorSample,
   FrameConfig,
+  KeySample,
   RecordingMode,
 } from "@/lib/recording/types";
 import type { RailSection } from "./rail";
@@ -31,6 +33,20 @@ export interface StagingProps {
    * memory only: it is never written to `videos.edits` or to sessionStorage.
    */
   cursor: CursorSample[];
+  /**
+   * The take's global clicks, on the same terms as `cursor` (seconds, memory
+   * only). Staging seeds `edits.clicks` from them once, on first load; from
+   * then on the LANE is the truth and this array is only its origin. Empty
+   * whenever the shell captured none — no hook, no Input Monitoring, or a
+   * window capture — which is what hides the Clicks lane.
+   */
+  clicks: ClickSample[];
+  /**
+   * The take's key presses, same terms again. Read live by the renderer (the
+   * `keys` overlay's badge samples it at draw time), never copied into the
+   * edit list — only the overlay's span is persisted.
+   */
+  keys: KeySample[];
   defaults: { bubble: BubbleConfig; frame: FrameConfig };
   error: string;
   onFinish: (input: FinishInput) => void;
@@ -112,6 +128,13 @@ export interface StagingContext {
    * sampler the player draws with; undefined when there is no track.
    */
   cursorAt?: CursorAt;
+  /**
+   * The take's raw input tracks (see `StagingProps`). The Cursor & input
+   * section reads their lengths to explain a take that captured neither, and
+   * the Clicks lane is drawn from `edits.clicks`, not from `clicks`.
+   */
+  clicks: ClickSample[];
+  keys: KeySample[];
   mode: RecordingMode;
   tool: Tool;
   setTool(t: Tool): void;

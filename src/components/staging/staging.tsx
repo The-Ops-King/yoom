@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { parseEdits, type CameraTrack, type Overlay, type VideoEdits, type ZoomKind } from "@/lib/edits";
+import { DEFAULT_CURSOR, parseEdits, type CameraTrack, type Overlay, type VideoEdits, type ZoomKind } from "@/lib/edits";
 import { defaultCameraTrack } from "@/lib/editor/camera-track";
 import { createCursorSampler } from "@/lib/editor/cursor-path";
 import * as ops from "@/lib/editor/edit-ops";
@@ -90,7 +90,17 @@ function initialEdits(p: StagingProps, screenAspect: number): VideoEdits {
   } else {
     base.camera = null;
   }
-  return base;
+  // The clicks lane starts as the take's own click track with every mark on.
+  // From here the LANE is the truth — it is persisted with the edits, so a
+  // reload restores it from the draft instead of re-seeding from the track.
+  const seeded = ops.setClicks(
+    base,
+    p.clicks.map((c) => ({ t: c.t, x: c.x, y: c.y, on: true })),
+  );
+  // `real`: the capture always contains the OS pointer (neither Electron nor
+  // Chrome honours a `cursor: "never"` constraint any more), so the synthetic
+  // arrow would be a SECOND cursor and has to be asked for. Motion blur is on.
+  return ops.setMotionBlur(ops.setCursor(seeded, DEFAULT_CURSOR), true);
 }
 
 export function Staging(props: StagingProps) {
@@ -113,6 +123,7 @@ export function Staging(props: StagingProps) {
 
   const player = useStagingPlayer(props.screenUrl, props.cameraUrl, props.mode, props.durationMs, edits, {
     cursor: props.cursor,
+    keys: props.keys,
   });
   // One sampler for the whole screen: the player draws with it and the zoom
   // box measures against it, so the box lands exactly on what is rendered.
@@ -188,7 +199,25 @@ export function Staging(props: StagingProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      const typing =
+        !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      /*
+        Space is the transport and NOTHING else. This listener is on `window`
+        in the CAPTURE phase, so stopping propagation here keeps the event away
+        from whatever happens to have focus: a button (or a lane diamond) is
+        activated by Space on keyUP, so both halves of the press have to be
+        swallowed, or clicking a lane and hitting space would re-fire that
+        control instead of playing. `preventDefault` also kills the page scroll.
+      */
+      if (e.code === "Space" && !typing) {
+        e.preventDefault();
+        e.stopPropagation();
+        // Auto-repeat while the bar is held must not toggle 30 times a second.
+        if (e.type === "keydown" && !e.repeat) playerRef.current.toggle();
+        return;
+      }
+      // Everything below is a keydown shortcut; keyup only exists here for Space.
+      if (e.type !== "keydown" || typing) return;
       const meta = e.metaKey || e.ctrlKey;
       if (meta && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -199,11 +228,6 @@ export function Staging(props: StagingProps) {
       const p = playerRef.current;
       // The throttled `time` lags by up to 100 ms; mark from the live playhead.
       const now = p.timeRef.current;
-      if (e.key === " ") {
-        e.preventDefault();
-        p.toggle();
-        return;
-      }
       if (e.key === ",") p.step(-1);
       if (e.key === ".") p.step(1);
       // Arrows mirror `,`/`.` — one frame, or a second with Shift. `step`
@@ -245,8 +269,13 @@ export function Staging(props: StagingProps) {
         setSelected(null);
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture phase, and keyup as well as keydown — see the Space branch.
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("keyup", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("keyup", onKey, true);
+    };
   }, [apply, inPoint, outPoint, selected]);
 
   /** In/out points scope a new span when both are set; otherwise 3 s from the playhead. */
@@ -356,6 +385,8 @@ export function Staging(props: StagingProps) {
       duration,
       cursor: props.cursor,
       cursorAt,
+      clicks: props.clicks,
+      keys: props.keys,
       mode: props.mode,
       tool,
       setTool,
@@ -388,6 +419,8 @@ export function Staging(props: StagingProps) {
       duration,
       props.cursor,
       cursorAt,
+      props.clicks,
+      props.keys,
       props.mode,
       props.error,
       tool,
@@ -405,7 +438,7 @@ export function Staging(props: StagingProps) {
   );
 
   return (
-    <div className="grid w-full max-w-6xl select-none gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div className="grid w-full max-w-6xl select-none gap-4 overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px]">
       <div className="space-y-3">
         <Preview ctx={ctx} />
         <Timeline ctx={ctx} />

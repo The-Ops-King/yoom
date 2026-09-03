@@ -191,6 +191,8 @@ export function Recorder() {
           cameraOffsetMs={state.cameraOffsetMs}
           markers={state.markers}
           cursor={staging.cursor}
+          clicks={staging.clicks}
+          keys={staging.keys}
           defaults={{ bubble: state.bubble, frame: state.frame }}
           error={state.error}
           onFinish={actions.finish}
