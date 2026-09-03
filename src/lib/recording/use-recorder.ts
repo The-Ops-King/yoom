@@ -682,6 +682,7 @@ export function useRecorder(): UseRecorderResult {
           thumbnailAt: input.thumbnailAt,
           onProgress: (percent) => dispatch({ type: "RENDER_PROGRESS", percent }),
           signal: abort.signal,
+          cursor: toSeconds(cursorRef.current),
         });
       } catch (err) {
         renderAbortRef.current = null;
