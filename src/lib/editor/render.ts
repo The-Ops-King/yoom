@@ -1,8 +1,8 @@
-import type { CameraMode, Overlay, Rect, VideoEdits } from "@/lib/edits";
+import { DEFAULT_OVERLAY_THICKNESS, type CameraMode, type Overlay, type Point, type Rect, type VideoEdits } from "@/lib/edits";
 import { computeFrameLayout, coverCrop, shapeRadius } from "@/lib/recording/geometry";
 import type { BackgroundConfig, RecordingMode } from "@/lib/recording/types";
 import { cameraAt } from "./camera-track";
-import { FULL_RECT, fitView, toOutput, zoomAt } from "./zoom";
+import { type CursorAt, FULL_RECT, fitView, toOutput, zoomAt } from "./zoom";
 
 export interface RenderInputs {
   screen: HTMLVideoElement | null;
@@ -11,6 +11,11 @@ export interface RenderInputs {
   edits: VideoEdits;
   /** Decoded frame background media (image or looping video), or null for none/colour. */
   background: HTMLImageElement | HTMLVideoElement | null;
+  /**
+   * The take's smoothed cursor sampler, for `follow` zooms. Omitted (or
+   * returning null) leaves every zoom on its stored rect.
+   */
+  cursorAt?: CursorAt;
 }
 
 /** The output canvas size for a source of `w`×`h`. */
@@ -65,6 +70,11 @@ function framePath(x: number, y: number, w: number, h: number, r: number): Path2
   return p;
 }
 
+/** A normalised source point through the active zoom, the `toOutput` of a point. */
+function toPoint(p: Point, view: Rect): Point {
+  return { x: (p.x - view.x) / view.w, y: (p.y - view.y) / view.h };
+}
+
 /** Duck-typed so the node tests can pass plain objects for media elements. */
 function isVideo(media: HTMLImageElement | HTMLVideoElement): media is HTMLVideoElement {
   return "videoWidth" in media;
@@ -96,6 +106,50 @@ function scratchCanvas(): HTMLCanvasElement {
 }
 
 /**
+ * Decoded overlay images, keyed by `src`. `drawFrame` is synchronous, so a
+ * miss can only kick the decode off and skip this frame — the preview picks
+ * the image up on the next one. The export must not do that (it renders each
+ * frame once), so it awaits `preloadOverlayImages` first.
+ *
+ * Module-level and never evicted: an overlay `src` is an object URL that lives
+ * as long as the staging screen, and there are at most `MAX_OVERLAYS` of them.
+ */
+const imageCache = new Map<string, HTMLImageElement>();
+
+/** The cached element for `src`, starting its decode on the first miss. Null outside a browser. */
+function overlayImage(src: string): HTMLImageElement | null {
+  const hit = imageCache.get(src);
+  if (hit) return hit;
+  if (typeof Image === "undefined") return null;
+  const img = new Image();
+  imageCache.set(src, img);
+  img.src = src;
+  return img;
+}
+
+/**
+ * Decode every image overlay in `edits` up front. The export awaits this
+ * before its first frame; nothing else has to. Never rejects — an image that
+ * fails to load is simply skipped by `drawOverlay`, so a dead `blob:` cannot
+ * take the whole render down with it.
+ */
+export function preloadOverlayImages(edits: VideoEdits): Promise<void> {
+  const pending: Promise<void>[] = [];
+  for (const o of edits.overlays) {
+    if (o.type !== "image" || !o.src) continue;
+    const img = overlayImage(o.src);
+    if (!img || (img.complete && img.naturalWidth > 0)) continue;
+    pending.push(
+      new Promise<void>((resolve) => {
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+      }),
+    );
+  }
+  return Promise.all(pending).then(() => undefined);
+}
+
+/**
  * `zoom` is the current magnification (1 / view.w), so effects sized in output
  * pixels rather than source fractions still grow with the zoom.
  */
@@ -105,6 +159,11 @@ function drawOverlay(ctx: CanvasRenderingContext2D, o: Overlay, t: number, conte
   const w = o.rect.w * content.w;
   const h = o.rect.h * content.h;
   const color = o.color ?? "#f5c542";
+  // Thickness is normalised to the frame HEIGHT and stays constant in output
+  // pixels under a zoom — a 4× zoom must not give you a 4× fatter stroke.
+  const stroke = Math.max(1, (o.thickness ?? DEFAULT_OVERLAY_THICKNESS) * content.h);
+  /** A normalised point (already mapped through the zoom) in output pixels. */
+  const at = (p: Point) => ({ x: content.x + p.x * content.w, y: content.y + p.y * content.h });
   ctx.save();
   switch (o.type) {
     case "blur": {
@@ -124,20 +183,58 @@ function drawOverlay(ctx: CanvasRenderingContext2D, o: Overlay, t: number, conte
       break;
     }
     case "highlight":
-      ctx.globalAlpha = 0.35; ctx.fillStyle = color; ctx.fillRect(x, y, w, h); break;
+      ctx.globalAlpha = o.opacity ?? 0.35; ctx.fillStyle = color; ctx.fillRect(x, y, w, h); break;
     case "underline":
-      ctx.strokeStyle = color; ctx.lineWidth = Math.max(2, W * 0.003);
+      ctx.strokeStyle = color; ctx.lineWidth = stroke; ctx.lineCap = "round";
       ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x + w, y + h); ctx.stroke(); break;
-    case "callout": {
-      const r = Math.max(w, h) / 2;
+    case "ellipse":
+      ctx.strokeStyle = color; ctx.lineWidth = stroke;
+      ctx.beginPath();
+      ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+    case "step": {
+      // A badge sized by the rect, so the same drag gesture that draws every
+      // other overlay sets how big the number is.
+      const d = Math.min(w, h);
       const cx = x + w / 2, cy = y + h / 2;
-      ctx.strokeStyle = color; ctx.lineWidth = Math.max(3, W * 0.004);
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-      const badge = Math.max(18, W * 0.018);
-      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx + r * 0.75, cy - r * 0.75, badge / 2, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#111"; ctx.font = `bold ${badge * 0.65}px system-ui, sans-serif`;
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(cx, cy, d / 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = `bold ${d * 0.58}px system-ui, sans-serif`;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(String(o.n ?? ""), cx + r * 0.75, cy - r * 0.75);
+      ctx.fillText(String(o.n ?? 1), cx, cy);
+      break;
+    }
+    case "arrow": {
+      // `from`/`to` are the arrow (see the note in `edits.ts`); the rect is
+      // only their bounding box, so fall back to its diagonal if they are gone.
+      const a = at(o.from ?? { x: o.rect.x, y: o.rect.y });
+      const b = at(o.to ?? { x: o.rect.x + o.rect.w, y: o.rect.y + o.rect.h });
+      const angle = Math.atan2(b.y - a.y, b.x - a.x);
+      const head = stroke * 3.5;
+      ctx.strokeStyle = color; ctx.lineWidth = stroke; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      // Stop the shaft just short of the tip so the head is a clean triangle.
+      ctx.lineTo(b.x - Math.cos(angle) * head * 0.8, b.y - Math.sin(angle) * head * 0.8);
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(b.x - Math.cos(angle - 0.4) * head, b.y - Math.sin(angle - 0.4) * head);
+      ctx.lineTo(b.x - Math.cos(angle + 0.4) * head, b.y - Math.sin(angle + 0.4) * head);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    case "image": {
+      const img = o.src ? overlayImage(o.src) : null;
+      // Sync draw: an image still decoding is skipped and picked up next frame.
+      if (!img || !img.complete || img.naturalWidth <= 0 || img.naturalHeight <= 0) break;
+      const s = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+      const dw = img.naturalWidth * s, dh = img.naturalHeight * s;
+      ctx.globalAlpha = o.opacity ?? 1;
+      ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
       break;
     }
     case "click": {
@@ -165,7 +262,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
   const frame = inputs.edits.frame;
   const framed = frame?.enabled === true;
   // Zoom: the part of the source that fills the content box this frame.
-  const view = zoomAt(inputs.edits.zooms, t);
+  const view = zoomAt(inputs.edits.zooms, t, inputs.cursorAt);
   const sx = view.x * sw, sy = view.y * sh, svw = view.w * sw, svh = view.h * sh;
 
   // Camera-only draws the camera as the primary source: cover the box (a
@@ -269,7 +366,17 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
   const zoom = view.w > 0 ? 1 / view.w : 1;
   for (const o of inputs.edits.overlays) {
     if (t < o.start || t > o.end) continue;
-    const mapped = view === FULL_RECT ? o : { ...o, rect: toOutput(o.rect, view) };
+    // An arrow's endpoints live in the same source space as the rect, so they
+    // map through the zoom the same way (`toOutput` on a zero-size rect).
+    const mapped =
+      view === FULL_RECT
+        ? o
+        : {
+            ...o,
+            rect: toOutput(o.rect, view),
+            from: o.from && toPoint(o.from, view),
+            to: o.to && toPoint(o.to, view),
+          };
     drawOverlay(ctx, mapped, t, dest, W, zoom);
   }
   ctx.restore();
