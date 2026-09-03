@@ -11,6 +11,7 @@ import { appendSamples, toSeconds } from "./cursor-track";
 import {
   isDesktop,
   onDesktopCursor,
+  onDesktopInput,
   onDesktopShortcut,
   setDesktopHudState,
 } from "./desktop-bridge";
@@ -26,9 +27,11 @@ import { uploadRecording } from "./upload";
 import type {
   BubbleConfig,
   Capabilities,
+  ClickSample,
   CursorSample,
   FrameConfig,
   HudStatus,
+  KeySample,
   RecordingMode,
   SurfacePref,
 } from "./types";
@@ -96,6 +99,15 @@ export interface UseRecorderResult {
     screenUrl: string | null;
     cameraUrl: string | null;
     cursor: CursorSample[];
+    /**
+     * The take's global clicks, `t` in SECONDS like `cursor`. Staging seeds
+     * `edits.clicks` from them once. Empty in the browser, on a shell that
+     * predates the input hook, without macOS Input Monitoring, and for window
+     * captures — which is how the Clicks lane decides whether to appear.
+     */
+    clicks: ClickSample[];
+    /** The take's key presses, on the same terms as `clicks`. */
+    keys: KeySample[];
   } | null;
   getLevel: (id: "mic" | "system") => number;
   actions: {
@@ -191,6 +203,10 @@ export function useRecorder(): UseRecorderResult {
   // because nothing re-renders on a new batch — staging reads the finished
   // track once. Cleared when a take begins and when one is thrown away.
   const cursorRef = useRef<CursorSample[]>([]);
+  // The other two input tracks, on identical terms: the shell's native hook
+  // forwards them in one mixed batch and they are split by `kind` here.
+  const clicksRef = useRef<ClickSample[]>([]);
+  const keysRef = useRef<KeySample[]>([]);
   // Settings are only persisted once the stored settings have been read back,
   // so the first render never writes DEFAULT_SETTINGS over the saved ones.
   const hydratedRef = useRef(false);
@@ -219,6 +235,23 @@ export function useRecorder(): UseRecorderResult {
   // is nothing to unsubscribe between takes. A no-op in the browser.
   useEffect(() => onDesktopCursor((batch) => {
     cursorRef.current = appendSamples(cursorRef.current, batch);
+  }), []);
+
+  // Clicks and keys arrive on one mixed, time-ordered channel (`yoom:input`),
+  // subscribed for the life of the page like the cursor. `kind` is dropped on
+  // the way in: the two tracks are separate everywhere downstream, and staging
+  // asks different questions of each.
+  useEffect(() => onDesktopInput((batch) => {
+    // Split the batch first and append once per track: `appendSamples` copies,
+    // so appending sample by sample would be quadratic in a long take.
+    const clicks: ClickSample[] = [];
+    const keys: KeySample[] = [];
+    for (const s of batch) {
+      if (s.kind === "click") clicks.push({ t: s.t, x: s.x, y: s.y, button: s.button });
+      else keys.push({ t: s.t, key: s.key, mods: s.mods });
+    }
+    if (clicks.length > 0) clicksRef.current = appendSamples(clicksRef.current, clicks);
+    if (keys.length > 0) keysRef.current = appendSamples(keysRef.current, keys);
   }), []);
 
   // Persist preferences whenever they change.
@@ -431,6 +464,8 @@ export function useRecorder(): UseRecorderResult {
     // Covers the first take and every restart: the shell's `t` restarts at 0
     // with the encoder, so a stale track would sit in front of the new one.
     cursorRef.current = [];
+    clicksRef.current = [];
+    keysRef.current = [];
 
     const mimeType = pickMimeType();
     const recorder = new MediaRecorder(recordStream, {
@@ -638,14 +673,22 @@ export function useRecorder(): UseRecorderResult {
   }, [state.blob, state.cameraBlob, state.mode]);
 
   /*
-    What staging actually receives. The cursor track is read from the ref
-    exactly once per take: `stagingUrls` only changes identity when the blobs
+    What staging actually receives. The three input tracks are read from their
+    refs exactly once per take: `stagingUrls` only changes identity when the blobs
     do, i.e. when a NEW take lands, and the shell has stopped sampling by then —
     so the converted array is computed once and its identity stays stable for
     the whole staging session (the editor holds it in `ctx`).
   */
   const staging = useMemo(
-    () => (stagingUrls ? { ...stagingUrls, cursor: toSeconds(cursorRef.current) } : null),
+    () =>
+      stagingUrls
+        ? {
+            ...stagingUrls,
+            cursor: toSeconds(cursorRef.current),
+            clicks: toSeconds(clicksRef.current),
+            keys: toSeconds(keysRef.current),
+          }
+        : null,
     [stagingUrls],
   );
 
@@ -685,6 +728,11 @@ export function useRecorder(): UseRecorderResult {
           onProgress: (percent) => dispatch({ type: "RENDER_PROGRESS", percent }),
           signal: abort.signal,
           cursor: toSeconds(cursorRef.current),
+          // The key track is not persisted, so the export has to be handed it.
+          // The CLICK track deliberately is not passed: what the render draws
+          // is `edits.clicks`, the lane the user actually toggled, which rides
+          // along inside `input.edits`.
+          keys: toSeconds(keysRef.current),
         });
       } catch (err) {
         renderAbortRef.current = null;
@@ -777,6 +825,8 @@ export function useRecorder(): UseRecorderResult {
     chunksRef.current = [];
     cameraChunksRef.current = [];
     cursorRef.current = [];
+    clicksRef.current = [];
+    keysRef.current = [];
     const recorder = recorderRef.current;
     const cam = cameraRecorderRef.current;
     recorderRef.current = null;

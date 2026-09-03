@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { appendSamples, CURSOR_CAP, toSeconds } from "./cursor-track";
-import type { CursorSample } from "./types";
+import type { ClickSample, CursorSample, KeySample } from "./types";
 
 const sample = (t: number, x = 0.5, y = 0.5): CursorSample => ({ t, x, y });
 
@@ -65,5 +65,23 @@ describe("toSeconds", () => {
 
   it("maps an empty track to an empty track", () => {
     expect(toSeconds([])).toEqual([]);
+  });
+
+  it("carries every other field through — clicks and keys use it too", () => {
+    const clicks: ClickSample[] = [{ t: 2500, x: 0.5, y: 0.5, button: 1 }];
+    expect(toSeconds(clicks)).toEqual([{ t: 2.5, x: 0.5, y: 0.5, button: 1 }]);
+    const keys: KeySample[] = [{ t: 900, key: "k", mods: ["meta"] }];
+    expect(toSeconds(keys)).toEqual([{ t: 0.9, key: "k", mods: ["meta"] }]);
+    // The `mods` array is shared, not cloned — the track is read-only anyway.
+    expect(toSeconds(keys)[0].mods).toBe(keys[0].mods);
+  });
+});
+
+describe("appendSamples over the other tracks", () => {
+  it("appends clicks and keys with the same cap semantics", () => {
+    const clicks: ClickSample[] = [{ t: 0, x: 0, y: 0, button: 0 }];
+    expect(appendSamples(clicks, [{ t: 1, x: 1, y: 1, button: 2 }], 1)).toBe(clicks);
+    const keys: KeySample[] = [];
+    expect(appendSamples(keys, [{ t: 1, key: "a", mods: [] }])).toHaveLength(1);
   });
 });
