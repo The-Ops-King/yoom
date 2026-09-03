@@ -1,4 +1,4 @@
-import type { DesktopBridge, DesktopShortcut, HudState } from "./types";
+import type { CursorSample, DesktopBridge, DesktopShortcut, HudState } from "./types";
 
 declare global {
   interface Window {
@@ -28,6 +28,18 @@ export function onDesktopShortcut(cb: (action: DesktopShortcut) => void): () => 
   const bridge = getDesktopBridge();
   if (!bridge?.onShortcut) return () => {};
   return bridge.onShortcut(cb);
+}
+
+/**
+ * Subscribe to batched cursor samples from the desktop shell (mouse-follow
+ * zoom). Returns a no-op unsubscribe in the browser and against a shell that
+ * predates the feature, so the caller can wire it unconditionally; in those
+ * cases no batch ever arrives and the recorder simply has no cursor track.
+ */
+export function onDesktopCursor(cb: (samples: CursorSample[]) => void): () => void {
+  const bridge = getDesktopBridge();
+  if (!bridge?.onCursor) return () => {};
+  return bridge.onCursor(cb);
 }
 
 /**

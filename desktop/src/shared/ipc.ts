@@ -101,6 +101,12 @@ export const IPC = {
   /** app renderer → main. Payload: HudState. ~4 Hz while a take is live. */
   setHudState: "yoom:hud-state",
 
+  /**
+   * main → app renderer. Payload: CursorSample[]. Batched every ~250 ms while
+   * the take is `recording` and the capture is a display. See `main/cursor.ts`.
+   */
+  cursor: "yoom:cursor",
+
   /** main → HUD renderer. Payload: HudState. */
   hudApply: "yoom:hud:apply",
   /** HUD renderer → main. Payload: DesktopShortcut. */
@@ -137,6 +143,20 @@ export const IPC = {
   /** picker renderer → main. No payload. */
   pickerCancel: "yoom:picker:cancel",
 } as const;
+
+/**
+ * One sampled cursor position, for the staging editor's mouse-follow zoom.
+ *
+ * MUST stay identical to `CursorSample` in `src/lib/recording/types.ts` (and
+ * to the copy in `main/cursor-track.ts`).
+ */
+export interface CursorSample {
+  /** Milliseconds of RECORDED material since the take started, paused time excluded. */
+  t: number;
+  /** 0..1 across the captured display, clamped to [-0.1, 1.1]. */
+  x: number;
+  y: number;
+}
 
 export interface PickerPayload {
   sources: SourceInfo[];

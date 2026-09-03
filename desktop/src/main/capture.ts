@@ -1,6 +1,7 @@
 import { Notification, ipcMain, type Session } from "electron";
 import { IPC, type SurfacePref } from "../shared/ipc";
 import { setCaptureKind } from "./bubble";
+import { displayIdFromSourceId } from "./cursor-track";
 import { hasScreenAccess, openPrivacyPane } from "./permissions";
 import { listSources, openPicker } from "./picker";
 
@@ -11,6 +12,25 @@ import { listSources, openPicker } from "./picker";
  * hops apart, and a stale preference only affects which tab is preselected.
  */
 let surfacePref: SurfacePref = "monitor";
+
+/**
+ * The display id behind the chosen capture source, or null when the capture is
+ * a window (or nothing is being captured). Written the moment the picker
+ * resolves, read by `cursor.ts` to decide which display's bounds the cursor
+ * samples normalize against — window captures produce no cursor track at all.
+ */
+let currentCaptureDisplayId: number | null = null;
+
+export function captureDisplayId(): number | null {
+  return currentCaptureDisplayId;
+}
+
+/** Kept next to `setCaptureKind` so the two never drift apart. */
+function setCaptureSource(source: { id: string; kind: "screen" | "window" } | null): void {
+  setCaptureKind(source?.kind ?? "screen");
+  currentCaptureDisplayId =
+    source && source.kind === "screen" ? displayIdFromSourceId(source.id) : null;
+}
 
 export function installCaptureIpc(): void {
   ipcMain.on(IPC.setSurfacePref, (_e, pref: SurfacePref) => {
@@ -73,13 +93,13 @@ export function installDisplayMediaHandler(ses: Session): void {
         sources = await listSources();
       } catch (err) {
         console.error("[yoom] desktopCapturer.getSources failed", err);
-        setCaptureKind("screen");
+        setCaptureSource(null);
         deny(callback);
         return;
       }
 
       if (sources.length === 0) {
-        setCaptureKind("screen");
+        setCaptureSource(null);
         deny(callback);
         return;
       }
@@ -96,7 +116,7 @@ export function installDisplayMediaHandler(ses: Session): void {
         // recorder handles as "user dismissed the picker" and returns to idle.
         // Reset so a stale `window` kind from a previous pick never survives
         // a cancelled reselect and mis-hides the bubble.
-        setCaptureKind("screen");
+        setCaptureSource(null);
         deny(callback);
         return;
       }
@@ -104,8 +124,9 @@ export function installDisplayMediaHandler(ses: Session): void {
       // Amendment 1: self-occlusion only works for display captures, where the
       // composited bubble covers the same pixels the capture picked up of the
       // live window. Tell the bubble which kind of source won so it can hide
-      // itself for `window` captures while the encoder runs.
-      setCaptureKind(source.kind);
+      // itself for `window` captures while the encoder runs. The same call
+      // records the display id for `cursor.ts`.
+      setCaptureSource(source);
 
       callback({
         video: { id: source.id, name: source.name },

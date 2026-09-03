@@ -108,6 +108,26 @@ export interface HudState {
   markers: number;
 }
 
+/**
+ * One sampled cursor position, forwarded by the desktop shell while a take is
+ * live (mouse-follow zoom). `t` is milliseconds of RECORDED material — paused
+ * time excluded — so it lines up with `HudState.elapsedMs` and with the
+ * staging editor's timeline. `x`/`y` are normalized to the captured display and
+ * arrive clamped to [-0.1, 1.1]: the cursor really does leave the captured
+ * display, and a following zoom should keep drifting rather than sticking to
+ * the edge. Consumers clamp the rest of the way.
+ *
+ * Only DISPLAY captures produce a track; a window capture produces none, so an
+ * empty track is the signal to hide the "Follow mouse" toggle.
+ *
+ * MUST stay identical to `CursorSample` in `desktop/src/shared/ipc.ts`.
+ */
+export interface CursorSample {
+  t: number;
+  x: number;
+  y: number;
+}
+
 export interface DesktopBridge {
   version: 1;
   isDesktop?: boolean;
@@ -142,6 +162,12 @@ export interface DesktopBridge {
   setHudState?(state: HudState): void;
   /** Which camera the floating bubble should open (`null` = default device). */
   setCameraDevice?(deviceId: string | null): void;
+  /**
+   * Batched cursor samples while a take is recording, ~4 batches a second.
+   * Absent on a shell that predates the mouse-follow zoom, which is why the
+   * whole feature is optional-chained through `onDesktopCursor`.
+   */
+  onCursor?(cb: (samples: CursorSample[]) => void): () => void;
 }
 
 // ---------- compositor ----------

@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getDesktopBridge, isDesktop, onDesktopShortcut, setDesktopHudState } from "./desktop-bridge";
+import {
+  getDesktopBridge,
+  isDesktop,
+  onDesktopCursor,
+  onDesktopShortcut,
+  setDesktopHudState,
+} from "./desktop-bridge";
+import type { CursorSample } from "./types";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -55,6 +62,49 @@ describe("desktop-bridge", () => {
   it("returns a no-op unsubscribe when the shell has no shortcut support", () => {
     vi.stubGlobal("window", { __yoomDesktop: { version: 1 } });
     expect(() => onDesktopShortcut(() => {})()).not.toThrow();
+  });
+});
+
+describe("onDesktopCursor", () => {
+  it("forwards every batch the shell sends and unsubscribes", () => {
+    const seen: (CursorSample[] | string)[] = [];
+    let emit: ((samples: CursorSample[]) => void) | null = null;
+    vi.stubGlobal("window", {
+      __yoomDesktop: {
+        version: 1,
+        onCursor: (cb: (samples: CursorSample[]) => void) => {
+          emit = cb;
+          return () => seen.push("unsub");
+        },
+      },
+    });
+
+    const unsub = onDesktopCursor((samples) => seen.push(samples));
+    emit!([{ t: 0, x: 0.5, y: 0.5 }]);
+    // A batch that left the display: the wire format keeps the overshoot.
+    emit!([
+      { t: 33, x: 1.1, y: -0.1 },
+      { t: 66, x: 0.2, y: 0.9 },
+    ]);
+    unsub();
+    expect(seen).toEqual([
+      [{ t: 0, x: 0.5, y: 0.5 }],
+      [
+        { t: 33, x: 1.1, y: -0.1 },
+        { t: 66, x: 0.2, y: 0.9 },
+      ],
+      "unsub",
+    ]);
+  });
+
+  it("returns a no-op unsubscribe when the shell has no cursor support", () => {
+    vi.stubGlobal("window", { __yoomDesktop: { version: 1 } });
+    expect(() => onDesktopCursor(() => {})()).not.toThrow();
+  });
+
+  it("returns a no-op unsubscribe in the browser", () => {
+    vi.stubGlobal("window", {});
+    expect(() => onDesktopCursor(() => {})()).not.toThrow();
   });
 });
 

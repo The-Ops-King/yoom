@@ -128,6 +128,23 @@ it. Two answers:
   your last interaction with it and reappears for 2 s whenever a hotkey fires,
   the status changes, or you use the tray's "Show/hide controls".
 
+### The cursor track
+
+While the status is `recording` (never while paused) and the chosen source is a
+*display*, `main/cursor.ts` samples `screen.getCursorScreenPoint()` every 33 ms
+and ships batches to the recorder renderer every ~250 ms on `yoom:cursor` as
+`CursorSample[]` — `{ t, x, y }`, where `x`/`y` are normalized against that
+display's `bounds` (both are DIP, so `scaleFactor` cancels out) and clamped to
+[-0.1, 1.1] so a cursor that wanders off the captured display still gives the
+staging editor a direction to drift in. `t` is recorded-media time: it starts at
+0 on `countdown → recording` and freezes across a pause, so it lines up with
+`HudState.elapsedMs` exactly. Window captures produce no track at all — there is
+no fixed rectangle to normalize against — which is what makes the staging
+editor's "Follow mouse" zoom toggle appear only for display takes. The track
+lives in memory in the recorder and is never persisted to `videos.edits`; the
+pure normalization and pause-clock logic is unit-tested in
+`main/cursor-track.test.ts`.
+
 ## Debugging
 
 There is no menu bar (`LSUIElement: true`), so the usual View → Toggle

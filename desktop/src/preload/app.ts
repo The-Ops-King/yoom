@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 // shared chunk that a sandboxed preload cannot require. See `app.channels.ts`.
 import type {
   BubbleAppearance,
+  CursorSample,
   DesktopShortcut,
   HudState,
   SurfacePref,
@@ -79,6 +80,17 @@ export const bridge = {
 
   setHudState(state: HudState): void {
     ipcRenderer.send(IPC.setHudState, state);
+  },
+
+  /**
+   * Batched cursor samples for the staging editor's mouse-follow zoom. Only
+   * display captures produce them, so a page that never sees a batch simply
+   * has no cursor track and hides the "Follow mouse" toggle.
+   */
+  onCursor(cb: (samples: CursorSample[]) => void): () => void {
+    const handler = (_e: unknown, samples: CursorSample[]) => cb(samples);
+    ipcRenderer.on(IPC.cursor, handler);
+    return () => ipcRenderer.removeListener(IPC.cursor, handler);
   },
 };
 

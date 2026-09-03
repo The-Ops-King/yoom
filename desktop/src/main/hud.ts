@@ -6,6 +6,7 @@ import {
   type HudState,
   type HudStatus,
 } from "../shared/ipc";
+import { onRecorderStatus, stopCursorTracking } from "./cursor";
 import { hudDefaultBounds, recorderWindowVisibility } from "./mapping";
 import {
   hideRecorderWindow,
@@ -260,6 +261,10 @@ export function setHudState(next: HudState): void {
   const statusChanged = prev !== next.status;
   state = next;
 
+  // The HUD push is the shell's only view of the recorder's state machine, so
+  // it also drives the cursor sampler (no-ops unless the status moved).
+  onRecorderStatus(next.status);
+
   if (statusChanged) {
     // A status change always un-suppresses the pill (wakeHud below re-arms).
     suppressed = false;
@@ -279,6 +284,7 @@ export function setHudState(next: HudState): void {
 }
 
 export function destroyHud(): void {
+  stopCursorTracking();
   clearAutoHide();
   alive()?.destroy();
   hudWindow = null;
