@@ -311,3 +311,50 @@ The recorder keeps the track in memory (not in `videos.edits`) and staging recei
 window SIZE; the centre follows the cursor path through a low-pass filter (~250 ms time
 constant) and is clamped inside the frame. The Zoom section shows a "Follow mouse" toggle
 when a cursor track exists. Click ripples stay reserved (no global click hook yet).
+
+## Addendum 2026-09-02 (night): CleanShot-class features
+
+**Input tracks (desktop only).** Besides the cursor track, the shell captures global mouse
+clicks and key presses while a take is live via a native hook (`uiohook-napi`, N-API, no
+rebuild; needs macOS Input Monitoring — the shell explains and deep-links the pane once,
+then degrades to cursor-only). Channel `yoom:input`, payload batches of
+`{ t, kind: "click", x, y, button }` and `{ t, kind: "key", key, mods }` with the same
+recorded-ms clock as the cursor track. Kept in memory only; staging receives
+`clicks: ClickSample[]` and `keys: KeySample[]`.
+
+**Clicks.** Each click becomes a diamond on a "Clicks" lane. `edits.clicks: ClickMark[]`
+= `{ t, x, y, on }` seeded from the track with `on: true`; the user toggles diamonds
+(click) and has "All on / All off". `on` clicks render the ripple (existing `click`
+drawing) at `t..t+0.5 s`. Persisted in `videos.edits` (cap 500).
+
+**Key tracking.** Overlay type `keys` with `start/end/rect` (badge position, default
+bottom-centre). Inside its span, key presses from the key track render as a keycap
+badge ("⌘ ⇧ K") that fades after 1.2 s; modifiers combine with the next key. Ranges are
+created like any overlay and can be toggled per section of the take.
+
+**Cursor.** `edits.cursor: { style: "none" | "real" | "smooth", size, clickRipples }`.
+`smooth` hides the captured cursor (capture requests `cursor: "never"`, falling back to
+"real" when the platform ignores it — the shell knows and reports `cursorHidden`) and
+draws a synthetic macOS-style arrow along the low-pass cursor path (τ = 0.12 s), scaled
+by `size`. **Motion blur:** when the zoom view moves faster than 0.5 frame-widths/s, the
+source is drawn with a directional blur proportional to the view velocity (capped),
+using a 3-tap smear along the motion vector; off when `cursor.style !== "smooth"`? No:
+independent toggle `edits.motionBlur: boolean` (default on).
+
+**Zoom kind.** Each zoom is `kind: "static" | "follow"` (replaces the `follow` flag;
+`follow: true` parses as `kind: "follow"`). The Zoom section shows the choice as two
+buttons; the "Zoom" tool creates static, a second tool "Follow zoom" creates a follow
+zoom of the dragged size.
+
+**Backgrounds.** Preset gradients grow to a catalogue of 16 (`scripts/make-backgrounds.mjs`,
+ids `g01…g16`, labelled). **Saved wallpapers:** uploaded images persist in IndexedDB
+(`yoom.wallpapers`, `{ id, name, blob, addedAt }`); the frame picker lists them with delete;
+selecting one sets `background: { kind: "image", src: <object URL>, wallpaperId }` and the
+export loads it by id. `wallpaperId` persists in settings and edits; `src` is re-minted.
+
+**Overlays (full set).** `blur`, `blackout` (solid), `ellipse`, `rect` (outline or `fill`),
+`line`, `arrow` with `style: "standard" | "double" | "curved" | "fancy"` (curved uses a
+`ctrl` point, default the midpoint offset perpendicular by 15 %), `step`, `underline`,
+`highlight`, `text` (`text`, `size`, `color`, `bg`), `emoji` (`text` is the emoji, drawn as
+text at rect height), `draw` (freehand `points: Point[]`, stroke), `image`, `keys`, `click`.
+Common style fields: `color`, `thickness`, `opacity`, `fill?: boolean`.
