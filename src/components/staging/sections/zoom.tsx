@@ -1,12 +1,15 @@
 "use client";
 
-import type { Rect, Zoom } from "@/lib/edits";
+import { clampRect, type Rect, type Zoom } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
 import { DEFAULT_RAMP_S } from "@/lib/editor/zoom";
 import type { StagingContext } from "../types";
 
 /** What "Focus whole take" zooms to when nothing is selected to copy. */
 const CENTRE_HALF: Rect = { x: 0.25, y: 0.25, w: 0.5, h: 0.5 };
+
+/** Smallest side a zoom may be typed down to, as a percentage of the source. */
+const MIN_PCT = 5;
 
 const btn =
   "rounded-md border border-border bg-surface-raised px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground disabled:opacity-30 disabled:hover:text-muted";
@@ -38,6 +41,19 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
     const at = next.zooms.findIndex((z) => z.start === start);
     ctx.setSelected(at >= 0 ? { kind: "zoom", index: at } : null);
   };
+
+  /**
+   * Resize the selected zoom about its own origin. Free aspect: `drawFrame`
+   * fits whatever aspect the rect ends up with inside the content box, so a
+   * tall or wide zoom letterboxes rather than stretching the picture.
+   */
+  const editSize = (axis: "w" | "h", pct: number) => {
+    if (!zoom) return;
+    const side = Math.min(100, Math.max(MIN_PCT, pct)) / 100;
+    editZoom({ rect: clampRect({ ...zoom.rect, [axis]: side }) });
+  };
+
+  const pct = (v: number) => Math.round(v * 100);
 
   return (
     <div className="space-y-3">
@@ -108,6 +124,36 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
               />
             </label>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1 text-[11px] text-muted">
+              Width %
+              <input
+                type="number"
+                step={1}
+                min={MIN_PCT}
+                max={100}
+                value={pct(zoom.rect.w)}
+                className={field}
+                onChange={(e) => editSize("w", num(e.target.value, pct(zoom.rect.w)))}
+              />
+            </label>
+            <label className="flex items-center gap-1 text-[11px] text-muted">
+              Height %
+              <input
+                type="number"
+                step={1}
+                min={MIN_PCT}
+                max={100}
+                value={pct(zoom.rect.h)}
+                className={field}
+                onChange={(e) => editSize("h", num(e.target.value, pct(zoom.rect.h)))}
+              />
+            </label>
+          </div>
+          <p className="text-[11px] text-muted-dim">
+            Any aspect: the region is fitted inside the frame, so a tall or wide zoom letterboxes
+            rather than stretching. Drag the box on the preview to move or resize it.
+          </p>
           <button
             type="button"
             className="text-[11px] text-red-400/80 hover:text-red-300"
