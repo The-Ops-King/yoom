@@ -9,15 +9,19 @@ import { renderToBlob, type RenderSources } from "@/lib/editor/export";
 import { AudioMixer } from "./audio-mixer";
 import { appendSamples, toSeconds } from "./cursor-track";
 import {
+  changeDesktopShare,
   isDesktop,
   onDesktopCursor,
   onDesktopInput,
+  onDesktopShareSource,
   onDesktopShortcut,
   setDesktopHudState,
+  setDesktopShareMode,
 } from "./desktop-bridge";
 import { getProvider, isCaptureCancellation } from "./media-sources";
 import {
   MAX_DURATION_MS,
+  RESTART_COUNTDOWN_SECONDS,
   initialRecorderState,
   recorderReducer,
   type RecorderState,
@@ -33,6 +37,7 @@ import type {
   HudStatus,
   KeySample,
   RecordingMode,
+  ShareSource,
   SurfacePref,
 } from "./types";
 
@@ -79,6 +84,13 @@ export interface UseRecorderResult {
   capabilities: Capabilities;
   /** True when running inside the Electron shell (Phase 4). */
   desktop: boolean;
+  /**
+   * What the desktop shell says it is sharing, for the ready panel's "Sharing"
+   * row. Always null in the browser and on a shell that predates auto-share —
+   * the panel falls back to a generic label rather than hiding the row, since
+   * something IS being shared either way.
+   */
+  shareSource: ShareSource | null;
   /** Raw screen preview while configuring (screen and screen+camera). */
   screenVideoRef: React.RefObject<HTMLVideoElement | null>;
   /** Raw camera preview while configuring (camera and screen+camera). */
@@ -116,15 +128,21 @@ export interface UseRecorderResult {
     setSurfacePref(pref: SurfacePref): void;
     setDevice(kind: "mic" | "camera", deviceId: string): void;
     acquire(): void;
+    /**
+     * Desktop only: pick a different screen or window. Asks the shell for a
+     * one-shot picker, then re-acquires.
+     */
+    changeShare(): void;
     start(): void;
     skipCountdown(): void;
     pause(): void;
     resume(): void;
     stop(): void;
-    /** Restart with the 3-2-1 countdown (kept for completeness). */
+    /**
+     * Throw the take away and count a new one in with the short "Ready? Go!"
+     * countdown. Restart button / ⌘⇧K.
+     */
     restart(): void;
-    /** Restart immediately — no countdown. Bound to the Restart button / ⌘⇧K. */
-    restartNow(): void;
     /** Throw the take away and go back to setup. Trash button / ⌘⇧X. */
     cancel(): void;
     /** Drop a timestamp marker at the current elapsed time. Mark button / ⌘⇧M. */
@@ -160,9 +178,9 @@ export function useRecorder(): UseRecorderResult {
   // `window.__yoomDesktop` does not exist during SSR, so this has to be set
   // from the boot effect rather than a lazy initializer.
   const [desktop, setDesktop] = useState(false);
-  // Bumped by `restartNow`: a recording → recording restart does not change
-  // `state.status`, so the "start the encoder" effect needs its own trigger.
-  const [restartToken, setRestartToken] = useState(0);
+  // What the shell says it is sharing. Null in the browser and until the first
+  // announcement arrives; the ready panel labels that case generically.
+  const [shareSource, setShareSource] = useState<ShareSource | null>(null);
   const [stagingUrls, setStagingUrls] = useState<{
     screenUrl: string | null;
     cameraUrl: string | null;
@@ -210,6 +228,10 @@ export function useRecorder(): UseRecorderResult {
   // Settings are only persisted once the stored settings have been read back,
   // so the first render never writes DEFAULT_SETTINGS over the saved ones.
   const hydratedRef = useRef(false);
+  // The desktop app's zero-friction start acquires once, on mount. One shot:
+  // after a Cancel back to `idle` the user asked to stop sharing, and grabbing
+  // the screen again behind their back would be rude.
+  const autoAcquiredRef = useRef(false);
 
   // ---------- boot: settings + capabilities ----------
 
@@ -227,8 +249,15 @@ export function useRecorder(): UseRecorderResult {
     dispatch({ type: "SET_FRAME", patch: settings.frame });
     setCapabilities(getProvider().capabilities());
     setDesktop(isDesktop());
+    // Sticky, and sent before anything can ask for a display: the shell should
+    // answer with the last recorded source and no picker.
+    if (isDesktop()) setDesktopShareMode("auto");
     hydratedRef.current = true;
   }, []);
+
+  // Which source the shell is sharing. Subscribed for the life of the page; a
+  // no-op in the browser.
+  useEffect(() => onDesktopShareSource(setShareSource), []);
 
   // Mouse-follow zoom: subscribe once for the life of the page. The shell only
   // emits while a take is live, and `beginRecording` clears the track, so there
@@ -419,6 +448,34 @@ export function useRecorder(): UseRecorderResult {
     [acquire, teardown],
   );
 
+  /**
+   * Zero-friction start in the desktop app: the shell answers `getDisplayMedia`
+   * with the last recorded screen and no picker, so the ready panel can be on
+   * screen the moment the window opens. With nothing remembered the shell shows
+   * its picker, which is the same first-run experience as before.
+   *
+   * The browser deliberately does NOT do this: `getDisplayMedia` needs a user
+   * gesture, so there the "Choose what to share" button stays.
+   */
+  useEffect(() => {
+    if (!desktop || autoAcquiredRef.current) return;
+    if (state.status !== "idle" || state.mode === "camera") return;
+    autoAcquiredRef.current = true;
+    void acquire();
+  }, [desktop, state.status, state.mode, acquire]);
+
+  /**
+   * "Change" in the ready panel: ask the shell for a one-shot picker, then
+   * re-acquire so the picked source replaces the current one. On a shell that
+   * predates the one-shot we would just re-acquire the SAME source and look
+   * broken, so nothing happens there.
+   */
+  const changeShare = useCallback(() => {
+    if (!changeDesktopShare()) return;
+    if (stateRef.current.status === "setup") reacquireWith(() => {});
+    else void acquire();
+  }, [acquire, reacquireWith]);
+
   // ---------- audio toggles ----------
 
   useEffect(() => {
@@ -519,11 +576,12 @@ export function useRecorder(): UseRecorderResult {
 
   // Enter `recording` with no encoder behind it → start one. `recorderRef` is
   // the guard: it is non-null for the whole take (including while paused) and
-  // is nulled by `restartNow` / `cancel` / `finishRecording`, so this fires on
-  // the first entry and again after an immediate restart, but never on resume.
+  // is nulled by `restart` / `cancel` / `finishRecording`, so this fires on the
+  // first entry and again on the way out of a restart's countdown, but never on
+  // resume.
   useEffect(() => {
     if (state.status === "recording" && !recorderRef.current) beginRecording();
-  }, [state.status, restartToken, beginRecording]);
+  }, [state.status, beginRecording]);
 
   // Elapsed timer: `performance.now()` deltas only, minus paused time.
   useEffect(() => {
@@ -910,8 +968,7 @@ export function useRecorder(): UseRecorderResult {
         if (status !== "countdown" && status !== "recording" && status !== "paused") return;
         e.preventDefault();
         discardRecorder();
-        dispatch({ type: "RESTART_NOW" });
-        setRestartToken((n) => n + 1);
+        dispatch({ type: "RESTART", seconds: RESTART_COUNTDOWN_SECONDS });
       } else if (key === "x") {
         if (
           status !== "countdown" &&
@@ -949,8 +1006,7 @@ export function useRecorder(): UseRecorderResult {
       } else if (action === "restart") {
         if (status !== "countdown" && status !== "recording" && status !== "paused") return;
         discardRecorder();
-        dispatch({ type: "RESTART_NOW" });
-        setRestartToken((n) => n + 1);
+        dispatch({ type: "RESTART", seconds: RESTART_COUNTDOWN_SECONDS });
       } else if (action === "cancel") {
         if (
           status !== "countdown" &&
@@ -1022,12 +1078,16 @@ export function useRecorder(): UseRecorderResult {
 
   const actions = useMemo(
     () => ({
-      setMode: (mode: RecordingMode) => dispatch({ type: "SELECT_MODE", mode }),
+      // From `setup` the mode toggle swaps the live capture under the panel
+      // rather than dropping back to a blank idle screen.
+      setMode: (mode: RecordingMode) =>
+        reacquireWith(() => dispatch({ type: "SELECT_MODE", mode })),
       setSurfacePref: (pref: SurfacePref) =>
         reacquireWith(() => dispatch({ type: "SET_SURFACE_PREF", pref })),
       setDevice: (kind: "mic" | "camera", deviceId: string) =>
         dispatch({ type: "SET_DEVICE", kind, deviceId }),
       acquire: () => void acquire(),
+      changeShare,
       start: () => dispatch({ type: "START" }),
       skipCountdown: () => dispatch({ type: "SKIP_COUNTDOWN" }),
       pause: () => dispatch({ type: "PAUSE" }),
@@ -1035,14 +1095,7 @@ export function useRecorder(): UseRecorderResult {
       stop: () => dispatch({ type: "STOP" }),
       restart: () => {
         discardRecorder();
-        dispatch({ type: "RESTART" });
-      },
-      restartNow: () => {
-        discardRecorder();
-        dispatch({ type: "RESTART_NOW" });
-        // `recording → recording` leaves the status untouched, so nudge the
-        // encoder effect explicitly.
-        setRestartToken((n) => n + 1);
+        dispatch({ type: "RESTART", seconds: RESTART_COUNTDOWN_SECONDS });
       },
       cancel: () => {
         discardRecorder();
@@ -1058,13 +1111,23 @@ export function useRecorder(): UseRecorderResult {
       setBubble: (patch: Partial<BubbleConfig>) => dispatch({ type: "SET_BUBBLE", patch }),
       setFrame: (patch: Partial<FrameConfig>) => dispatch({ type: "SET_FRAME", patch }),
     }),
-    [acquire, cancelRender, discard, discardRecorder, finish, reacquireWith, reset],
+    [
+      acquire,
+      cancelRender,
+      changeShare,
+      discard,
+      discardRecorder,
+      finish,
+      reacquireWith,
+      reset,
+    ],
   );
 
   return {
     state,
     capabilities,
     desktop,
+    shareSource,
     screenVideoRef,
     cameraVideoRef,
     staging,

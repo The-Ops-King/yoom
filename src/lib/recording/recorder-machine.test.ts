@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS } from "./settings";
 import {
+  COUNTDOWN_SECONDS,
   MAX_DURATION_MS,
+  RESTART_COUNTDOWN_SECONDS,
   initialRecorderState,
   recorderReducer,
   type RecorderEvent,
@@ -169,6 +171,16 @@ describe("countdown and recording", () => {
     const s = recorderReducer(setup(), { type: "START" });
     expect(s.status).toBe("countdown");
     expect(s.countdown).toBe(3);
+    expect(COUNTDOWN_SECONDS).toBe(3);
+  });
+
+  it("START takes the countdown length as a parameter", () => {
+    expect(recorderReducer(setup(), { type: "START", seconds: 2 }).countdown).toBe(2);
+    expect(recorderReducer(setup(), { type: "START", seconds: 5 }).countdown).toBe(5);
+    // A nonsensical length still has to leave a countdown that terminates.
+    expect(recorderReducer(setup(), { type: "START", seconds: 0 }).countdown).toBe(1);
+    expect(recorderReducer(setup(), { type: "START", seconds: -4 }).countdown).toBe(1);
+    expect(recorderReducer(setup(), { type: "START", seconds: 2.6 }).countdown).toBe(2);
   });
 
   it("COUNTDOWN_TICK walks down and then starts recording", () => {
@@ -233,7 +245,7 @@ describe("countdown and recording", () => {
     expect(rec.elapsedMs).toBe(0);
   });
 
-  it("RESTART_NOW restarts straight into recording from every live state", () => {
+  it("RESTART restarts through a countdown from every live state", () => {
     const live = (extra: RecorderEvent[] = []) =>
       run(setup(), [
         { type: "START" },
@@ -247,26 +259,55 @@ describe("countdown and recording", () => {
       live(), // recording
       live([{ type: "PAUSE" }]), // paused
     ]) {
-      const s = recorderReducer(from, { type: "RESTART_NOW" });
-      expect(s.status).toBe("recording");
-      expect(s.countdown).toBe(0);
+      const s = recorderReducer(from, {
+        type: "RESTART",
+        seconds: RESTART_COUNTDOWN_SECONDS,
+      });
+      expect(s.status).toBe("countdown");
+      expect(s.countdown).toBe(2);
       expect(s.elapsedMs).toBe(0);
       expect(s.blob).toBeNull();
       expect(s.streamsAlive).toBe(true);
     }
   });
 
-  it("RESTART_NOW is a no-op outside countdown/recording/paused", () => {
+  // ⌘⇧K, the HUD button and the in-page Restart button all take this route:
+  // "Ready? Go!" and then the encoder is running again.
+  it("RESTART with 2 seconds counts down and lands back in recording", () => {
+    const restarted = run(setup(), [
+      { type: "START" },
+      { type: "SKIP_COUNTDOWN" },
+      { type: "TICK", elapsedMs: 5000 },
+      { type: "MARK" },
+      { type: "RESTART", seconds: RESTART_COUNTDOWN_SECONDS },
+    ]);
+    expect(restarted.status).toBe("countdown");
+    expect(restarted.countdown).toBe(2);
+    expect(restarted.markers).toEqual([]);
+
+    const ready = recorderReducer(restarted, { type: "COUNTDOWN_TICK" });
+    expect(ready.status).toBe("countdown");
+    expect(ready.countdown).toBe(1);
+
+    const go = recorderReducer(ready, { type: "COUNTDOWN_TICK" });
+    expect(go.status).toBe("recording");
+    expect(go.countdown).toBe(0);
+    expect(go.elapsedMs).toBe(0);
+    expect(go.streamsAlive).toBe(true);
+    expect(RESTART_COUNTDOWN_SECONDS).toBe(2);
+  });
+
+  it("RESTART is a no-op outside countdown/recording/paused", () => {
     const idle = init();
-    expect(recorderReducer(idle, { type: "RESTART_NOW" })).toBe(idle);
+    expect(recorderReducer(idle, { type: "RESTART" })).toBe(idle);
     const s = setup();
-    expect(recorderReducer(s, { type: "RESTART_NOW" })).toBe(s);
+    expect(recorderReducer(s, { type: "RESTART" })).toBe(s);
     const stopping = run(setup(), [
       { type: "START" },
       { type: "SKIP_COUNTDOWN" },
       { type: "STOP" },
     ]);
-    expect(recorderReducer(stopping, { type: "RESTART_NOW" })).toBe(stopping);
+    expect(recorderReducer(stopping, { type: "RESTART" })).toBe(stopping);
   });
 
   it("CANCEL throws the take away and returns to setup", () => {
@@ -574,7 +615,6 @@ describe("markers", () => {
   it("clears markers on every transition that discards the take", () => {
     const marked = run(live(), [{ type: "TICK", elapsedMs: 1000 }, { type: "MARK" }]);
     expect(recorderReducer(marked, { type: "RESTART" }).markers).toEqual([]);
-    expect(recorderReducer(marked, { type: "RESTART_NOW" }).markers).toEqual([]);
     expect(recorderReducer(marked, { type: "CANCEL" }).markers).toEqual([]);
     expect(recorderReducer(marked, { type: "RESET" }).markers).toEqual([]);
 

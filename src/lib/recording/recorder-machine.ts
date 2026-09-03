@@ -8,7 +8,13 @@ import type {
   SurfacePref,
 } from "./types";
 
+/** The countdown a fresh take gets: "3 · Ready? · Go!". */
 export const COUNTDOWN_SECONDS = 3;
+/**
+ * The countdown a restart gets: "Ready? · Go!". Short on purpose — the user is
+ * already set up and mid-flow, they just want to take it again.
+ */
+export const RESTART_COUNTDOWN_SECONDS = 2;
 export const MAX_DURATION_MS = 30 * 60 * 1000;
 
 export type RecorderStatus =
@@ -96,7 +102,8 @@ export type RecorderEvent =
    */
   | { type: "ACQUIRE_CANCELLED" }
   | { type: "RECORD_FAILED"; error: string }
-  | { type: "START" }
+  /** `seconds` defaults to `COUNTDOWN_SECONDS`. */
+  | { type: "START"; seconds?: number }
   | { type: "COUNTDOWN_TICK" }
   | { type: "SKIP_COUNTDOWN" }
   | { type: "TICK"; elapsedMs: number }
@@ -104,8 +111,12 @@ export type RecorderEvent =
   | { type: "PAUSE" }
   | { type: "RESUME" }
   | { type: "STOP" }
-  | { type: "RESTART" }
-  | { type: "RESTART_NOW" }
+  /**
+   * Throw the current take away and count in a new one. `seconds` defaults to
+   * `COUNTDOWN_SECONDS`; the Restart button and ⌘⇧K pass
+   * `RESTART_COUNTDOWN_SECONDS`.
+   */
+  | { type: "RESTART"; seconds?: number }
   | { type: "CANCEL" }
   | { type: "MAX_DURATION" }
   | { type: "STREAM_ENDED" }
@@ -165,6 +176,16 @@ export function initialRecorderState(
     error: "",
     notice: "",
   };
+}
+
+/**
+ * The countdown an event asked for, or the default. Clamped to a whole number
+ * of seconds ≥ 1: a countdown of 0 would leave `status: "countdown"` with
+ * nothing to tick down to, so the encoder would never start.
+ */
+function countdownFor(seconds: number | undefined): number {
+  if (seconds === undefined || !Number.isFinite(seconds)) return COUNTDOWN_SECONDS;
+  return Math.max(1, Math.floor(seconds));
 }
 
 const CONFIGURABLE: RecorderStatus[] = ["idle", "setup"];
@@ -268,7 +289,7 @@ export function recorderReducer(
       return {
         ...state,
         status: "countdown",
-        countdown: COUNTDOWN_SECONDS,
+        countdown: countdownFor(event.seconds),
         elapsedMs: 0,
         markers: [],
         notice: "",
@@ -313,28 +334,15 @@ export function recorderReducer(
         notice: "Reached the 30 minute limit — wrapping up.",
       };
 
+    // Throw the take away and count a new one in. The streams stay live, so
+    // this is a countdown → recording round trip and the hook's "no encoder in
+    // `recording`" effect starts the fresh encoder on the way back through.
     case "RESTART":
       if (!LIVE.includes(state.status)) return state;
       return {
         ...state,
         status: "countdown",
-        countdown: COUNTDOWN_SECONDS,
-        elapsedMs: 0,
-        markers: [],
-        blob: null,
-        error: "",
-      };
-
-    // Restart without the countdown: the streams are already live, so drop
-    // straight back into `recording`. The hook discards the old MediaRecorder
-    // and starts a fresh one off `restartToken`, since the status does not
-    // change on a recording → recording restart.
-    case "RESTART_NOW":
-      if (!LIVE.includes(state.status)) return state;
-      return {
-        ...state,
-        status: "recording",
-        countdown: 0,
+        countdown: countdownFor(event.seconds),
         elapsedMs: 0,
         markers: [],
         blob: null,

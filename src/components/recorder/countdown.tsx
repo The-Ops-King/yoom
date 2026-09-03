@@ -5,15 +5,34 @@ interface CountdownProps {
   onSkip: () => void;
 }
 
+/**
+ * The last two ticks are words, not numbers: "Ready?" then "Go!". A 2-second
+ * restart is therefore entirely words, and the 3-second first take reads
+ * "3 · Ready? · Go!".
+ *
+ * The desktop HUD renders the same labels off the same `countdown` number, so
+ * this mapping has a twin in `desktop/src/renderer/hud`.
+ */
+export function countdownLabel(value: number): string {
+  if (value === 2) return "Ready?";
+  if (value === 1) return "Go!";
+  return String(value);
+}
+
 export function Countdown({ value, onSkip }: CountdownProps) {
+  const label = countdownLabel(value);
+  const isWord = value <= 2;
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-background/90 backdrop-blur">
       <span
         key={value}
         aria-live="assertive"
-        className="text-8xl font-bold tabular-nums text-foreground"
+        className={`font-bold text-foreground ${
+          isWord ? "text-7xl tracking-tight" : "text-8xl tabular-nums"
+        }`}
       >
-        {value}
+        {label}
       </span>
       <button
         type="button"

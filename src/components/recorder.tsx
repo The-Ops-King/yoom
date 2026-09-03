@@ -26,6 +26,7 @@ export function Recorder() {
     state,
     capabilities,
     desktop,
+    shareSource,
     screenVideoRef,
     cameraVideoRef,
     staging,
@@ -60,6 +61,39 @@ export function Recorder() {
   // controls right. Everything else is a single centred column.
   const twoColumn = state.status === "setup" || capturing;
   const stagingView = state.status === "staging" && staging !== null;
+  // The desktop app is already sharing by the time `setup` is reached, so its
+  // panel is the "ready" one: what you are sharing, how you sound and look, and
+  // one big Record button. The browser still needs the gesture-bound picker
+  // first, so it keeps the two-step flow.
+  const readyPanel = desktop && state.status === "setup";
+
+  // Rendered in two different places: above the mic while idle (the browser's
+  // pre-picker screen) and below the camera in the ready panel.
+  const modeToggle = (
+    <div
+      role="radiogroup"
+      aria-label="What to record"
+      className="flex gap-1 rounded-lg border border-border bg-surface p-1"
+    >
+      {MODE_OPTIONS.map((option) => {
+        const on = state.mode === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => actions.setMode(option.id)}
+            className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+              on ? "bg-surface-raised text-foreground" : "text-muted hover:text-foreground"
+            }`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 
   async function copyShareUrl() {
     try {
@@ -226,31 +260,29 @@ export function Recorder() {
             in post, never at capture), "Camera only" records the camera alone.
             Bare screen is not offered.
           */}
-          {(state.status === "idle" || state.status === "error") && (
-            <div
-              role="radiogroup"
-              aria-label="What to record"
-              className="flex gap-1 rounded-lg border border-border bg-surface p-1"
-            >
-              {MODE_OPTIONS.map((option) => {
-                const on = state.mode === option.id;
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={on}
-                    onClick={() => actions.setMode(option.id)}
-                    className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                      on
-                        ? "bg-surface-raised text-foreground"
-                        : "text-muted hover:text-foreground"
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
+          {(state.status === "idle" || state.status === "error") && modeToggle}
+
+          {/*
+            The ready panel's first row: what the shell auto-shared, and the way
+            out of it. `shareSource` is null until the shell announces one (and
+            on a shell that predates the announcement), so the label falls back
+            to the truth of the default case rather than hiding the row.
+          */}
+          {readyPanel && state.mode !== "camera" && (
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-muted-dim">
+                Sharing
+              </span>
+              <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                {shareSource?.name ?? "Entire screen"}
+              </span>
+              <button
+                type="button"
+                onClick={actions.changeShare}
+                className="shrink-0 rounded-md border border-border bg-surface-raised px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-foreground"
+              >
+                Change
+              </button>
             </div>
           )}
 
@@ -291,6 +323,8 @@ export function Recorder() {
             />
           )}
 
+          {readyPanel && modeToggle}
+
           {state.error && (
             <p className="text-center text-sm text-red-400/90">{state.error}</p>
           )}
@@ -313,7 +347,24 @@ export function Recorder() {
               <span className="text-sm text-muted">Waiting for permission…</span>
             )}
 
-            {state.status === "setup" && (
+            {/*
+              Desktop: one big Record button and nothing else — Cancel would
+              only drop the capture the app just set up for free, and the way
+              back out is the window itself.
+            */}
+            {readyPanel && (
+              <button
+                type="button"
+                onClick={actions.start}
+                title="Record (⌘⇧L)"
+                className="flex w-full items-center justify-center gap-2.5 rounded-xl bg-accent px-8 py-3.5 text-base font-semibold text-white shadow-lg shadow-accent/20 transition-all hover:bg-accent-hover hover:shadow-accent/30"
+              >
+                <span className="h-3 w-3 rounded-full bg-white/90" />
+                Record
+              </button>
+            )}
+
+            {state.status === "setup" && !readyPanel && (
               <>
                 <button
                   type="button"
@@ -370,8 +421,8 @@ export function Recorder() {
                 )}
                 <button
                   type="button"
-                  onClick={actions.restartNow}
-                  title="Restart now (⌘⇧K)"
+                  onClick={actions.restart}
+                  title="Restart the take — Ready? Go! (⌘⇧K)"
                   aria-label="Restart recording"
                   className="flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-4 py-2.5 text-sm font-medium text-muted transition-colors hover:text-foreground"
                 >
@@ -418,7 +469,8 @@ export function Recorder() {
           </div>
 
           <p className="text-center text-[11px] leading-relaxed text-muted-dim">
-            ⌘⇧L start / stop · ⌘⇧P pause · ⌘⇧M mark · ⌘⇧K restart · ⌘⇧X cancel
+            ⌘⇧L start / stop · ⌘⇧P pause · ⌘⇧M mark · ⌘⇧K restart (Ready? Go!) ·
+            ⌘⇧X cancel
             {desktop && " · this window hides while recording — use the controls pill"}
           </p>
         </div>
