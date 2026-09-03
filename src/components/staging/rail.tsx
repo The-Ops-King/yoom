@@ -5,11 +5,20 @@ import { TrimSection } from "./sections/trim";
 import { CameraSection } from "./sections/camera";
 import { FrameSection } from "./sections/frame";
 import { ZoomSection } from "./sections/zoom";
+import { CursorSection } from "./sections/cursor";
 import { OverlaysSection } from "./sections/overlays";
 import { DetailsForm } from "./details-form";
 import { UploadSection } from "./sections/upload";
 
-export type RailSection = "trim" | "camera" | "frame" | "zoom" | "overlays" | "details" | "upload";
+export type RailSection =
+  | "trim"
+  | "camera"
+  | "frame"
+  | "zoom"
+  | "overlays"
+  | "cursor"
+  | "details"
+  | "upload";
 
 const SECTIONS: { id: RailSection; label: string }[] = [
   { id: "trim", label: "Trim & cut" },
@@ -17,6 +26,7 @@ const SECTIONS: { id: RailSection; label: string }[] = [
   { id: "frame", label: "Frame" },
   { id: "zoom", label: "Zoom" },
   { id: "overlays", label: "Overlays" },
+  { id: "cursor", label: "Cursor & input" },
   { id: "details", label: "Details" },
   { id: "upload", label: "Upload" },
 ];
@@ -74,6 +84,7 @@ export function Rail({
               {s.id === "frame" && <FrameSection ctx={ctx} />}
               {s.id === "zoom" && <ZoomSection ctx={ctx} />}
               {s.id === "overlays" && <OverlaysSection ctx={ctx} />}
+              {s.id === "cursor" && <CursorSection ctx={ctx} />}
               {s.id === "details" && <DetailsForm ctx={ctx} />}
               {s.id === "upload" && <UploadSection ctx={ctx} />}
             </div>
