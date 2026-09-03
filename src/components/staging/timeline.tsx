@@ -195,7 +195,10 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
   };
 
   const camera = edits.camera;
-  const laneCount = edits.zooms.length + edits.overlays.length + (camera ? 1 : 0);
+  // The clicks lane exists only for a take the desktop hook actually saw.
+  const clicks = edits.clicks ?? [];
+  const laneCount =
+    edits.zooms.length + edits.overlays.length + (camera ? 1 : 0) + (clicks.length > 0 ? 1 : 0);
 
   return (
     <div className="space-y-1">
@@ -340,6 +343,50 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
                     }
                     begin(e, { kind: "keyframe", index: i, from: edits });
                   }}
+                />
+              ))}
+            </div>
+          )}
+
+          {/*
+            One diamond per captured click: filled while it draws its ripple,
+            hollow once switched off. Every diamond stops the pointer event —
+            toggling a click must never also drag the playhead onto it — and
+            the lane's own label carries the two bulk switches.
+          */}
+          {clicks.length > 0 && (
+            <div className={`${laneRow} border-border`}>
+              <span className={`${laneLabel} pointer-events-auto flex items-center gap-1`}>
+                Clicks
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => ctx.apply((e) => ops.setAllClicks(e, true))}
+                  className="rounded-sm px-0.5 text-[9px] leading-none text-muted hover:text-foreground"
+                >
+                  All on
+                </button>
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => ctx.apply((e) => ops.setAllClicks(e, false))}
+                  className="rounded-sm px-0.5 text-[9px] leading-none text-muted hover:text-foreground"
+                >
+                  All off
+                </button>
+              </span>
+              {clicks.map((c, i) => (
+                <button
+                  key={`click-${i}`}
+                  type="button"
+                  title={`Click at ${c.t.toFixed(2)}s — ${c.on ? "on" : "off"}`}
+                  aria-pressed={c.on}
+                  className={`absolute top-1/2 z-30 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rotate-45 border ${
+                    c.on ? "border-amber-200 bg-amber-400" : "border-amber-400/60 bg-transparent"
+                  }`}
+                  style={{ left: pct(c.t) }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => ctx.apply((e) => ops.toggleClick(e, i))}
                 />
               ))}
             </div>
