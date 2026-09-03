@@ -14,9 +14,14 @@ import type {
  * Bumped to v2 in Phase 2.1: camera-bubble backgrounds were removed, so a v1
  * object carries a `background` key that no longer means anything. `sanitize`
  * ignores unknown keys anyway, but the fresh key also drops the stale blob.
+ *
+ * Bumped to v3 because the frame defaults changed (framed on, 2 % padding, the
+ * mint background). Those are plain booleans and numbers, so a v2 object would
+ * silently win over the new defaults for anyone who had ever opened the app —
+ * they would still see framing off at 5 %. A new key is the only honest reset.
  */
-export const SETTINGS_KEY = "yoom.recorder.v2";
-const LEGACY_SETTINGS_KEYS = ["yoom.recorder.v1"];
+export const SETTINGS_KEY = "yoom.recorder.v3";
+const LEGACY_SETTINGS_KEYS = ["yoom.recorder.v1", "yoom.recorder.v2"];
 
 export const DEFAULT_BUBBLE: BubbleConfig = {
   shape: "circle",

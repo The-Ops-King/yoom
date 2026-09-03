@@ -176,6 +176,22 @@ describe("saveSettings", () => {
     expect("background" in s).toBe(false);
   });
 
+  it("ignores a v2 object and clears every legacy key", () => {
+    // v2 predates the new frame defaults (framed on, 2 % padding, mint). Its
+    // stored `enabled: false` / `padding: 0.05` must not win over them.
+    storage.map.set("yoom.recorder.v1", JSON.stringify({ micOn: false }));
+    storage.map.set(
+      "yoom.recorder.v2",
+      JSON.stringify({ frame: { enabled: false, padding: 0.05 } }),
+    );
+    expect(SETTINGS_KEY).toBe("yoom.recorder.v3");
+    expect(loadSettings().frame).toEqual(DEFAULT_FRAME);
+
+    saveSettings(DEFAULT_SETTINGS);
+    expect(storage.map.has("yoom.recorder.v1")).toBe(false);
+    expect(storage.map.has("yoom.recorder.v2")).toBe(false);
+  });
+
   it("never throws when storage is unavailable", () => {
     vi.stubGlobal("localStorage", {
       getItem: () => {
