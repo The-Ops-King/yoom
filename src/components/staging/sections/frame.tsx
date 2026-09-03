@@ -1,6 +1,6 @@
 "use client";
 
-import { DEFAULT_FRAME } from "@/lib/recording/settings";
+import { DEFAULT_FRAME, persistFrame } from "@/lib/recording/settings";
 import type { FrameConfig } from "@/lib/recording/types";
 import * as ops from "@/lib/editor/edit-ops";
 import { FramePicker } from "../frame-picker";
@@ -18,7 +18,12 @@ export function FrameSection({ ctx }: { ctx: StagingContext }) {
         // releases them when staging itself goes away.
         const src = patch.background?.src;
         if (src) ctx.registerBlobUrl(src);
-        ctx.apply((e) => ops.setFrame(e, { ...frame, ...patch }));
+        const next = { ...frame, ...patch };
+        ctx.apply((e) => ops.setFrame(e, next));
+        // Carry the choice into the next take. `persistFrame` sanitizes, so a
+        // blob: `src` is dropped and only a `wallpaperId` (or a preset path)
+        // survives — which is exactly what can be reloaded.
+        persistFrame(next);
       }}
     />
   );

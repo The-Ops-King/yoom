@@ -1,6 +1,7 @@
 import fixWebmDuration from "fix-webm-duration";
 import type { VideoEdits } from "@/lib/edits";
 import type { CursorSample, RecordingMode } from "@/lib/recording/types";
+import { getWallpaperBlob } from "@/lib/wallpapers";
 import { createCursorSampler } from "./cursor-path";
 import { editedToSource, keptRanges } from "./cuts";
 import { drawFrame, outputSize, preloadOverlayImages, type RenderInputs } from "./render";
@@ -173,19 +174,79 @@ function seek(el: HTMLVideoElement, t: number, signal: AbortSignal): Promise<voi
   });
 }
 
+/**
+ * Backgrounds whose `src` we minted ourselves from a saved wallpaper, so
+ * `releaseBackground` knows which object URLs are ours to revoke. A `WeakSet`
+ * because the element is the only thing that keeps the entry alive.
+ */
+const mintedBackgrounds = new WeakSet<HTMLElement>();
+
+/** Mint a fresh object URL for a saved wallpaper, or null when the id is gone. */
+async function mintWallpaperUrl(wallpaperId: string | undefined): Promise<string | null> {
+  if (!wallpaperId) return null;
+  const blob = await getWallpaperBlob(wallpaperId).catch(() => null);
+  return blob ? URL.createObjectURL(blob) : null;
+}
+
 export async function loadBackground(edits: VideoEdits): Promise<HTMLImageElement | HTMLVideoElement | null> {
   const bg = edits.frame?.enabled ? edits.frame.background : undefined;
-  if (!bg?.src || (bg.kind !== "image" && bg.kind !== "video")) return null;
+  if (!bg || (bg.kind !== "image" && bg.kind !== "video")) return null;
+  // A stored background carries a `wallpaperId` and a blob: `src` that is dead
+  // in any document but the one that minted it. Prefer the src we were given,
+  // and fall back to the stored bytes when it is missing or will not decode.
+  let src = bg.src ?? null;
+  let minted = false;
+  if (!src) {
+    src = await mintWallpaperUrl(bg.wallpaperId);
+    minted = !!src;
+  }
+  if (!src) return null;
+
   if (bg.kind === "video") {
     const v = document.createElement("video");
-    v.src = bg.src; v.loop = true; v.muted = true; v.playsInline = true; v.crossOrigin = "anonymous";
+    v.src = src; v.loop = true; v.muted = true; v.playsInline = true; v.crossOrigin = "anonymous";
+    if (minted) mintedBackgrounds.add(v);
     mountOffscreen(v);
     await v.play().catch(() => {});
     return v;
   }
-  const img = new Image(); img.crossOrigin = "anonymous"; img.src = bg.src;
-  await img.decode().catch(() => {});
+
+  let img = new Image(); img.crossOrigin = "anonymous"; img.src = src;
+  let ok = await img.decode().then(() => true, () => false);
+  if (!ok && !minted && bg.wallpaperId) {
+    // The src was a blob: URL from a previous session. Re-mint and retry.
+    const fresh = await mintWallpaperUrl(bg.wallpaperId);
+    if (fresh) {
+      img = new Image(); img.crossOrigin = "anonymous"; img.src = fresh;
+      minted = true;
+      ok = await img.decode().then(() => true, () => false);
+      if (!ok) URL.revokeObjectURL(fresh);
+    }
+  }
+  if (minted && ok) mintedBackgrounds.add(img);
+  else if (minted) return null;
   return img;
+}
+
+/**
+ * Fully release a decoded background: revoke the object URL if we minted it
+ * from a saved wallpaper, and tear a video decoder down so it stops holding
+ * its source. Images need nothing beyond the revoke — dropping the reference
+ * leaves them to the GC.
+ */
+export function releaseBackground(el: HTMLImageElement | HTMLVideoElement | null): void {
+  if (!el) return;
+  if (mintedBackgrounds.has(el)) {
+    mintedBackgrounds.delete(el);
+    // Read `src` before the teardown clears it.
+    if (el.src.startsWith("blob:")) URL.revokeObjectURL(el.src);
+  }
+  if (typeof HTMLVideoElement === "undefined" || !(el instanceof HTMLVideoElement)) return;
+  el.pause();
+  el.removeAttribute("src");
+  el.load();
+  // Decoders are parked in the document (see `mountOffscreen`); take them out.
+  el.remove();
 }
 
 /**
@@ -211,12 +272,9 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
     primary.pause(); camera?.pause();
     URL.revokeObjectURL(primary.src); if (camera) URL.revokeObjectURL(camera.src);
     primary.remove(); camera?.remove();
-    if (background && "pause" in background) {
-      background.pause();
-      background.removeAttribute("src");
-      background.load();
-      background.remove();
-    }
+    // Revokes the object URL too, when the background came from a saved
+    // wallpaper and `loadBackground` minted one.
+    releaseBackground(background);
     stream?.getTracks().forEach((t) => t.stop());
     audioCtx?.close().catch(() => {});
   };

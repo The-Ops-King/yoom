@@ -9,6 +9,7 @@ import { canRedo, canUndo, createHistory, push, redo, undo, type History } from 
 import { useStagingPlayer } from "@/lib/editor/use-staging-player";
 import { DEFAULT_RAMP_S } from "@/lib/editor/zoom";
 import { defaultRecordingTitle } from "@/lib/recording/upload";
+import type { BackgroundConfig } from "@/lib/recording/types";
 import { Preview } from "./preview";
 import { Timeline } from "./timeline";
 import { Rail, type RailSection } from "./rail";
@@ -53,12 +54,18 @@ function readDraft(durationMs: number): Draft | null {
 /**
  * A `blob:` frame background is dead the moment the page reloads, so it is
  * never worth persisting — drop it back to "no background" and keep the rest
- * of the frame (padding, radius, shadow) intact.
+ * of the frame (padding, radius, shadow) intact. A SAVED wallpaper survives:
+ * its bytes are in IndexedDB, so keeping `wallpaperId` is enough for
+ * `loadBackground` to mint a fresh URL after the reload.
  */
 function persistableEdits(edits: VideoEdits): VideoEdits {
   const frame = edits.frame;
   if (!frame?.background.src?.startsWith("blob:")) return edits;
-  return { ...edits, frame: { ...frame, background: { kind: "none" } } };
+  const wallpaperId = frame.background.wallpaperId;
+  const background: BackgroundConfig = wallpaperId
+    ? { kind: "image", wallpaperId }
+    : { kind: "none" };
+  return { ...edits, frame: { ...frame, background } };
 }
 
 function initialEdits(p: StagingProps, screenAspect: number): VideoEdits {

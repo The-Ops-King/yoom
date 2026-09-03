@@ -96,7 +96,12 @@ function sanitizeBackground(
   const r = raw as Record<string, unknown>;
   const kind = pick(r.kind, KINDS, fallback.kind);
   const src = persistableSrc(typeof r.src === "string" ? r.src : undefined);
-  if ((kind === "image" || kind === "video") && !src) return { kind: "none" };
+  // A saved wallpaper is the one image background allowed to arrive without a
+  // usable `src`: the bytes live in IndexedDB and `loadBackground` mints a
+  // fresh object URL from `wallpaperId`. Everything else still needs a src,
+  // because a dropped blob: URL would render as nothing at all.
+  const wallpaperId = typeof r.wallpaperId === "string" && r.wallpaperId ? r.wallpaperId : undefined;
+  if ((kind === "image" || kind === "video") && !src && !wallpaperId) return { kind: "none" };
   const out: BackgroundConfig = { kind };
   if (typeof r.color === "string") {
     out.color = r.color;
@@ -105,6 +110,7 @@ function sanitizeBackground(
   }
   if (src) out.src = src;
   if (typeof r.presetId === "string") out.presetId = r.presetId;
+  if (wallpaperId) out.wallpaperId = wallpaperId;
   return out;
 }
 
@@ -118,6 +124,18 @@ export function sanitizeFrame(raw: unknown, fallback: FrameConfig = DEFAULT_FRAM
     shadow: bool(frameRaw.shadow, fallback.shadow),
     background: sanitizeBackground(frameRaw.background, fallback.background),
   };
+}
+
+/**
+ * Merge a frame config into the stored recorder settings, leaving every other
+ * preference alone. The staging editor's frame picker calls this so the next
+ * take opens on the background — gradient or saved wallpaper — the last one
+ * ended on; the recorder hook itself only ever writes its own state.
+ */
+export function persistFrame(frame: FrameConfig): void {
+  if (typeof window === "undefined") return;
+  const current = loadSettings();
+  saveSettings({ ...current, frame: sanitizeFrame(frame, current.frame) });
 }
 
 function sanitize(raw: unknown): RecorderSettings {

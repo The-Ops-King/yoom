@@ -4,6 +4,8 @@ import {
   DEFAULT_SETTINGS,
   SETTINGS_KEY,
   loadSettings,
+  persistFrame,
+  sanitizeFrame,
   saveSettings,
 } from "./settings";
 
@@ -146,6 +148,54 @@ describe("saveSettings", () => {
     });
   });
 
+  it("keeps a saved wallpaper id and drops its dead blob: src", () => {
+    saveSettings({
+      ...DEFAULT_SETTINGS,
+      frame: {
+        ...DEFAULT_SETTINGS.frame,
+        background: {
+          kind: "image",
+          src: "blob:http://x/ghi",
+          wallpaperId: "wp-1",
+        },
+      },
+    });
+    // The bytes are in IndexedDB, so the id alone is enough — `loadBackground`
+    // mints a fresh object URL from it on the next take.
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY)!);
+    expect(stored.frame.background).toEqual({ kind: "image", wallpaperId: "wp-1" });
+    expect(JSON.stringify(stored)).not.toContain("blob:");
+    expect(loadSettings().frame.background).toEqual({
+      kind: "image",
+      wallpaperId: "wp-1",
+    });
+  });
+
+  it("still drops an image background with neither a src nor a wallpaperId", () => {
+    saveSettings({
+      ...DEFAULT_SETTINGS,
+      frame: {
+        ...DEFAULT_SETTINGS.frame,
+        background: { kind: "image", wallpaperId: "" },
+      },
+    });
+    expect(loadSettings().frame.background).toEqual({ kind: "none" });
+  });
+
+  it("persists the frame on its own without disturbing the other preferences", () => {
+    saveSettings({ ...DEFAULT_SETTINGS, cameraId: "cam-9", micOn: false });
+    persistFrame({
+      ...DEFAULT_SETTINGS.frame,
+      padding: 0.05,
+      background: { kind: "image", src: "blob:http://x/jkl", wallpaperId: "wp-2" },
+    });
+    const s = loadSettings();
+    expect(s.cameraId).toBe("cam-9");
+    expect(s.micOn).toBe(false);
+    expect(s.frame.padding).toBe(0.05);
+    expect(s.frame.background).toEqual({ kind: "image", wallpaperId: "wp-2" });
+  });
+
   it("falls back to the default colour when a stored color background has none", () => {
     saveSettings({
       ...DEFAULT_SETTINGS,
@@ -203,5 +253,31 @@ describe("saveSettings", () => {
     });
     expect(() => saveSettings(DEFAULT_SETTINGS)).not.toThrow();
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+  });
+});
+
+/**
+ * `parseEdits` (server side, `src/lib/edits.ts`) runs an untrusted `frame`
+ * through this exact function, so a `wallpaperId` posted with a take has to
+ * come out the other side — it is a harmless opaque string, and dropping it
+ * would strand the background on the next load.
+ */
+describe("sanitizeFrame on the parseEdits path", () => {
+  it("keeps a wallpaperId on an image background with no usable src", () => {
+    const frame = sanitizeFrame({
+      enabled: true,
+      padding: 0.03,
+      radius: 0.01,
+      shadow: true,
+      background: { kind: "image", src: "blob:http://x/mno", wallpaperId: "wp-7" },
+    });
+    expect(frame.background).toEqual({ kind: "image", wallpaperId: "wp-7" });
+  });
+
+  it("ignores a non-string wallpaperId", () => {
+    const frame = sanitizeFrame({
+      background: { kind: "image", src: "/backgrounds/g01.svg", wallpaperId: 42 },
+    });
+    expect(frame.background).toEqual({ kind: "image", src: "/backgrounds/g01.svg" });
   });
 });

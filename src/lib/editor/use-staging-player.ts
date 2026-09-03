@@ -11,7 +11,7 @@ import {
   sourceToEditedIn,
   type Range,
 } from "./cuts";
-import { loadBackground, mountOffscreen } from "./export";
+import { loadBackground, mountOffscreen, releaseBackground } from "./export";
 import { drawFrame, outputSize, type RenderInputs } from "./render";
 
 /**
@@ -87,11 +87,14 @@ function sameSize(a: Size, b: Size): boolean {
   return a.width === b.width && a.height === b.height;
 }
 
+
 /**
  * Fully release a video decoder so the blob URL it holds can be revoked.
- * Images need nothing — dropping the reference leaves them to the GC.
+ * Images need nothing — dropping the reference leaves them to the GC. Frame
+ * backgrounds go through `releaseBackground` instead, which also revokes an
+ * object URL minted from a saved wallpaper.
  */
-function release(el: HTMLImageElement | HTMLVideoElement | null): void {
+function release(el: HTMLVideoElement | null): void {
   if (!el || typeof HTMLVideoElement === "undefined" || !(el instanceof HTMLVideoElement)) return;
   el.pause();
   el.removeAttribute("src");
@@ -103,8 +106,12 @@ function release(el: HTMLImageElement | HTMLVideoElement | null): void {
 /** Identity of the frame background, so it is only decoded when it actually changes. */
 function backgroundKey(edits: VideoEdits): string | null {
   const bg = edits.frame?.enabled ? edits.frame.background : undefined;
-  if (!bg?.src || (bg.kind !== "image" && bg.kind !== "video")) return null;
-  return `${bg.kind}:${bg.src}`;
+  if (!bg || (bg.kind !== "image" && bg.kind !== "video")) return null;
+  // A saved wallpaper has no persistable `src` — `loadBackground` mints one
+  // from the id — so the id is part of the identity, and a bare wallpaperId
+  // with no src is still a background worth decoding.
+  if (!bg.src && !bg.wallpaperId) return null;
+  return `${bg.kind}:${bg.src ?? ""}:${bg.wallpaperId ?? ""}`;
 }
 
 export function useStagingPlayer(
@@ -276,7 +283,7 @@ export function useStagingPlayer(
     if (key === bgKeyRef.current) return;
     bgKeyRef.current = key;
     if (!key) {
-      release(bgRef.current);
+      releaseBackground(bgRef.current);
       bgRef.current = null;
       dirtyRef.current = true;
       return;
@@ -284,10 +291,10 @@ export function useStagingPlayer(
     let alive = true;
     void loadBackground(edits).then((bg) => {
       if (!alive) {
-        release(bg);
+        releaseBackground(bg);
         return;
       }
-      release(bgRef.current);
+      releaseBackground(bgRef.current);
       bgRef.current = bg;
       dirtyRef.current = true;
     });
@@ -300,7 +307,7 @@ export function useStagingPlayer(
   // not tear down a background it is about to reuse).
   useEffect(() => {
     return () => {
-      release(bgRef.current);
+      releaseBackground(bgRef.current);
       bgRef.current = null;
       bgKeyRef.current = null;
     };

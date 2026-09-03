@@ -1,16 +1,111 @@
 "use client";
 
-import { useRef } from "react";
-import { COLOR_SWATCHES, FRAME_PRESETS } from "@/lib/recording/presets";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { COLOR_SWATCHES, FRAME_PRESETS, resolvePresetId } from "@/lib/recording/presets";
 import type { FrameConfig } from "@/lib/recording/types";
+import {
+  addWallpaper,
+  getWallpaperBlob,
+  listWallpapers,
+  removeWallpaper,
+  type WallpaperMeta,
+} from "@/lib/wallpapers";
 
 interface FramePickerProps {
   frame: FrameConfig;
   onChange: (patch: Partial<FrameConfig>) => void;
 }
 
+/** A saved wallpaper plus the object URL its thumbnail is drawn from. */
+type Thumb = WallpaperMeta & { url: string };
+
+/**
+ * Loads the saved wallpapers and mints one object URL per thumbnail, revoking
+ * every one of them on unmount. These URLs belong to the tiles only — the URL
+ * handed to `onChange` when a wallpaper is *selected* is a separate, freshly
+ * minted one, because the staging screen owns that one's lifetime and undo can
+ * bring an earlier `src` back long after this panel has closed.
+ */
+function useWallpapers(): {
+  items: Thumb[];
+  error: string;
+  add: (file: File) => Promise<WallpaperMeta | null>;
+  remove: (id: string) => Promise<void>;
+} {
+  const [items, setItems] = useState<Thumb[]>([]);
+  const [error, setError] = useState("");
+  // Every URL this hook has minted, so unmount can revoke them all — including
+  // ones already dropped from `items` by a delete.
+  const mintedRef = useRef<string[]>([]);
+
+  const mint = useCallback(async (meta: WallpaperMeta): Promise<Thumb | null> => {
+    const blob = await getWallpaperBlob(meta.id);
+    if (!blob) return null;
+    const url = URL.createObjectURL(blob);
+    mintedRef.current.push(url);
+    return { ...meta, url };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const metas = await listWallpapers();
+      const thumbs = (await Promise.all(metas.map(mint))).filter((t): t is Thumb => !!t);
+      if (alive) setItems(thumbs);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [mint]);
+
+  // Revoke on unmount only — a re-render must not pull the rug out from under
+  // the <img> tags that are still showing these.
+  useEffect(() => {
+    const minted = mintedRef;
+    return () => {
+      for (const url of minted.current) URL.revokeObjectURL(url);
+      minted.current = [];
+    };
+  }, []);
+
+  const add = useCallback(
+    async (file: File): Promise<WallpaperMeta | null> => {
+      setError("");
+      try {
+        const meta = await addWallpaper(file);
+        const thumb = await mint(meta);
+        if (thumb) setItems((prev) => [thumb, ...prev]);
+        return meta;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not save that image.");
+        return null;
+      }
+    },
+    [mint],
+  );
+
+  const remove = useCallback(async (id: string) => {
+    await removeWallpaper(id);
+    setItems((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  return { items, error, add, remove };
+}
+
 export function FramePicker({ frame, onChange }: FramePickerProps) {
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const { items, error, add, remove } = useWallpapers();
+  const selectedPreset = resolvePresetId(frame.background.presetId);
+  const selectedWallpaper = frame.background.wallpaperId;
+
+  /** Select a saved wallpaper: a fresh URL for the edits, plus the durable id. */
+  const selectWallpaper = useCallback(async (id: string) => {
+    const blob = await getWallpaperBlob(id);
+    if (!blob) return;
+    onChange({
+      background: { kind: "image", src: URL.createObjectURL(blob), wallpaperId: id },
+    });
+  }, [onChange]);
 
   return (
     <div className="space-y-3 rounded-lg border border-border bg-surface p-3">
@@ -44,19 +139,86 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
                 key={preset.id}
                 type="button"
                 title={preset.label}
+                aria-label={`Frame background ${preset.label}`}
                 onClick={() =>
                   onChange({
                     background: { kind: "image", src: preset.src, presetId: preset.id },
                   })
                 }
                 style={{ background: preset.swatch }}
-                className={`h-10 rounded-md border transition-all ${
-                  frame.background.presetId === preset.id
+                className={`group relative h-10 overflow-hidden rounded-md border transition-all ${
+                  !selectedWallpaper && selectedPreset === preset.id
                     ? "border-accent ring-2 ring-accent/40"
                     : "border-border hover:border-accent/50"
                 }`}
-              />
+              >
+                <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/45 px-1 py-0.5 text-[9px] leading-tight text-white opacity-0 transition-opacity group-hover:opacity-100">
+                  {preset.label}
+                </span>
+              </button>
             ))}
+          </div>
+
+          <div className="space-y-1.5">
+            <span className="text-[11px] text-muted-dim">Wallpapers</span>
+            <div className="grid grid-cols-4 gap-1.5">
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                title="Upload a wallpaper"
+                className="flex h-10 items-center justify-center rounded-md border border-dashed border-border bg-surface-raised text-[11px] font-medium text-muted transition-colors hover:border-accent/50 hover:text-foreground"
+              >
+                Upload
+              </button>
+              {items.map((item) => (
+                <div key={item.id} className="group relative">
+                  <button
+                    type="button"
+                    title={item.name}
+                    aria-label={`Frame wallpaper ${item.name}`}
+                    onClick={() => void selectWallpaper(item.id)}
+                    className={`block h-10 w-full overflow-hidden rounded-md border transition-all ${
+                      selectedWallpaper === item.id
+                        ? "border-accent ring-2 ring-accent/40"
+                        : "border-border hover:border-accent/50"
+                    }`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element -- a blob: URL cannot go through next/image */}
+                    <img src={item.url} alt="" className="h-full w-full object-cover" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete wallpaper ${item.name}`}
+                    onClick={() => void remove(item.id)}
+                    className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full border border-border bg-surface text-[10px] leading-none text-muted transition-colors group-hover:flex hover:text-foreground"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+            {error && <p className="text-[11px] text-red-400">{error}</p>}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                // Saved first, then selected: the id is what survives into the
+                // next take, and the object URL is minted fresh from the store
+                // so the tile and the edits never share one. The caller owns
+                // that URL — `FrameSection` registers it with the staging
+                // screen, which revokes them all on unmount, never on
+                // replacement (undo can put an earlier `src` back and the
+                // export still has to load it).
+                void add(file).then((meta) => {
+                  if (meta) return selectWallpaper(meta.id);
+                });
+              }}
+            />
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5">
@@ -74,32 +236,6 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
                 }`}
               />
             ))}
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="rounded-md border border-border bg-surface-raised px-2.5 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground"
-            >
-              Upload
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = "";
-                if (!file) return;
-                // The caller owns the object URL: `FrameSection` registers
-                // each one with the staging screen, which revokes them all
-                // when it unmounts — never on replacement, because undo can
-                // put an earlier `src` back and the export still has to load
-                // it.
-                onChange({
-                  background: { kind: "image", src: URL.createObjectURL(file) },
-                });
-              }}
-            />
           </div>
 
           <label className="block space-y-1">
