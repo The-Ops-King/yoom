@@ -1,7 +1,8 @@
 import { DEFAULT_OVERLAY_THICKNESS, DEFAULT_TEXT_SIZE, type CameraMode, type Overlay, type Point, type Rect, type VideoEdits } from "@/lib/edits";
 import { computeFrameLayout, coverCrop, shapeRadius } from "@/lib/recording/geometry";
-import type { BackgroundConfig, RecordingMode } from "@/lib/recording/types";
+import type { BackgroundConfig, KeySample, RecordingMode } from "@/lib/recording/types";
 import { cameraAt } from "./camera-track";
+import { drawInputLayer } from "./render-input";
 import { type CursorAt, FULL_RECT, fitView, toOutput, zoomAt } from "./zoom";
 
 export interface RenderInputs {
@@ -16,6 +17,20 @@ export interface RenderInputs {
    * returning null) leaves every zoom on its stored rect.
    */
   cursorAt?: CursorAt;
+  /**
+   * The key presses still on screen at a source time, for the `keys` overlay's
+   * badge (`render-input.createKeySampler`). The key track lives in memory
+   * only — it is never in `videos.edits` — so an export that is not handed one
+   * simply draws no badges. Clicks need no field here: the edited lane IS
+   * `edits.clicks`, and it is persisted with the rest of the edit list.
+   */
+  keysAt?: (t: number) => KeySample[];
+  /**
+   * The synthetic cursor's position, for `cursor.style === "smooth"`. Built
+   * from the same track as `cursorAt` but filtered harder (τ = 0.12 s): a
+   * following zoom wants a lazy centre, a drawn pointer wants to keep up.
+   */
+  smoothCursorAt?: (t: number) => Point | null;
 }
 
 /** The output canvas size for a source of `w`×`h`. */
@@ -559,6 +574,9 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
           };
     drawOverlay(ctx, mapped, t, dest, W, zoom, content.h);
   }
+  // The input layer sits on top of the overlays, inside the same clip: a click
+  // ripple at the edge of a zoom must not bleed onto the frame's padding.
+  drawInputLayer(ctx, inputs, t, { box: dest, view, W });
   ctx.restore();
   ctx.restore();
 }
