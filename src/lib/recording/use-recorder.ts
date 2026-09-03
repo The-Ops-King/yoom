@@ -22,7 +22,6 @@ import type {
   Capabilities,
   FrameConfig,
   HudStatus,
-  RecordingMode,
   SurfacePref,
 } from "./types";
 
@@ -77,12 +76,6 @@ export interface UseRecorderResult {
   staging: { screenUrl: string | null; cameraUrl: string | null } | null;
   getLevel: (id: "mic" | "system") => number;
   actions: {
-    selectMode(mode: RecordingMode): void;
-    /**
-     * Mode switch that works from `setup` too: tears the live capture down and
-     * re-acquires with the new mode, so the user lands straight back in setup.
-     */
-    switchMode(mode: RecordingMode): void;
     setSurfacePref(pref: SurfacePref): void;
     setDevice(kind: "mic" | "camera", deviceId: string): void;
     acquire(): void;
@@ -176,7 +169,10 @@ export function useRecorder(): UseRecorderResult {
 
   useEffect(() => {
     const settings = loadSettings();
-    dispatch({ type: "SELECT_MODE", mode: settings.mode });
+    // Mode is not user-selectable: every take is screen + camera, and the
+    // camera is hidden in post instead. `loadSettings` already forces it; this
+    // keeps the machine in step even if the reducer default ever drifts.
+    dispatch({ type: "SELECT_MODE", mode: "screen+camera" });
     dispatch({ type: "SET_SURFACE_PREF", pref: settings.surfacePref });
     dispatch({ type: "SET_DEVICE", kind: "mic", deviceId: settings.micId });
     dispatch({ type: "SET_DEVICE", kind: "camera", deviceId: settings.cameraId });
@@ -948,9 +944,6 @@ export function useRecorder(): UseRecorderResult {
 
   const actions = useMemo(
     () => ({
-      selectMode: (mode: RecordingMode) => dispatch({ type: "SELECT_MODE", mode }),
-      switchMode: (mode: RecordingMode) =>
-        reacquireWith(() => dispatch({ type: "SELECT_MODE", mode })),
       setSurfacePref: (pref: SurfacePref) =>
         reacquireWith(() => dispatch({ type: "SET_SURFACE_PREF", pref })),
       setDevice: (kind: "mic" | "camera", deviceId: string) =>

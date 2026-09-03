@@ -5,9 +5,7 @@ import dynamic from "next/dynamic";
 import { YoomLogo } from "./logo";
 import { DeviceSelector } from "./device-selector";
 import { AudioControls } from "./recorder/audio-controls";
-import { CameraBubbleControls } from "./recorder/camera-bubble-controls";
 import { Countdown } from "./recorder/countdown";
-import { ModePicker } from "./recorder/mode-picker";
 import { PreviewStage } from "./recorder/preview-stage";
 import { useRecorder } from "@/lib/recording/use-recorder";
 
@@ -51,8 +49,10 @@ export function Recorder() {
   // Restart and Cancel are reachable from the countdown too; Pause and Stop
   // only make sense once the encoder is actually running.
   const capturing = live || state.status === "countdown";
-  const configuring = state.status === "idle" || state.status === "setup";
-  const showsCamera = state.mode !== "screen";
+  // Setup and the take itself share one two-column layout: preview left,
+  // controls right. Everything else is a single centred column.
+  const twoColumn = state.status === "setup" || capturing;
+  const stagingView = state.status === "staging" && staging !== null;
 
   async function copyShareUrl() {
     try {
@@ -141,26 +141,37 @@ export function Recorder() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col items-center gap-6 p-8">
+    <main
+      className={
+        stagingView
+          ? "flex min-h-screen flex-col items-center gap-6 p-8"
+          : twoColumn
+            ? "flex h-screen gap-6 overflow-hidden p-6"
+            : "flex h-screen items-center justify-center overflow-hidden p-8"
+      }
+    >
       {state.status === "countdown" && (
         <Countdown value={state.countdown} onSkip={actions.skipCountdown} />
       )}
 
       {/*
-        Stays mounted through staging (it hides itself) so the hook's raw
-        preview refs survive the transition.
+        A direct child of <main> in every state, and never unmounted: it hides
+        itself outside a take so the hook's raw preview refs survive each
+        transition. In the two-column layout it *is* the left column.
       */}
       <PreviewStage
-        mode={state.mode}
         status={state.status}
         elapsedMs={state.elapsedMs}
         markFlash={markFlash}
         screenVideoRef={screenVideoRef}
         cameraVideoRef={cameraVideoRef}
         mirror={state.bubble.mirror}
+        // p-6 top+bottom = 3rem; the video is object-contain inside it, so the
+        // page itself never scrolls.
+        className="h-[calc(100vh-3rem)] min-w-0 flex-1"
       />
 
-      {state.status === "staging" && staging ? (
+      {stagingView && staging ? (
         <Staging
           mode={state.mode}
           screenUrl={staging.screenUrl}
@@ -174,37 +185,38 @@ export function Recorder() {
           onDiscard={actions.discard}
         />
       ) : (
-        <div className="w-full max-w-md space-y-4">
+        <div
+          className={
+            twoColumn
+              ? "flex w-[21rem] shrink-0 flex-col gap-4 overflow-y-auto"
+              : "w-full max-w-md space-y-4"
+          }
+        >
           {state.status === "idle" && (
             <div className="flex justify-center">
               <YoomLogo size="sm" />
             </div>
           )}
 
-          {configuring && desktop && capabilities.systemAudio === "full" && (
-            <p className="flex items-center justify-center gap-1.5 text-[11px] text-muted-dim">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              Desktop app · System audio: on
-            </p>
-          )}
+          {(state.status === "idle" || state.status === "setup") &&
+            desktop &&
+            capabilities.systemAudio === "full" && (
+              <p className="flex items-center justify-center gap-1.5 text-[11px] text-muted-dim">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                Desktop app · System audio: on
+              </p>
+            )}
 
-          {configuring && (
-            <ModePicker
-              mode={state.mode}
-              surfacePref={state.surfacePref}
-              surface={state.surface}
-              disabled={state.status !== "idle" && state.status !== "setup"}
-              onModeChange={actions.switchMode}
-              onSurfaceChange={actions.setSurfacePref}
-            />
-          )}
-
-          {state.status === "idle" && showsCamera && (
+          {/*
+            No mode picker: every take is screen + camera. The devices are
+            pickable before the share picker opens so the take starts right.
+          */}
+          {(state.status === "idle" || state.status === "error") && (
             <DeviceSelector
-              kind="videoinput"
-              label="Camera"
-              value={state.cameraId}
-              onChange={(id) => actions.setDevice("camera", id)}
+              kind="audioinput"
+              label="Microphone"
+              value={state.micId}
+              onChange={(id) => actions.setDevice("mic", id)}
             />
           )}
 
@@ -223,11 +235,16 @@ export function Recorder() {
             />
           )}
 
-          {(state.status === "setup" || live) && showsCamera && (
-            <CameraBubbleControls
-              bubble={state.bubble}
-              shapeLocked={state.mode === "camera"}
-              onChange={actions.setBubble}
+          {(state.status === "idle" ||
+            state.status === "error" ||
+            state.status === "setup" ||
+            live) && (
+            <DeviceSelector
+              kind="videoinput"
+              label="Camera"
+              value={state.cameraId}
+              onChange={(id) => actions.setDevice("camera", id)}
+              disabled={live}
             />
           )}
 
@@ -238,14 +255,14 @@ export function Recorder() {
             <p className="text-center text-sm text-muted">{state.notice}</p>
           )}
 
-          <div className="flex items-center justify-center gap-3">
+          <div className="flex flex-wrap items-center justify-center gap-2">
             {(state.status === "idle" || state.status === "error") && (
               <button
                 type="button"
                 onClick={actions.acquire}
                 className="rounded-lg bg-accent px-8 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent/20 transition-all hover:bg-accent-hover hover:shadow-accent/30"
               >
-                Set up recording
+                Choose what to share
               </button>
             )}
 
@@ -357,12 +374,10 @@ export function Recorder() {
             )}
           </div>
 
-          {(state.status === "setup" || capturing) && (
-            <p className="text-center text-[11px] text-muted-dim">
-              ⌘⇧L start / stop · ⌘⇧P pause · ⌘⇧M mark · ⌘⇧K restart · ⌘⇧X cancel
-              {desktop && " · this window hides while recording — use the controls pill"}
-            </p>
-          )}
+          <p className="text-center text-[11px] leading-relaxed text-muted-dim">
+            ⌘⇧L start / stop · ⌘⇧P pause · ⌘⇧M mark · ⌘⇧K restart · ⌘⇧X cancel
+            {desktop && " · this window hides while recording — use the controls pill"}
+          </p>
         </div>
       )}
     </main>

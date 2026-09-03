@@ -45,7 +45,8 @@ describe("loadSettings", () => {
       JSON.stringify({ mode: "camera", micOn: false, bubble: { shape: "square" } }),
     );
     const s = loadSettings();
-    expect(s.mode).toBe("camera");
+    // `mode` is no longer user-selectable: a stored value is always dropped.
+    expect(s.mode).toBe("screen+camera");
     expect(s.micOn).toBe(false);
     expect(s.bubble.shape).toBe("square");
     // untouched nested fields keep their defaults
@@ -156,7 +157,7 @@ describe("saveSettings", () => {
       }),
     );
     const s = loadSettings();
-    expect(s.mode).toBe("camera");
+    expect(s.mode).toBe("screen+camera");
     expect(s.bubble.shape).toBe("square");
     expect("background" in s).toBe(false);
   });

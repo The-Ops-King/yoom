@@ -1,10 +1,8 @@
 "use client";
 
 import type { RefObject } from "react";
-import type { RecordingMode } from "@/lib/recording/types";
 
 interface PreviewStageProps {
-  mode: RecordingMode;
   status: string;
   elapsedMs: number;
   /** Flashes the REC chip for ~300 ms when a marker is dropped. */
@@ -13,6 +11,8 @@ interface PreviewStageProps {
   cameraVideoRef: RefObject<HTMLVideoElement | null>;
   /** Mirror the camera preview, matching the bubble default the user picked. */
   mirror: boolean;
+  /** Sizing from the parent layout — the stage itself only fills what it is given. */
+  className?: string;
 }
 
 export function formatElapsed(ms: number): string {
@@ -25,33 +25,32 @@ export function formatElapsed(ms: number): string {
 }
 
 export function PreviewStage({
-  mode,
   status,
   elapsedMs,
   markFlash = false,
   screenVideoRef,
   cameraVideoRef,
   mirror,
+  className = "",
 }: PreviewStageProps) {
   const live = status === "recording" || status === "paused";
-  // Hidden — not unmounted — during staging: the two <video> elements are the
-  // raw preview sinks, and the hook's refs must survive the transition.
+  // Hidden — not unmounted — outside a take: the two <video> elements are the
+  // raw preview sinks, and the hook's refs must survive every transition.
   const showStage =
     status !== "idle" && status !== "acquiring" && status !== "staging";
-  const cameraIsStage = mode === "camera";
 
   return (
     <div
       // Native HTML5 drag-and-drop must never engage here: dragging a preview
       // otherwise paints Chrome's ghost image.
       onDragStart={(e) => e.preventDefault()}
-      className={`relative w-full max-w-3xl aspect-video select-none touch-none overflow-hidden rounded-xl border border-border bg-surface shadow-lg shadow-black/30 ${
-        showStage ? "" : "hidden"
+      className={`relative select-none touch-none overflow-hidden rounded-xl border border-border bg-surface shadow-lg shadow-black/30 ${
+        showStage ? className : "hidden"
       }`}
     >
       {/*
-        Capture is raw now: this is the untouched screen track. The bubble and
-        the frame are placed in staging, so nothing is composited here.
+        Capture is raw: this is the untouched screen track. The bubble and the
+        frame are placed in staging, so nothing is composited here.
       */}
       <video
         ref={screenVideoRef}
@@ -60,10 +59,10 @@ export function PreviewStage({
         autoPlay
         draggable={false}
         aria-label="Screen preview"
-        className={`h-full w-full object-contain ${cameraIsStage ? "hidden" : ""}`}
+        className="h-full w-full object-contain"
       />
 
-      {cameraIsStage ? (
+      <div className="absolute bottom-3 right-3 w-36">
         <video
           ref={cameraVideoRef}
           muted
@@ -72,29 +71,12 @@ export function PreviewStage({
           draggable={false}
           aria-label="Camera preview"
           style={{ transform: mirror ? "scaleX(-1)" : undefined }}
-          className="h-full w-full object-contain"
+          className="aspect-video w-full rounded-lg border border-border object-cover"
         />
-      ) : (
-        <div
-          className={`absolute bottom-3 right-3 w-32 ${
-            mode === "screen+camera" ? "" : "hidden"
-          }`}
-        >
-          <video
-            ref={cameraVideoRef}
-            muted
-            playsInline
-            autoPlay
-            draggable={false}
-            aria-label="Camera preview"
-            style={{ transform: mirror ? "scaleX(-1)" : undefined }}
-            className="aspect-video w-full rounded-lg border border-border object-cover"
-          />
-          <p className="mt-1 text-center text-[10px] leading-tight text-muted-dim">
-            camera · placed after recording
-          </p>
-        </div>
-      )}
+        <p className="mt-1 text-center text-[10px] leading-tight text-muted-dim">
+          camera · placed after recording
+        </p>
+      </div>
 
       {/*
         The REC chip lives in the DOM on purpose — it is never burned into the
