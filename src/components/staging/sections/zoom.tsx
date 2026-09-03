@@ -1,6 +1,6 @@
 "use client";
 
-import { clampRect, type Rect, type Zoom } from "@/lib/edits";
+import { clampRect, type Rect, type Zoom, type ZoomKind } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
 import { DEFAULT_RAMP_S } from "@/lib/editor/zoom";
 import type { StagingContext } from "../types";
@@ -44,6 +44,20 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
     ctx.setSelected(at >= 0 ? { kind: "zoom", index: at } : null);
   };
 
+  /** Whether this take has a mouse track to follow at all. */
+  const hasCursor = ctx.cursor.length > 0;
+  /** `kind` is the only spelling read here; `parseEdits` migrates the legacy flag. */
+  const following = zoom?.kind === "follow";
+
+  /** Static ⇄ Follow. `setZoomKind` re-inserts too, so re-find the zoom like `editZoom` does. */
+  const setKind = (kind: ZoomKind) => {
+    if (!zoom) return;
+    const next = ops.setZoomKind(edits, index, kind);
+    ctx.apply(() => next);
+    const at = next.zooms.findIndex((z) => z.start === zoom.start);
+    ctx.setSelected(at >= 0 ? { kind: "zoom", index: at } : null);
+  };
+
   /**
    * Resize the selected zoom about its own origin. Free aspect: `drawFrame`
    * fits whatever aspect the rect ends up with inside the content box, so a
@@ -68,6 +82,17 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
         >
           Zoom
         </button>
+        {/* The drag sets only the window SIZE, so it needs a track to follow. */}
+        <button
+          type="button"
+          aria-pressed={tool === "followZoom"}
+          disabled={!hasCursor}
+          title={hasCursor ? undefined : "No mouse track for this take"}
+          className={tool === "followZoom" ? active : btn}
+          onClick={() => ctx.setTool(tool === "followZoom" ? "select" : "followZoom")}
+        >
+          Follow zoom
+        </button>
         <button
           type="button"
           className={btn}
@@ -83,7 +108,9 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
       </div>
 
       <p className="text-[11px] text-muted-dim">
-        Drag the region to zoom into; it holds for 3 s or the in/out range.
+        {tool === "followZoom"
+          ? "Drag the window SIZE; its centre rides the mouse. It holds for 3 s or the in/out range."
+          : "Drag the region to zoom into; it holds for 3 s or the in/out range."}
       </p>
 
       {zoom && (
@@ -153,27 +180,36 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
             </label>
           </div>
           {/*
-            Hidden when there is no cursor track — UNLESS the zoom is already
-            following one: a take restored from a draft has the flag but not
-            the track, and hiding the checkbox would leave no way to untick it.
+            Follow is offered whenever there is a track — and, even without
+            one, whenever the zoom is ALREADY following: a take restored from a
+            draft has the kind but not the track, and disabling both buttons
+            would leave no way back to Static.
           */}
-          {(ctx.cursor.length > 0 || zoom.follow === true) && (
-            <label className="flex items-center gap-1.5 text-[11px] text-muted">
-              <input
-                type="checkbox"
-                className="accent-accent"
-                disabled={ctx.cursor.length === 0}
-                checked={zoom.follow === true}
-                onChange={(e) => editZoom({ follow: e.target.checked })}
-              />
-              Follow mouse
-              {ctx.cursor.length === 0 && (
-                <span className="text-muted-dim">· no mouse track for this take</span>
-              )}
-            </label>
-          )}
+          <div className="space-y-1">
+            <span className="text-[11px] text-muted">Kind</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                aria-pressed={!following}
+                className={following ? btn : active}
+                onClick={() => setKind("static")}
+              >
+                Static
+              </button>
+              <button
+                type="button"
+                aria-pressed={following}
+                disabled={!hasCursor && !following}
+                className={following ? active : btn}
+                onClick={() => setKind("follow")}
+              >
+                Follow mouse
+              </button>
+              {!hasCursor && <span className="text-[11px] text-muted-dim">· no mouse track for this take</span>}
+            </div>
+          </div>
           <p className="text-[11px] text-muted-dim">
-            {zoom.follow
+            {following
               ? "Width and height set the window size; its centre follows the mouse, smoothed and kept inside the frame."
               : "Any aspect: the region is fitted inside the frame, so a tall or wide zoom letterboxes rather than stretching. Drag the box on the preview to move or resize it."}
           </p>
@@ -200,6 +236,7 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
               <li key={`${z.start}-${z.end}`} className="flex items-center justify-between gap-2">
                 <span className={`flex-1 text-[11px] ${i === index ? "text-foreground" : "text-muted"}`}>
                   {fmt(z.start)} → {fmt(z.end)}
+                  {z.kind === "follow" && <span className="text-muted-dim"> · follows</span>}
                 </span>
                 <button
                   type="button"

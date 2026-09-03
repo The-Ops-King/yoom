@@ -1,13 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { VideoEdits } from "@/lib/edits";
+import type { OverlayType, VideoEdits } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
 import { formatElapsed } from "@/components/recorder/preview-stage";
 import type { StagingContext } from "./types";
 
 /** Shortest a dragged span may collapse to, matching `edit-ops`. */
 const MIN_SPAN = 0.1;
+
+/**
+ * Lane names for the overlay types whose bare capitalised id reads badly on a
+ * row ("Rect", "Draw"). Anything absent is capitalised as-is.
+ */
+const OVERLAY_NAMES: Partial<Record<OverlayType, string>> = {
+  rect: "Rectangle",
+  draw: "Drawing",
+  keys: "Keys",
+  click: "Click",
+};
 
 type Drag =
   | { kind: "scrub" }
@@ -175,7 +186,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
    */
   const overlayLabel = (i: number) => {
     const { type, n } = edits.overlays[i];
-    const name = type.charAt(0).toUpperCase() + type.slice(1);
+    const name = OVERLAY_NAMES[type] ?? type.charAt(0).toUpperCase() + type.slice(1);
     if (type === "step") return `Step ${n ?? 1}`;
     const total = edits.overlays.reduce((n, o) => n + (o.type === type ? 1 : 0), 0);
     if (total < 2) return name;
@@ -270,7 +281,9 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
         >
           {edits.zooms.map((z, i) => (
             <div key={`zoom-lane-${i}`} className={`${laneRow} ${isSel("zoom", i) ? "border-accent" : "border-border"}`}>
-              <span className={laneLabel}>Zoom {i + 1}</span>
+              <span className={laneLabel}>
+                {z.kind === "follow" ? "Follow" : "Zoom"} {i + 1}
+              </span>
               <div
                 className={`${laneClip} z-30 cursor-grab ${
                   isSel("zoom", i) ? "border-sky-300 bg-sky-500/50" : "border-sky-500/50 bg-sky-500/25"

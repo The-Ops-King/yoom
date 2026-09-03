@@ -1,7 +1,15 @@
 "use client";
 
 import type { ChangeEvent } from "react";
-import { DEFAULT_OVERLAY_THICKNESS, MAX_OVERLAY_THICKNESS, type OverlayType } from "@/lib/edits";
+import {
+  DEFAULT_OVERLAY_THICKNESS,
+  DEFAULT_TEXT_SIZE,
+  MAX_OVERLAY_THICKNESS,
+  MAX_TEXT_SIZE,
+  MIN_TEXT_SIZE,
+  type ArrowStyle,
+  type OverlayType,
+} from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
 import { contentRect } from "../content-rect";
 import type { StagingContext, Tool } from "../types";
@@ -9,23 +17,53 @@ import type { StagingContext, Tool } from "../types";
 /** The drawable overlay tools, in rail order. `image` is not one: it is placed from the file picker. */
 const TOOLS: { id: Tool; label: string }[] = [
   { id: "blur", label: "Blur" },
+  { id: "blackout", label: "Blackout" },
   { id: "ellipse", label: "Ellipse" },
+  { id: "rect", label: "Rectangle" },
   { id: "step", label: "Step" },
   { id: "arrow", label: "Arrow" },
+  { id: "line", label: "Line" },
   { id: "highlight", label: "Highlight" },
   { id: "underline", label: "Underline" },
+  { id: "text", label: "Text" },
+  { id: "emoji", label: "Emoji" },
+  { id: "draw", label: "Draw" },
 ];
+
+/** The four arrow shapes, in picker order. */
+const ARROW_STYLES: { id: ArrowStyle; label: string }[] = [
+  { id: "standard", label: "Standard" },
+  { id: "double", label: "Double" },
+  { id: "curved", label: "Curved" },
+  { id: "fancy", label: "Fancy" },
+];
+
+/** A starter set of emoji; anything else goes in the free field beside it. */
+const EMOJI_PALETTE = ["👉", "👆", "👇", "👈", "✅", "❌", "⭐", "🔥", "💡", "⚠️", "🎯", "🙌"];
 
 /** `render.ts`'s fallback, so the picker opens on the colour actually drawn. */
 const DEFAULT_COLOR = "#f5c542";
-/** Types whose colour is drawn: blur resamples the pixels, an image brings its own. */
-const COLOURED: OverlayType[] = ["ellipse", "step", "arrow", "highlight", "underline", "click"];
+/** The plate colour the bg picker opens on once it is switched on. */
+const DEFAULT_BG = "#000000";
+/** Types whose colour is drawn: blur resamples the pixels, an image and an emoji bring their own. */
+const COLOURED: OverlayType[] = [
+  "blackout", "ellipse", "rect", "step", "arrow", "line", "highlight", "underline", "text", "draw", "click",
+];
 /** Types drawn as a stroke, so a thickness means something. */
-const STROKED: OverlayType[] = ["ellipse", "arrow", "underline"];
+const STROKED: OverlayType[] = ["ellipse", "rect", "arrow", "line", "underline", "draw"];
 /** Types drawn with an alpha the user can set. */
-const FADED: OverlayType[] = ["image", "highlight"];
+const FADED: OverlayType[] = ["image", "highlight", "rect", "blackout"];
 /** How wide a placed image is, as a fraction of the frame. */
 const IMAGE_WIDTH = 0.4;
+/** The hint under the tool row, per armed tool. */
+const HINTS: Partial<Record<Tool, string>> = {
+  select: "Pick a tool, then drag on the video to draw.",
+  arrow: "Drag from the tail to the head. Esc cancels.",
+  line: "Drag from one end to the other. Esc cancels.",
+  draw: "Drag to scribble freehand; it commits when you let go. Esc cancels.",
+  text: "Click to drop a caption, or drag the box it wraps inside. Esc cancels.",
+  emoji: "Click to place it, or drag to size it. Esc cancels.",
+};
 
 const btn =
   "rounded-md border border-border bg-surface-raised px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground";
@@ -95,13 +133,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
         </label>
       </div>
 
-      <p className="text-[11px] text-muted-dim">
-        {tool === "select"
-          ? "Pick a tool, then drag on the video to draw."
-          : tool === "arrow"
-            ? "Drag from the tail to the head. Esc cancels."
-            : "Drag on the video to draw. Esc cancels."}
-      </p>
+      <p className="text-[11px] text-muted-dim">{HINTS[tool] ?? "Drag on the video to draw. Esc cancels."}</p>
 
       {overlay ? (
         <div className="space-y-2 border-t border-border pt-2">
@@ -147,7 +179,19 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                 />
               </label>
             )}
-            {STROKED.includes(overlay.type) && (
+            {overlay.type === "rect" && (
+              <label className="flex items-center gap-1.5 text-[11px] text-muted">
+                <input
+                  type="checkbox"
+                  className="accent-accent"
+                  checked={overlay.fill === true}
+                  onChange={(e) => ctx.apply((ed) => ops.updateOverlay(ed, index, { fill: e.target.checked }))}
+                />
+                Fill
+              </label>
+            )}
+            {/* A filled rect has no stroke to size, and an outlined one no fill to fade. */}
+            {STROKED.includes(overlay.type) && !(overlay.type === "rect" && overlay.fill) && (
               <label className="flex items-center gap-1.5 text-[11px] text-muted">
                 Thickness
                 <input
@@ -188,7 +232,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                 />
               </label>
             )}
-            {FADED.includes(overlay.type) && (
+            {FADED.includes(overlay.type) && !(overlay.type === "rect" && !overlay.fill) && (
               <label className="flex items-center gap-1.5 text-[11px] text-muted">
                 Opacity
                 <input
@@ -196,7 +240,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                   min={0.05}
                   max={1}
                   step={0.05}
-                  value={overlay.opacity ?? (overlay.type === "highlight" ? 0.35 : 1)}
+                  value={overlay.opacity ?? (overlay.type === "highlight" || overlay.type === "rect" ? 0.35 : 1)}
                   className="w-24"
                   onChange={(e) =>
                     ctx.apply((ed) =>
@@ -207,6 +251,115 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
               </label>
             )}
           </div>
+
+          {overlay.type === "arrow" && (
+            <div className="space-y-1">
+              <span className="text-[11px] text-muted">Style</span>
+              <div className="flex flex-wrap gap-1.5">
+                {ARROW_STYLES.map((s) => {
+                  const on = (overlay.style ?? "standard") === s.id;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      aria-pressed={on}
+                      className={on ? active : btn}
+                      onClick={() => ctx.apply((ed) => ops.updateOverlay(ed, index, { style: s.id }))}
+                    >
+                      {s.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {overlay.style === "curved" && (
+                <p className="text-[11px] text-muted-dim">
+                  Bows through the midpoint by default; drag either end to re-aim it.
+                </p>
+              )}
+            </div>
+          )}
+
+          {overlay.type === "text" && (
+            <div className="space-y-2">
+              <textarea
+                rows={2}
+                value={overlay.text ?? ""}
+                aria-label="Overlay text"
+                placeholder="Type the caption"
+                className="w-full select-text rounded-md border border-border bg-surface-raised px-1.5 py-1 text-[11px] text-foreground"
+                onChange={(e) => ctx.apply((ed) => ops.updateOverlay(ed, index, { text: e.target.value }))}
+              />
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-1.5 text-[11px] text-muted">
+                  Size
+                  <input
+                    type="range"
+                    min={MIN_TEXT_SIZE}
+                    max={MAX_TEXT_SIZE}
+                    step={0.005}
+                    value={overlay.size ?? DEFAULT_TEXT_SIZE}
+                    className="w-24"
+                    onChange={(e) =>
+                      ctx.apply((ed) =>
+                        ops.updateOverlay(ed, index, { size: num(e.target.value, overlay.size ?? DEFAULT_TEXT_SIZE) }),
+                      )
+                    }
+                  />
+                </label>
+                {/*
+                  The plate is optional, so the swatch alone cannot express it:
+                  "None" clears `bg` outright, which is what the renderer reads
+                  as "no plate at all".
+                */}
+                <label className="flex items-center gap-1.5 text-[11px] text-muted">
+                  Plate
+                  <input
+                    type="color"
+                    value={overlay.bg ?? DEFAULT_BG}
+                    className="h-6 w-8 rounded border border-border bg-transparent"
+                    onChange={(e) => ctx.apply((ed) => ops.updateOverlay(ed, index, { bg: e.target.value }))}
+                  />
+                </label>
+                <button
+                  type="button"
+                  aria-pressed={overlay.bg === undefined}
+                  className={overlay.bg === undefined ? active : btn}
+                  onClick={() => ctx.apply((ed) => ops.updateOverlay(ed, index, { bg: undefined }))}
+                >
+                  None
+                </button>
+              </div>
+              <p className="text-[11px] text-muted-dim">Wraps inside the box you drew; drag its corner to rewrap.</p>
+            </div>
+          )}
+
+          {overlay.type === "emoji" && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-1.5">
+                {EMOJI_PALETTE.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    aria-label={`Use ${emoji}`}
+                    aria-pressed={overlay.text === emoji}
+                    className={`${overlay.text === emoji ? active : btn} text-sm leading-none`}
+                    onClick={() => ctx.apply((ed) => ops.updateOverlay(ed, index, { text: emoji }))}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+              <label className="flex items-center gap-1.5 text-[11px] text-muted">
+                Or paste one
+                <input
+                  type="text"
+                  value={overlay.text ?? ""}
+                  className={field}
+                  onChange={(e) => ctx.apply((ed) => ops.updateOverlay(ed, index, { text: e.target.value }))}
+                />
+              </label>
+            </div>
+          )}
 
           <button
             type="button"
