@@ -2,11 +2,13 @@ import {
   MAX_CAMERA_OFFSET_MS,
   MAX_CUTS,
   MAX_OVERLAYS,
+  arrowRect,
   clampRect,
   type CameraKeyframe,
   type CameraTrack,
   type Cut,
   type Overlay,
+  type Point,
   type VideoEdits,
   type Zoom,
 } from "@/lib/edits";
@@ -66,13 +68,36 @@ export function removeCut(e: VideoEdits, index: number): VideoEdits {
   return { ...e, cuts: e.cuts.filter((_, i) => i !== index) };
 }
 
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+const clampPoint = (p: Point): Point => ({ x: clamp01(p.x), y: clamp01(p.y) });
+
+/**
+ * The next free step number: `max(existing step n) + 1`, never a plain count
+ * of existing steps — so removing a middle step can never leave two overlays
+ * sharing a number.
+ */
+function nextStepNumber(overlays: readonly Overlay[]): number {
+  return overlays.reduce((m, o) => (o.type === "step" && typeof o.n === "number" ? Math.max(m, o.n) : m), 0) + 1;
+}
+
+/**
+ * Restore the arrow invariant from `edits.ts`: `from`/`to` are the truth and
+ * `rect` is their bounding box. An arrow that arrives with no points takes the
+ * rect's diagonal; everything else just re-derives the rect.
+ */
+function withArrowRect(o: Overlay): Overlay {
+  if (o.type !== "arrow") return o;
+  const from = clampPoint(o.from ?? { x: o.rect.x, y: o.rect.y });
+  const to = clampPoint(o.to ?? { x: o.rect.x + o.rect.w, y: o.rect.y + o.rect.h });
+  return { ...o, from, to, rect: arrowRect(from, to) };
+}
+
 /**
  * Append an overlay, clamped into range (`start >= 0`, `end > start` by
- * `MIN_SPAN`, `rect` clamped into the 0..1 frame via `clampRect`). A callout
- * with no explicit `n` is numbered `max(existing callout n) + 1` — never a
- * plain count of existing callouts — so removing a middle callout can never
- * leave two overlays sharing a number. Returns `e` unchanged once
- * `MAX_OVERLAYS` is reached.
+ * `MIN_SPAN`, `rect` clamped into the 0..1 frame via `clampRect`). A step with
+ * no explicit `n` is numbered by `nextStepNumber`; an arrow's `rect` is
+ * re-derived from its endpoints. Returns `e` unchanged once `MAX_OVERLAYS` is
+ * reached.
  */
 export function addOverlay(e: VideoEdits, overlay: Overlay): VideoEdits {
   if (e.overlays.length >= MAX_OVERLAYS) return e;
@@ -80,17 +105,19 @@ export function addOverlay(e: VideoEdits, overlay: Overlay): VideoEdits {
   next.start = Math.max(0, next.start);
   if (next.end <= next.start) next.end = next.start + MIN_SPAN;
   next.rect = clampRect(next.rect);
-  if (next.type === "callout" && next.n === undefined) {
-    const maxN = e.overlays.reduce((m, o) => (o.type === "callout" && typeof o.n === "number" ? Math.max(m, o.n) : m), 0);
-    next.n = maxN + 1;
-  }
-  return { ...e, overlays: [...e.overlays, next] };
+  if (next.type === "step" && next.n === undefined) next.n = nextStepNumber(e.overlays);
+  return { ...e, overlays: [...e.overlays, withArrowRect(next)] };
 }
 
 /**
  * Patch the overlay at `index`, re-clamping the same way `addOverlay` does
  * (`start >= 0`, `end > start` by `MIN_SPAN`, `rect` clamped into range). An
  * out-of-range index returns `e` unchanged (same reference).
+ *
+ * Arrows keep the `edits.ts` invariant: patching `from`/`to` re-derives the
+ * bounding box, and patching only `rect` (the box drag the preview does for
+ * every other type) TRANSLATES both endpoints by the origin delta rather than
+ * letting the two representations drift apart.
  */
 export function updateOverlay(e: VideoEdits, index: number, patch: Partial<Overlay>): VideoEdits {
   if (index < 0 || index >= e.overlays.length) return e;
@@ -102,7 +129,17 @@ export function updateOverlay(e: VideoEdits, index: number, patch: Partial<Overl
       merged.start = Math.max(0, merged.start);
       if (merged.end <= merged.start) merged.end = merged.start + MIN_SPAN;
       merged.rect = clampRect(merged.rect);
-      return merged;
+      if (merged.type === "arrow" && patch.rect && !patch.from && !patch.to) {
+        const dx = merged.rect.x - o.rect.x;
+        const dy = merged.rect.y - o.rect.y;
+        const shift = (p: Point | undefined, fallback: Point) => {
+          const base = p ?? fallback;
+          return { x: base.x + dx, y: base.y + dy };
+        };
+        merged.from = shift(o.from, { x: o.rect.x, y: o.rect.y });
+        merged.to = shift(o.to, { x: o.rect.x + o.rect.w, y: o.rect.y + o.rect.h });
+      }
+      return withArrowRect(merged);
     }),
   };
 }
