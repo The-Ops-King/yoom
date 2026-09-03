@@ -440,6 +440,46 @@ describe("drawOverlay", () => {
     expect(lines[1][2] - lines[0][2]).toBeCloseTo(108 * 1.25);
   });
 
+  it("scales text with the zoom, so a caption grows with the box it sits in", () => {
+    const at = (zooms: RenderInputs["edits"]["zooms"]) => {
+      const ctx = fakeCtx();
+      const e = { ...base, camera: null, zooms,
+        overlays: [{ type: "text" as const, start: 0, end: 10, rect: { x: 0.3, y: 0.3, w: 0.4, h: 0.2 }, text: "hi" }] };
+      drawFrame(ctx, { screen: src, camera: null, mode: "screen", edits: e, background: null }, 5, 1920, 1080);
+      return Number(String(ctx.props.font).split("px")[0]);
+    };
+    // 0.05 of the 1080-tall frame unzoomed; a half-height view magnifies the
+    // box 2×, and the type in it has to follow or the caption shrinks inside
+    // its own plate. The VERTICAL magnification is what sizes it: a view that
+    // is half as wide but full height leaves it alone.
+    expect(at([])).toBeCloseTo(54);
+    expect(at([{ start: 0, end: 10, rect: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, ramp: 0 }])).toBeCloseTo(108);
+    expect(at([{ start: 0, end: 10, rect: { x: 0, y: 0, w: 0.5, h: 1 }, ramp: 0 }])).toBeCloseTo(54);
+  });
+
+  it("reuses one mapped path array across frames while the zoom is held", () => {
+    const overlay = { type: "draw" as const, start: 0, end: 10, rect: { x: 0.3, y: 0.3, w: 0.2, h: 0.2 }, points: [{ x: 0.3, y: 0.3 }, { x: 0.4, y: 0.4 }, { x: 0.5, y: 0.5 }] };
+    const e = { ...base, camera: null, zooms: [{ start: 0, end: 10, rect: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, ramp: 0 }], overlays: [overlay] };
+    const path = (ctx: ReturnType<typeof fakeCtx>) =>
+      ctx.calls.filter((c) => c[0] === "moveTo" || c[0] === "quadraticCurveTo" || c[0] === "lineTo").map((c) => c[1]);
+    const a = fakeCtx();
+    const b = fakeCtx();
+    drawFrame(a, { screen: src, camera: null, mode: "screen", edits: e, background: null }, 5, 1920, 1080);
+    drawFrame(b, { screen: src, camera: null, mode: "screen", edits: e, background: null }, 6, 1920, 1080);
+    // Same overlay, same held view: the second frame draws the identical path.
+    expect(path(b)).toEqual(path(a));
+    // And a different view re-maps it rather than serving the stale one.
+    const moved = fakeCtx();
+    drawFrame(
+      moved,
+      { screen: src, camera: null, mode: "screen", edits: { ...e, zooms: [{ start: 0, end: 10, rect: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 }, ramp: 0 }] }, background: null },
+      5,
+      1920,
+      1080,
+    );
+    expect(path(moved)).not.toEqual(path(a));
+  });
+
   it("draws an emoji centred in its rect at the rect's height", () => {
     const ctx = fakeCtx();
     drawFrame(ctx, inputs([{ type: "emoji", start: 0, end: 5, rect: { x: 0.4, y: 0.45, w: 0.1, h: 0.1 }, text: "🔥" }]), 1, 1920, 1080);

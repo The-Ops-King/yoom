@@ -2,7 +2,7 @@ import { DEFAULT_OVERLAY_THICKNESS, DEFAULT_TEXT_SIZE, type CameraMode, type Ove
 import { computeFrameLayout, coverCrop, shapeRadius } from "@/lib/recording/geometry";
 import type { BackgroundConfig, KeySample, RecordingMode } from "@/lib/recording/types";
 import { cameraAt } from "./camera-track";
-import { MOTION_ALPHA, MOTION_DT, drawInputLayer, motionOffsets } from "./render-input";
+import { MOTION_DT, drawInputLayer, motionOffsets, motionTapAlpha } from "./render-input";
 import { type CursorAt, FULL_RECT, fitView, toOutput, zoomAt } from "./zoom";
 
 export interface RenderInputs {
@@ -31,6 +31,12 @@ export interface RenderInputs {
    * following zoom wants a lazy centre, a drawn pointer wants to keep up.
    */
   smoothCursorAt?: (t: number) => Point | null;
+  /**
+   * True for the staging preview, false/absent for the export. Editing chrome
+   * that has to be visible on the canvas but must never be burned into the
+   * file keys off this — today just the `keys` overlay's empty-state ghost.
+   */
+  preview?: boolean;
 }
 
 /** The output canvas size for a source of `w`×`h`. */
@@ -210,12 +216,33 @@ function textWidth(ctx: CanvasRenderingContext2D, s: string, fontSize: number): 
   return m && Number.isFinite(m.width) ? m.width : s.length * fontSize * 0.55;
 }
 
+/** A wrapped caption: the lines to draw and the width of the widest, for the plate. */
+type Wrapped = { lines: string[]; width: number };
+
+/**
+ * Wrapping costs one `measureText` per word and the plate one more per line,
+ * every frame the caption is on screen — for a string that almost never
+ * changes. Cached on `${text}|${size}|${maxW}`, which is everything the result
+ * depends on (the font stack is a constant). Bounded and refreshed on read, so
+ * the entry evicted at the cap is the least recently used one.
+ */
+const WRAP_CACHE_MAX = 256;
+const wrapCache = new Map<string, Wrapped>();
+
 /**
  * Greedy word wrap inside `maxW`, honouring the string's own newlines. A word
  * longer than the box is left on its own line rather than broken mid-word:
  * over-running the plate reads better than a caption chopped into fragments.
  */
-function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number, fontSize: number): string[] {
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number, fontSize: number): Wrapped {
+  const key = `${text}|${fontSize}|${maxW}`;
+  const hit = wrapCache.get(key);
+  if (hit) {
+    // Re-insert so insertion order tracks USE, making the eviction below LRU.
+    wrapCache.delete(key);
+    wrapCache.set(key, hit);
+    return hit;
+  }
   const lines: string[] = [];
   for (const para of text.split("\n")) {
     let line = "";
@@ -230,16 +257,47 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number, fon
     }
     lines.push(line);
   }
-  return lines;
+  const wrapped: Wrapped = {
+    lines,
+    width: lines.reduce((m, l) => Math.max(m, textWidth(ctx, l, fontSize)), 0),
+  };
+  wrapCache.set(key, wrapped);
+  if (wrapCache.size > WRAP_CACHE_MAX) {
+    const oldest = wrapCache.keys().next();
+    if (!oldest.done) wrapCache.delete(oldest.value);
+  }
+  return wrapped;
 }
 
 /**
- * `zoom` is the current magnification (1 / view.w), so effects sized in output
- * pixels rather than source fractions still grow with the zoom. `strokeBase`
- * is the CONTENT box's height — the frame's own height — which is what
- * `thickness` is normalised to; `content` here is the *fitted view* box, and a
- * free-aspect zoom letterboxes that to a fraction of the frame, so sizing a
- * stroke off it would thin every line out on a wide zoom.
+ * A freehand stroke's path mapped through the active zoom, memoised per
+ * overlay. The path can run to `MAX_DRAW_POINTS`, and re-allocating it 60
+ * times a second for a zoom that is usually *held* is pure garbage; the
+ * overlay object is a stable reference until the stroke is edited (every
+ * `edit-ops` mutation rebuilds it), so a WeakMap keyed on it needs no eviction.
+ * Compared by VALUE, because a follow zoom mints a fresh view rect each frame.
+ */
+const pathCache = new WeakMap<Overlay, { view: Rect; points: Point[] }>();
+
+function mappedPoints(o: Overlay, view: Rect): Point[] | undefined {
+  if (!o.points) return undefined;
+  const hit = pathCache.get(o);
+  if (hit && hit.view.x === view.x && hit.view.y === view.y && hit.view.w === view.w && hit.view.h === view.h) {
+    return hit.points;
+  }
+  const points = o.points.map((p) => toPoint(p, view));
+  pathCache.set(o, { view: { ...view }, points });
+  return points;
+}
+
+/**
+ * `zoom` is the current horizontal magnification (1 / view.w) and `zoomY` the
+ * vertical one, so effects sized in output pixels rather than source fractions
+ * still grow with the zoom. `strokeBase` is the CONTENT box's height — the
+ * frame's own height — which is what `thickness` is normalised to; `content`
+ * here is the *fitted view* box, and a free-aspect zoom letterboxes that to a
+ * fraction of the frame, so sizing a stroke off it would thin every line out
+ * on a wide zoom.
  */
 function drawOverlay(
   ctx: CanvasRenderingContext2D,
@@ -248,6 +306,7 @@ function drawOverlay(
   content: Rect,
   W: number,
   zoom: number,
+  zoomY: number,
   strokeBase: number,
 ) {
   const x = content.x + o.rect.x * content.w;
@@ -368,7 +427,11 @@ function drawOverlay(
       break;
     }
     case "text": {
-      const size = Math.max(1, (o.size ?? DEFAULT_TEXT_SIZE) * strokeBase);
+      // `size` is normalised to the frame height, and the box it is set in
+      // grows with the zoom — so the type has to grow with it too, or a zoomed
+      // caption shrinks inside its own plate. Emoji and step badges already
+      // scale this way, because they are sized off their mapped rect.
+      const size = Math.max(1, (o.size ?? DEFAULT_TEXT_SIZE) * strokeBase * zoomY);
       const pad = size * TEXT_PAD;
       const lh = size * TEXT_LINE_H;
       ctx.font = `${size}px ${TEXT_FONT}`;
@@ -376,12 +439,11 @@ function drawOverlay(
       ctx.textBaseline = "top";
       // Wrapped inside the drawn rect's width, minus the plate's padding — the
       // box the user dragged is what decides where the caption breaks.
-      const lines = wrapText(ctx, o.text ?? "", Math.max(0, w - pad * 2), size);
+      const { lines, width } = wrapText(ctx, o.text ?? "", Math.max(0, w - pad * 2), size);
       ctx.globalAlpha = o.opacity ?? 1;
       if (o.bg) {
-        const widest = lines.reduce((m, l) => Math.max(m, textWidth(ctx, l, size)), 0);
         ctx.fillStyle = o.bg;
-        ctx.fill(buildPath(x, y, widest + pad * 2, lines.length * lh + pad * 2, pad));
+        ctx.fill(buildPath(x, y, width + pad * 2, lines.length * lh + pad * 2, pad));
       }
       ctx.fillStyle = color;
       for (const [i, line] of lines.entries()) ctx.fillText(line, x + pad, y + pad + i * lh);
@@ -497,22 +559,28 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
   const letterboxed = dest.w < content.w - 0.5 || dest.h < content.h - 0.5;
 
   // Motion blur: while the zoom view is travelling, the source is drawn three
-  // times along the motion vector at a third alpha each — a cheap directional
-  // smear that reads as speed instead of as a strobing crop. Below the
-  // threshold (`motionOffsets` returns nothing) it is one ordinary draw.
+  // times along the motion vector — a cheap directional smear that reads as
+  // speed instead of as a strobing crop. Below the threshold
+  // (`motionOffsets` returns nothing) it is one ordinary draw.
   const prevView = inputs.edits.motionBlur === false
     ? view
     : zoomAt(inputs.edits.zooms, Math.max(0, t - MOTION_DT), inputs.cursorAt);
   const smear = prevView === view ? [] : motionOffsets(view, prevView, W);
   const drawSource = (box: Rect) => {
     if (smear.length === 0) { drawPrimary(box); return; }
-    for (const o of smear) {
+    // Clipped to the box the taps belong in: an offset draw would otherwise
+    // ghost into the letterbox (or the frame's padding) beside the picture.
+    ctx.save();
+    ctx.clip(buildPath(box.x, box.y, box.w, box.h, 0));
+    for (let i = 0; i < smear.length; i++) {
       ctx.save();
-      ctx.globalAlpha = MOTION_ALPHA;
-      ctx.translate(o.dx, o.dy);
+      // Progressive, not a flat third — see `motionTapAlpha`.
+      ctx.globalAlpha = motionTapAlpha(i);
+      ctx.translate(smear[i].dx, smear[i].dy);
       drawPrimary(box);
       ctx.restore();
     }
+    ctx.restore();
   };
 
   if (framed && frame) {
@@ -575,6 +643,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
   ctx.clip(framePath(content.x, content.y, content.w, content.h, radius));
   if (letterboxed) ctx.clip(buildPath(dest.x, dest.y, dest.w, dest.h, 0));
   const zoom = view.w > 0 ? 1 / view.w : 1;
+  const zoomY = view.h > 0 ? 1 / view.h : 1;
   for (const o of inputs.edits.overlays) {
     if (t < o.start || t > o.end) continue;
     // An arrow's endpoints live in the same source space as the rect, so they
@@ -589,9 +658,9 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
             from: o.from && toPoint(o.from, view),
             to: o.to && toPoint(o.to, view),
             ctrl: o.ctrl && toPoint(o.ctrl, view),
-            points: o.points?.map((p) => toPoint(p, view)),
+            points: mappedPoints(o, view),
           };
-    drawOverlay(ctx, mapped, t, dest, W, zoom, content.h);
+    drawOverlay(ctx, mapped, t, dest, W, zoom, zoomY, content.h);
   }
   // The input layer sits on top of the overlays, inside the same clip: a click
   // ripple at the edge of a zoom must not bleed onto the frame's padding.
