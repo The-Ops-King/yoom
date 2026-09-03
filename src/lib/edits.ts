@@ -15,19 +15,58 @@ export type Rect = { x: number; y: number; w: number; h: number };
 
 export type Cut = { start: number; end: number };
 
-export type Zoom = { start: number; end: number; rect: Rect; ramp?: number };
+/**
+ * `follow` (desktop takes with a cursor track only): `rect` gives the window
+ * SIZE and its position is ignored — the centre rides the smoothed cursor path
+ * instead, clamped inside the frame. See `lib/editor/cursor-path`.
+ */
+export type Zoom = { start: number; end: number; rect: Rect; ramp?: number; follow?: boolean };
 
-export type OverlayType = "blur" | "callout" | "underline" | "highlight" | "click";
+export type OverlayType =
+  | "blur"
+  | "ellipse"
+  | "step"
+  | "underline"
+  | "highlight"
+  | "arrow"
+  | "image"
+  | "click";
 
+/** A normalised point on the source frame (0..1 in each axis). */
+export type Point = { x: number; y: number };
+
+/**
+ * ARROW REPRESENTATION (one representation, chosen once, relied on everywhere):
+ * `from` and `to` are the arrow's endpoints in normalised **source** coordinates
+ * — the same space as `rect` — and they are the single source of truth. `rect`
+ * is their axis-aligned BOUNDING BOX, derived and kept in step by `parseEdits`
+ * and by `edit-ops.addOverlay` / `updateOverlay`, so every rect-shaped consumer
+ * (the timeline, hit-testing, the zoom mapping in `render.ts`) keeps working
+ * unchanged. Nothing else reads `from`/`to`; every other overlay type drops them.
+ */
 export type Overlay = {
   type: OverlayType;
   start: number;
   end: number;
   rect: Rect;
-  /** Callout number badge. */
+  /** Step badge number. */
   n?: number;
-  /** CSS colour for underline/highlight. */
+  /** CSS colour for everything but blur and image. */
   color?: string;
+  /** Arrow tail; see the arrow note above. Arrows only. */
+  from?: Point;
+  /** Arrow head; see the arrow note above. Arrows only. */
+  to?: Point;
+  /**
+   * Image source: an object URL minted during staging, or a data URL. Kept
+   * verbatim, `blob:` included — the client export needs it, and a `blob:`
+   * that reaches the server is simply a dead string nothing dereferences.
+   */
+  src?: string;
+  /** Stroke width, normalised to the frame HEIGHT (see `DEFAULT_OVERLAY_THICKNESS`). */
+  thickness?: number;
+  /** 0..1; the fill alpha for highlight and the draw alpha for image. */
+  opacity?: number;
 };
 
 /** A recorder-placed timestamp marker (seconds from the start of the video). */
@@ -104,7 +143,24 @@ const MAX_RAMP_S = 2;
 export const MAX_CAMERA_OFFSET_MS = 5000;
 /** Smallest a normalised rect's width/height may shrink to when clamped into the frame. */
 const MIN_RECT_SIZE = 0.001;
-const OVERLAY_TYPES: OverlayType[] = ["blur", "callout", "underline", "highlight", "click"];
+/** Longest an overlay image `src` may be; anything longer is dropped rather than stored. */
+export const MAX_OVERLAY_SRC = 2048;
+/** Stroke width as a fraction of the frame height — a fat but still sane ceiling. */
+export const MAX_OVERLAY_THICKNESS = 0.1;
+/** The stroke width an ellipse/arrow/underline is drawn with when it carries none. */
+export const DEFAULT_OVERLAY_THICKNESS = 0.006;
+const OVERLAY_TYPES: OverlayType[] = [
+  "blur",
+  "ellipse",
+  "step",
+  "underline",
+  "highlight",
+  "arrow",
+  "image",
+  "click",
+];
+/** Pre-addendum names that still have to parse. `callout` is today's `step`. */
+const LEGACY_OVERLAY_TYPES: Record<string, OverlayType> = { callout: "step" };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -139,6 +195,29 @@ export function clampRect(r: Rect): Rect {
     w: clamp(r.w, MIN_RECT_SIZE, 1 - x),
     h: clamp(r.h, MIN_RECT_SIZE, 1 - y),
   };
+}
+
+/**
+ * The bounding box of an arrow's two endpoints, clamped into the frame. Never
+ * zero-area: `clampRect` floors both sides, so an axis-aligned arrow still has
+ * a grabbable, drawable rect.
+ */
+export function arrowRect(from: Point, to: Point): Rect {
+  return clampRect({
+    x: Math.min(from.x, to.x),
+    y: Math.min(from.y, to.y),
+    w: Math.abs(to.x - from.x),
+    h: Math.abs(to.y - from.y),
+  });
+}
+
+/** A normalised point, clamped into 0..1, or null when either axis is missing. */
+function parsePoint(value: unknown): Point | null {
+  if (!isRecord(value)) return null;
+  const x = num(value.x);
+  const y = num(value.y);
+  if (x === null || y === null) return null;
+  return { x: clamp(x, 0, 1), y: clamp(y, 0, 1) };
 }
 
 function parseCamera(value: unknown): CameraTrack | null | undefined {
@@ -215,6 +294,9 @@ export function parseEdits(input: unknown): VideoEdits {
     const zoom: Zoom = { ...span, rect: clampRect(rect) };
     const ramp = isRecord(raw) ? num(raw.ramp) : null;
     if (ramp !== null) zoom.ramp = clamp(ramp, 0, MAX_RAMP_S);
+    // Only `true` is worth storing: a stored take without a cursor track falls
+    // back to the rect anyway, so `follow: false` and absent mean the same.
+    if (isRecord(raw) && raw.follow === true) zoom.follow = true;
     zooms.push(zoom);
   }
 
@@ -222,16 +304,32 @@ export function parseEdits(input: unknown): VideoEdits {
   for (const raw of asArray(input.overlays)) {
     if (overlays.length >= MAX_OVERLAYS) break;
     if (!isRecord(raw)) continue;
-    const type = raw.type;
-    if (typeof type !== "string") continue;
-    if (!OVERLAY_TYPES.includes(type as OverlayType)) continue;
+    const raw_type = raw.type;
+    if (typeof raw_type !== "string") continue;
+    const type = LEGACY_OVERLAY_TYPES[raw_type] ?? (raw_type as OverlayType);
+    if (!OVERLAY_TYPES.includes(type)) continue;
     const span = parseSpan(raw);
     const rect = parseRect(raw.rect);
     if (!span || !rect) continue;
-    const overlay: Overlay = { type: type as OverlayType, ...span, rect: clampRect(rect) };
+    const overlay: Overlay = { type, ...span, rect: clampRect(rect) };
     const n = num(raw.n);
     if (n !== null) overlay.n = n;
     if (typeof raw.color === "string") overlay.color = raw.color;
+    if (type === "arrow") {
+      // The endpoints are the arrow; an old or hand-written entry with only a
+      // rect becomes that rect's diagonal, and the rect is then re-derived so
+      // the two can never disagree.
+      const from = parsePoint(raw.from) ?? { x: overlay.rect.x, y: overlay.rect.y };
+      const to = parsePoint(raw.to) ?? { x: overlay.rect.x + overlay.rect.w, y: overlay.rect.y + overlay.rect.h };
+      overlay.from = from;
+      overlay.to = to;
+      overlay.rect = arrowRect(from, to);
+    }
+    if (typeof raw.src === "string" && raw.src.length <= MAX_OVERLAY_SRC) overlay.src = raw.src;
+    const thickness = num(raw.thickness);
+    if (thickness !== null) overlay.thickness = clamp(thickness, 0, MAX_OVERLAY_THICKNESS);
+    const opacity = num(raw.opacity);
+    if (opacity !== null) overlay.opacity = clamp(opacity, 0, 1);
     overlays.push(overlay);
   }
 
