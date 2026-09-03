@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CursorSample } from "@/lib/recording/types";
-import { createCursorSampler, smoothCursor } from "./cursor-path";
+import { CURSOR_TAU_S, createCursorSampler, smoothCursor } from "./cursor-path";
 
 /** A track sampled at `hz` between `t0` and `t1`, positioned by `at`. */
 function track(t0: number, t1: number, hz: number, at: (t: number) => { x: number; y: number }): CursorSample[] {
@@ -92,5 +92,23 @@ describe("createCursorSampler", () => {
     const t0 = performance.now();
     for (let i = 0; i < 20_000; i++) at((i / 20_000) * 600);
     expect(performance.now() - t0).toBeLessThan(1000);
+  });
+
+  it("takes tau as a bare number or as an option object", () => {
+    expect(createCursorSampler(s, { tau: CURSOR_TAU_S })(2)).toEqual(
+      createCursorSampler(s, CURSOR_TAU_S)(2),
+    );
+    expect(createCursorSampler(s, {})(2)).toEqual(createCursorSampler(s)(2));
+  });
+
+  it("keeps two taus over one track apart", () => {
+    // A step the lazy filter is still climbing: the quicker one must be
+    // further along, and neither may be evicted by building the other.
+    const step = track(0, 2, 30, (t) => ({ x: t < 1 ? 0 : 1, y: 0.5 }));
+    const lazy = createCursorSampler(step);
+    const quick = createCursorSampler(step, { tau: CURSOR_TAU_S });
+    expect(quick(1.15)!.x).toBeGreaterThan(lazy(1.15)!.x);
+    // Re-reading the first sampler must still give the lazy answer.
+    expect(lazy(1.15)).toEqual(createCursorSampler(step)(1.15));
   });
 });

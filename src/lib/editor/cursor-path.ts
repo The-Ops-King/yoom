@@ -13,6 +13,22 @@ export interface CursorPoint {
  */
 export const DEFAULT_TAU_S = 0.25;
 
+/**
+ * The time constant the SYNTHETIC CURSOR is drawn with. Much shorter than the
+ * follow zoom's: a zoom window wants a lazy centre that ignores twitches, but a
+ * drawn pointer that lags the user's hand by a quarter second reads as broken.
+ * 0.12 s still sands off the 30 Hz sampling's stair-stepping.
+ */
+export const CURSOR_TAU_S = 0.12;
+
+/** How a sampler is filtered: bare seconds, or `{ tau }`. */
+export type SamplerOptions = number | { tau?: number };
+
+function tauOf(opts: SamplerOptions | undefined): number {
+  if (typeof opts === "number") return opts;
+  return opts?.tau ?? DEFAULT_TAU_S;
+}
+
 /** Samples arrive clamped to [-0.1, 1.1]; the window centre must stay in frame. */
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
@@ -42,11 +58,13 @@ interface Track {
 }
 
 /**
- * One track per samples array, so a component that re-renders 60 times a
- * second does not refilter the take on every frame. Keyed weakly: staging
- * holds the only reference to the array, and the track dies with it.
+ * One track per samples array PER TAU, so a component that re-renders 60 times
+ * a second does not refilter the take on every frame — and so the follow
+ * zoom's lazy filter and the synthetic cursor's quick one, which read the same
+ * array with different constants, do not evict each other. Keyed weakly:
+ * staging holds the only reference to the array, and the tracks die with it.
  */
-const cache = new WeakMap<CursorSample[], Track>();
+const cache = new WeakMap<CursorSample[], Map<number, Track>>();
 
 function build(samples: CursorSample[], tau: number): Track {
   const n = samples.length;
@@ -86,10 +104,15 @@ function build(samples: CursorSample[], tau: number): Track {
 }
 
 function trackFor(samples: CursorSample[], tau: number): Track {
-  const hit = cache.get(samples);
-  if (hit && hit.tau === tau) return hit;
+  let byTau = cache.get(samples);
+  if (!byTau) {
+    byTau = new Map<number, Track>();
+    cache.set(samples, byTau);
+  }
+  const hit = byTau.get(tau);
+  if (hit) return hit;
   const built = build(samples, tau);
-  cache.set(samples, built);
+  byTau.set(tau, built);
   return built;
 }
 
@@ -137,9 +160,9 @@ export function smoothCursor(samples: CursorSample[], t: number, tau = DEFAULT_T
  */
 export function createCursorSampler(
   samples: CursorSample[],
-  tau = DEFAULT_TAU_S,
+  opts?: SamplerOptions,
 ): (t: number) => CursorPoint | null {
   if (samples.length === 0) return () => null;
-  const track = trackFor(samples, tau);
+  const track = trackFor(samples, tauOf(opts));
   return (t: number) => evaluate(track, t);
 }

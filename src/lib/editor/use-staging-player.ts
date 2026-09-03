@@ -2,8 +2,9 @@
 
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { VideoEdits } from "@/lib/edits";
-import type { CursorSample, RecordingMode } from "@/lib/recording/types";
-import { createCursorSampler } from "./cursor-path";
+import type { CursorSample, KeySample, RecordingMode } from "@/lib/recording/types";
+import { CURSOR_TAU_S, createCursorSampler } from "./cursor-path";
+import { createKeySampler } from "./render-input";
 import {
   editedDurationIn,
   editedToSourceIn,
@@ -79,6 +80,11 @@ export interface StagingPlayerOptions {
    * changes, not on every render.
    */
   cursor?: CursorSample[];
+  /**
+   * The take's key track (`t` in seconds), for the `keys` overlay's badge.
+   * Stable reference, same as `cursor`; empty (or absent) draws no badges.
+   */
+  keys?: KeySample[];
 }
 
 type Size = { width: number; height: number };
@@ -153,6 +159,18 @@ export function useStagingPlayer(
   const cursorAt = useMemo(() => (cursor?.length ? createCursorSampler(cursor) : undefined), [cursor]);
   const cursorAtRef = useRef(cursorAt);
 
+  // The input layer's two samplers, built on the same terms: once per track,
+  // then O(log n) per frame. The synthetic cursor is filtered harder than the
+  // follow zoom (see `CURSOR_TAU_S`), so it is its own sampler over the same
+  // array rather than a second reader of `cursorAt`.
+  const keys = options?.keys;
+  const keysAt = useMemo(() => (keys?.length ? createKeySampler(keys) : undefined), [keys]);
+  const smoothCursorAt = useMemo(
+    () => (cursor?.length ? createCursorSampler(cursor, { tau: CURSOR_TAU_S }) : undefined),
+    [cursor],
+  );
+  const inputRef = useRef({ keysAt, smoothCursorAt });
+
   /** Push the exact playhead — for seek, pause, and end of playback. */
   const pushTime = useCallback((t: number) => {
     timeRef.current = t;
@@ -170,6 +188,11 @@ export function useStagingPlayer(
     cursorAtRef.current = cursorAt;
     dirtyRef.current = true;
   }, [cursorAt]);
+
+  useEffect(() => {
+    inputRef.current = { keysAt, smoothCursorAt };
+    dirtyRef.current = true;
+  }, [keysAt, smoothCursorAt]);
 
   // Hidden decoders. One primary (screen, or camera in camera-only mode) plus,
   // in screen+camera, a muted camera element kept in sync by the draw loop.
@@ -372,6 +395,8 @@ export function useStagingPlayer(
               edits: e,
               background: bgRef.current,
               cursorAt: cursorAtRef.current,
+              keysAt: inputRef.current.keysAt,
+              smoothCursorAt: inputRef.current.smoothCursorAt,
             };
             drawFrame(ctx, inputs, t, canvas.width, canvas.height);
             dirtyRef.current = false;

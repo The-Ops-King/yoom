@@ -1,8 +1,9 @@
 import fixWebmDuration from "fix-webm-duration";
 import type { VideoEdits } from "@/lib/edits";
-import type { CursorSample, RecordingMode } from "@/lib/recording/types";
+import type { CursorSample, KeySample, RecordingMode } from "@/lib/recording/types";
 import { getWallpaperBlob } from "@/lib/wallpapers";
-import { createCursorSampler } from "./cursor-path";
+import { CURSOR_TAU_S, createCursorSampler } from "./cursor-path";
+import { createKeySampler } from "./render-input";
 import { editedToSource, keptRanges } from "./cuts";
 import { drawFrame, outputSize, preloadOverlayImages, type RenderInputs } from "./render";
 
@@ -27,6 +28,12 @@ export interface RenderOptions {
    * rects. Omit it for a browser take, which has no track.
    */
   cursor?: CursorSample[];
+  /**
+   * The take's key track (`t` in SOURCE seconds), for the `keys` overlay's
+   * badge. In memory only, exactly like `cursor`: an export that is not handed
+   * one burns in the overlay's span with no keycaps on it.
+   */
+  keys?: KeySample[];
 }
 
 export interface RenderResult { blob: Blob; thumbnail: Blob | null; width: number; height: number }
@@ -303,6 +310,11 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
       mode: sources.mode, edits, background,
       // Built once per render: O(n) over the track, then O(log n) a frame.
       cursorAt: opts.cursor?.length ? createCursorSampler(opts.cursor) : undefined,
+      keysAt: opts.keys?.length ? createKeySampler(opts.keys) : undefined,
+      // The drawn pointer keeps up with the hand; the follow zoom lags it.
+      smoothCursorAt: opts.cursor?.length
+        ? createCursorSampler(opts.cursor, { tau: CURSOR_TAU_S })
+        : undefined,
     };
 
     stream = canvas.captureStream(fps);
