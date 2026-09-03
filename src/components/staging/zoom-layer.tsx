@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { Rect, VideoEdits } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
-import { toOutput, zoomAt } from "@/lib/editor/zoom";
+import { effectiveRect, toOutput, zoomAt } from "@/lib/editor/zoom";
 import type { StagingContext } from "./types";
 import { fractionOf, viewBox } from "./view-map";
 
@@ -45,7 +45,7 @@ type Drag = {
  * overlay layer beneath it or a bubble drag from the camera layer above it.
  */
 export function ZoomLayer({ ctx }: { ctx: StagingContext }) {
-  const { edits, player, tool, selected } = ctx;
+  const { edits, player, tool, selected, cursorAt } = ctx;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const boxRef = useRef<Measured | null>(null);
   /** The edits the last live apply produced, so the commit can re-find the zoom. */
@@ -120,7 +120,7 @@ export function ZoomLayer({ ctx }: { ctx: StagingContext }) {
     if (!zoom) return;
     // The live playhead, not the 10 Hz mirror: the zoom on screen is the one
     // the gesture is measured through.
-    const view = zoomAt(edits.zooms, player.timeRef.current);
+    const view = zoomAt(edits.zooms, player.timeRef.current, cursorAt);
     if (!measure(view)) return;
     const p = pointAt(e.clientX, e.clientY);
     if (!p) return;
@@ -128,11 +128,14 @@ export function ZoomLayer({ ctx }: { ctx: StagingContext }) {
     e.stopPropagation();
     player.pause();
     liveRef.current = null;
-    setDrag({ mode, index, start: zoom.start, ox: p.x, oy: p.y, rect: zoom.rect, view, from: edits });
+    // The rect the gesture starts from is the one on screen: for a follow
+    // zoom that is the cursor-centred window, not its (ignored) stored origin.
+    const rect = effectiveRect(zoom, player.timeRef.current, cursorAt);
+    setDrag({ mode, index, start: zoom.start, ox: p.x, oy: p.y, rect, view, from: edits });
   };
 
   const t = player.time;
-  const view = zoomAt(edits.zooms, t);
+  const view = zoomAt(edits.zooms, t, cursorAt);
   const { width: ow, height: oh } = player.size;
   const cf = fractionOf(viewBox(ow, oh, frame, view, ctx.mode === "camera"), ow, oh);
 
@@ -148,6 +151,10 @@ export function ZoomLayer({ ctx }: { ctx: StagingContext }) {
   // Solid while the playhead is inside the zoom's span (what you see is what
   // you are editing), dashed outside it.
   const inSpan = t >= zoom.start && t < zoom.end;
+  // A follow zoom has no position of its own to drag — only a size. The box
+  // still shows where the window actually is this frame.
+  const following = zoom.follow === true && cursorAt !== undefined;
+  const box = effectiveRect(zoom, t, cursorAt);
 
   return (
     <div ref={rootRef} className="pointer-events-none absolute inset-0 z-[15] touch-none">
@@ -155,11 +162,17 @@ export function ZoomLayer({ ctx }: { ctx: StagingContext }) {
         <div
           role="button"
           tabIndex={-1}
-          aria-label="Move the selected zoom"
-          title={`Zoom ${zoom.start.toFixed(1)}–${zoom.end.toFixed(1)}s — drag to move, corner to resize`}
-          onPointerDown={(e) => startDrag(e, "move")}
-          style={pctBox(toOutput(zoom.rect, view))}
-          className={`pointer-events-auto absolute cursor-move border-2 bg-sky-400/10 ${
+          aria-label={following ? "The selected zoom follows the mouse" : "Move the selected zoom"}
+          title={
+            following
+              ? `Zoom ${zoom.start.toFixed(1)}–${zoom.end.toFixed(1)}s — follows the mouse; drag the corner to resize`
+              : `Zoom ${zoom.start.toFixed(1)}–${zoom.end.toFixed(1)}s — drag to move, corner to resize`
+          }
+          onPointerDown={(e) => {
+            if (!following) startDrag(e, "move");
+          }}
+          style={pctBox(toOutput(box, view))}
+          className={`pointer-events-auto absolute border-2 bg-sky-400/10 ${following ? "cursor-default" : "cursor-move"} ${
             inSpan ? "border-sky-300" : "border-dashed border-sky-300/70"
           }`}
         >

@@ -1,5 +1,6 @@
 import type { Marker, Overlay, VideoEdits } from "@/lib/edits";
 import type { StagingPlayer } from "@/lib/editor/use-staging-player";
+import type { CursorAt } from "@/lib/editor/zoom";
 import type { FinishInput } from "@/lib/recording/use-recorder";
 import type {
   BubbleConfig,
@@ -50,8 +51,14 @@ export type Details = {
   slugOk?: boolean;
 };
 
-/** Which pointer gesture the preview is in. `select` drags/edits what exists. */
-export type Tool = "select" | "blur" | "callout" | "highlight" | "underline" | "zoom";
+/**
+ * Which pointer gesture the preview is in. `select` drags/edits what exists.
+ * Every other member but `zoom` is an `OverlayType` drawn by dragging — which
+ * is why `image` is NOT here: an image is placed from the Overlays section's
+ * file picker, not rubber-banded, so arming it as a tool would let you draw a
+ * picture-less image overlay.
+ */
+export type Tool = "select" | "blur" | "ellipse" | "step" | "highlight" | "underline" | "arrow" | "zoom";
 
 /**
  * The one selected editable thing, shared by the timeline, the preview and
@@ -81,6 +88,12 @@ export interface StagingContext {
    * track — an empty array means "no Follow mouse".
    */
   cursor: CursorSample[];
+  /**
+   * `cursor` filtered, for anything that has to resolve a `follow` zoom's
+   * effective rect on screen (the zoom box, the overlay mapping). The same
+   * sampler the player draws with; undefined when there is no track.
+   */
+  cursorAt?: CursorAt;
   mode: RecordingMode;
   tool: Tool;
   setTool(t: Tool): void;
@@ -98,7 +111,12 @@ export interface StagingContext {
   setOutPoint(t: number | null): void;
   details: Details;
   setDetails(d: Details | ((d: Details) => Details)): void;
-  addOverlayAt(type: Overlay["type"], rect: Overlay["rect"]): void;
+  /**
+   * Place a new overlay over `rect` at the playhead (or the in/out range).
+   * `extra` carries the fields a rect alone cannot express — an arrow's
+   * `from`/`to`, an image's `src` — and is merged in before the op runs.
+   */
+  addOverlayAt(type: Overlay["type"], rect: Overlay["rect"], extra?: Partial<Overlay>): void;
   addZoomAt(rect: Overlay["rect"]): void;
   /**
    * Hand an object URL minted for the edits (an uploaded frame background) to

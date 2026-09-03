@@ -150,9 +150,21 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
               />
             </label>
           </div>
+          {ctx.cursor.length > 0 && (
+            <label className="flex items-center gap-1.5 text-[11px] text-muted">
+              <input
+                type="checkbox"
+                className="accent-accent"
+                checked={zoom.follow === true}
+                onChange={(e) => editZoom({ follow: e.target.checked })}
+              />
+              Follow mouse
+            </label>
+          )}
           <p className="text-[11px] text-muted-dim">
-            Any aspect: the region is fitted inside the frame, so a tall or wide zoom letterboxes
-            rather than stretching. Drag the box on the preview to move or resize it.
+            {zoom.follow
+              ? "Width and height set the window size; its centre follows the mouse, smoothed and kept inside the frame."
+              : "Any aspect: the region is fitted inside the frame, so a tall or wide zoom letterboxes rather than stretching. Drag the box on the preview to move or resize it."}
           </p>
           <button
             type="button"

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseEdits, type CameraTrack, type Overlay, type VideoEdits } from "@/lib/edits";
 import { defaultCameraTrack } from "@/lib/editor/camera-track";
+import { createCursorSampler } from "@/lib/editor/cursor-path";
 import * as ops from "@/lib/editor/edit-ops";
 import { canRedo, canUndo, createHistory, push, redo, undo, type History } from "@/lib/editor/undo";
 import { useStagingPlayer } from "@/lib/editor/use-staging-player";
@@ -100,7 +101,15 @@ export function Staging(props: StagingProps) {
   const [inPoint, setInPoint] = useState<number | null>(null);
   const [outPoint, setOutPoint] = useState<number | null>(null);
 
-  const player = useStagingPlayer(props.screenUrl, props.cameraUrl, props.mode, props.durationMs, edits);
+  const player = useStagingPlayer(props.screenUrl, props.cameraUrl, props.mode, props.durationMs, edits, {
+    cursor: props.cursor,
+  });
+  // One sampler for the whole screen: the player draws with it and the zoom
+  // box measures against it, so the box lands exactly on what is rendered.
+  const cursorAt = useMemo(
+    () => (props.cursor.length > 0 ? createCursorSampler(props.cursor) : undefined),
+    [props.cursor],
+  );
   const duration = props.durationMs / 1000;
   const defaultBubbleSize = props.defaults.bubble.size;
 
@@ -224,9 +233,11 @@ export function Staging(props: StagingProps) {
   }, [duration, inPoint, outPoint]);
 
   const addOverlayAt = useCallback(
-    (type: Overlay["type"], rect: Overlay["rect"]) => {
+    (type: Overlay["type"], rect: Overlay["rect"], extra?: Partial<Overlay>) => {
       const { start, end } = spanForNew();
-      const next = ops.addOverlay(edits, { type, start, end, rect });
+      // `extra` first, so it cannot overwrite the identity fields; `addOverlay`
+      // is what re-derives an arrow's rect from the `from`/`to` it carries.
+      const next = ops.addOverlay(edits, { ...extra, type, start, end, rect });
       apply(() => next);
       // `addOverlay` refuses past `MAX_OVERLAYS`: only select what it added.
       if (next.overlays.length > edits.overlays.length) {
@@ -316,6 +327,7 @@ export function Staging(props: StagingProps) {
       player,
       duration,
       cursor: props.cursor,
+      cursorAt,
       mode: props.mode,
       tool,
       setTool,
@@ -347,6 +359,7 @@ export function Staging(props: StagingProps) {
       player,
       duration,
       props.cursor,
+      cursorAt,
       props.mode,
       props.error,
       tool,
