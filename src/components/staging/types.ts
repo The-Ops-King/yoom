@@ -1,7 +1,12 @@
 import type { Marker, Overlay, VideoEdits } from "@/lib/edits";
 import type { StagingPlayer } from "@/lib/editor/use-staging-player";
 import type { FinishInput } from "@/lib/recording/use-recorder";
-import type { BubbleConfig, FrameConfig, RecordingMode } from "@/lib/recording/types";
+import type {
+  BubbleConfig,
+  CursorSample,
+  FrameConfig,
+  RecordingMode,
+} from "@/lib/recording/types";
 import type { RailSection } from "./rail";
 
 /**
@@ -18,6 +23,13 @@ export interface StagingProps {
   durationMs: number;
   cameraOffsetMs: number;
   markers: Marker[];
+  /**
+   * The desktop shell's cursor track for this take (mouse-follow zoom), with
+   * `t` already in SECONDS. Empty in the browser and for window captures, which
+   * is how the Zoom section decides whether to offer "Follow mouse". Lives in
+   * memory only: it is never written to `videos.edits` or to sessionStorage.
+   */
+  cursor: CursorSample[];
   defaults: { bubble: BubbleConfig; frame: FrameConfig };
   error: string;
   onFinish: (input: FinishInput) => void;
@@ -63,6 +75,12 @@ export interface StagingContext {
   player: StagingPlayer;
   /** Source duration in seconds. */
   duration: number;
+  /**
+   * The take's cursor track, `t` in seconds (see `StagingProps.cursor`). A
+   * stable reference for the life of staging, and empty whenever there is no
+   * track — an empty array means "no Follow mouse".
+   */
+  cursor: CursorSample[];
   mode: RecordingMode;
   tool: Tool;
   setTool(t: Tool): void;

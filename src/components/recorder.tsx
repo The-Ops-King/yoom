@@ -179,6 +179,7 @@ export function Recorder() {
           durationMs={state.durationMs}
           cameraOffsetMs={state.cameraOffsetMs}
           markers={state.markers}
+          cursor={staging.cursor}
           defaults={{ bubble: state.bubble, frame: state.frame }}
           error={state.error}
           onFinish={actions.finish}

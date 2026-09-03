@@ -7,7 +7,13 @@ import type { VideoEdits } from "@/lib/edits";
 import { editedDuration } from "@/lib/editor/cuts";
 import { renderToBlob, type RenderSources } from "@/lib/editor/export";
 import { AudioMixer } from "./audio-mixer";
-import { isDesktop, onDesktopShortcut, setDesktopHudState } from "./desktop-bridge";
+import { appendSamples, toSeconds } from "./cursor-track";
+import {
+  isDesktop,
+  onDesktopCursor,
+  onDesktopShortcut,
+  setDesktopHudState,
+} from "./desktop-bridge";
 import { getProvider, isCaptureCancellation } from "./media-sources";
 import {
   MAX_DURATION_MS,
@@ -20,6 +26,7 @@ import { uploadRecording } from "./upload";
 import type {
   BubbleConfig,
   Capabilities,
+  CursorSample,
   FrameConfig,
   HudStatus,
   SurfacePref,
@@ -72,8 +79,23 @@ export interface UseRecorderResult {
   screenVideoRef: React.RefObject<HTMLVideoElement | null>;
   /** Raw camera preview while configuring (camera and screen+camera). */
   cameraVideoRef: React.RefObject<HTMLVideoElement | null>;
-  /** Object URLs for the two raw files while staging; null outside staging. */
-  staging: { screenUrl: string | null; cameraUrl: string | null } | null;
+  /**
+   * What staging needs from the take: object URLs for the two raw files, plus
+   * the desktop cursor track. Null outside staging.
+   *
+   * `cursor` is the mouse-follow-zoom track, and its `t` is in SECONDS here —
+   * the bridge delivers milliseconds, and the conversion happens at this
+   * boundary because staging's whole timeline is in seconds. It is empty in the
+   * browser, on a shell that predates the feature, and for window captures
+   * (only display captures produce samples), which is the signal to hide the
+   * "Follow mouse" toggle. The array identity is stable for the whole staging
+   * session.
+   */
+  staging: {
+    screenUrl: string | null;
+    cameraUrl: string | null;
+    cursor: CursorSample[];
+  } | null;
   getLevel: (id: "mic" | "system") => number;
   actions: {
     setSurfacePref(pref: SurfacePref): void;
@@ -126,7 +148,7 @@ export function useRecorder(): UseRecorderResult {
   // Bumped by `restartNow`: a recording → recording restart does not change
   // `state.status`, so the "start the encoder" effect needs its own trigger.
   const [restartToken, setRestartToken] = useState(0);
-  const [staging, setStaging] = useState<{
+  const [stagingUrls, setStagingUrls] = useState<{
     screenUrl: string | null;
     cameraUrl: string | null;
   } | null>(null);
@@ -161,6 +183,11 @@ export function useRecorder(): UseRecorderResult {
   });
   const stateRef = useRef(state);
   stateRef.current = state;
+  // Mouse-follow zoom: the desktop shell's cursor samples for the current take,
+  // in the bridge's own unit (milliseconds of recorded material). Kept in a ref
+  // because nothing re-renders on a new batch — staging reads the finished
+  // track once. Cleared when a take begins and when one is thrown away.
+  const cursorRef = useRef<CursorSample[]>([]);
   // Settings are only persisted once the stored settings have been read back,
   // so the first render never writes DEFAULT_SETTINGS over the saved ones.
   const hydratedRef = useRef(false);
@@ -184,6 +211,13 @@ export function useRecorder(): UseRecorderResult {
     setDesktop(isDesktop());
     hydratedRef.current = true;
   }, []);
+
+  // Mouse-follow zoom: subscribe once for the life of the page. The shell only
+  // emits while a take is live, and `beginRecording` clears the track, so there
+  // is nothing to unsubscribe between takes. A no-op in the browser.
+  useEffect(() => onDesktopCursor((batch) => {
+    cursorRef.current = appendSamples(cursorRef.current, batch);
+  }), []);
 
   // Persist preferences whenever they change.
   //
@@ -392,6 +426,9 @@ export function useRecorder(): UseRecorderResult {
     chunksRef.current = [];
     screenStartRef.current = 0;
     cameraStartRef.current = 0;
+    // Covers the first take and every restart: the shell's `t` restarts at 0
+    // with the encoder, so a stale track would sit in front of the new one.
+    cursorRef.current = [];
 
     const mimeType = pickMimeType();
     const recorder = new MediaRecorder(recordStream, {
@@ -597,18 +634,30 @@ export function useRecorder(): UseRecorderResult {
   // `screenUrl` null — the staging player picks its primary source by mode.
   useEffect(() => {
     if (!state.blob) {
-      setStaging(null);
+      setStagingUrls(null);
       return;
     }
     const url = URL.createObjectURL(state.blob);
     const cameraUrl = state.cameraBlob ? URL.createObjectURL(state.cameraBlob) : null;
     const camOnly = state.mode === "camera";
-    setStaging({ screenUrl: camOnly ? null : url, cameraUrl: camOnly ? url : cameraUrl });
+    setStagingUrls({ screenUrl: camOnly ? null : url, cameraUrl: camOnly ? url : cameraUrl });
     return () => {
       URL.revokeObjectURL(url);
       if (cameraUrl) URL.revokeObjectURL(cameraUrl);
     };
   }, [state.blob, state.cameraBlob, state.mode]);
+
+  /*
+    What staging actually receives. The cursor track is read from the ref
+    exactly once per take: `stagingUrls` only changes identity when the blobs
+    do, i.e. when a NEW take lands, and the shell has stopped sampling by then —
+    so the converted array is computed once and its identity stays stable for
+    the whole staging session (the editor holds it in `ctx`).
+  */
+  const staging = useMemo(
+    () => (stagingUrls ? { ...stagingUrls, cursor: toSeconds(cursorRef.current) } : null),
+    [stagingUrls],
+  );
 
   // ---------- render + upload ----------
 
@@ -736,6 +785,7 @@ export function useRecorder(): UseRecorderResult {
   const discardRecorder = useCallback(() => {
     chunksRef.current = [];
     cameraChunksRef.current = [];
+    cursorRef.current = [];
     const recorder = recorderRef.current;
     const cam = cameraRecorderRef.current;
     recorderRef.current = null;
