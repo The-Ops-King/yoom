@@ -308,15 +308,6 @@ export function installHudIpc(): void {
   });
 
   ipcMain.on(IPC.hudAction, (_e, action: unknown) => {
-    // TEMPORARY (pause investigation): hop 2 of 5. Main-process stdout.
-    console.debug(
-      "[Yoom] pause-trace 2 main hudAction",
-      action,
-      "whitelisted?",
-      ACTIONS.includes(action as DesktopShortcut),
-      "status",
-      state.status,
-    );
     if (!ACTIONS.includes(action as DesktopShortcut)) return;
     // Straight down the existing shortcut channel: the HUD's buttons and the
     // global hotkeys are the same remote-control actions, and the web app
