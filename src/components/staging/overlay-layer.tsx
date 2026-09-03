@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
-import { clampRect, type Rect, type VideoEdits } from "@/lib/edits";
+import { arrowRect, clampRect, type Overlay, type Point, type Rect, type VideoEdits } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
 import { toOutput, zoomAt } from "@/lib/editor/zoom";
 import type { StagingContext } from "./types";
@@ -25,10 +25,14 @@ type Measured = { left: number; top: number; x: number; y: number; w: number; h:
  */
 type Band = { ax: number; ay: number; bx: number; by: number; view: Rect };
 
-/** Moving or resizing an existing overlay in select mode. */
+/**
+ * Moving or resizing an existing overlay in select mode. `from`/`to` drag one
+ * end of an arrow: arrows have no box handles, because their endpoints — not
+ * their bounding rect — are what is stored (see the note in `edits.ts`).
+ */
 type Grab = {
   index: number;
-  mode: "move" | "resize";
+  mode: "move" | "resize" | "from" | "to";
   /** Pointer position at grab, content-normalised view space. */
   ox: number;
   oy: number;
@@ -43,6 +47,24 @@ type Grab = {
  * zoom rect no longer has to keep the source aspect, because `drawFrame` fits
  * the view inside the content box (letterboxing) rather than stretching it.
  */
+/** A point the user drew on the zoomed frame, in source space (the point form of `toSource`). */
+function toSourcePoint(p: Point, view: Rect): Point {
+  return { x: clamp01(view.x + p.x * view.w), y: clamp01(view.y + p.y * view.h) };
+}
+
+/** A stored source point in view space, for positioning a handle (the point form of `toOutput`). */
+function toViewPoint(p: Point, view: Rect): Point {
+  return { x: (p.x - view.x) / view.w, y: (p.y - view.y) / view.h };
+}
+
+/** An arrow's two endpoints, falling back to its rect's diagonal. */
+function endpoints(o: Overlay): { from: Point; to: Point } {
+  return {
+    from: o.from ?? { x: o.rect.x, y: o.rect.y },
+    to: o.to ?? { x: o.rect.x + o.rect.w, y: o.rect.y + o.rect.h },
+  };
+}
+
 function bandRect(b: Band): Rect {
   return {
     x: Math.min(b.ax, b.bx),
@@ -93,6 +115,15 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
     };
     const onUp = () => {
       setBand(null);
+      // An arrow is a drag from → to, not a band: it is measured by LENGTH, so
+      // a perfectly horizontal one is not rejected as a zero-height rect.
+      if (tool === "arrow") {
+        if (Math.hypot(band.bx - band.ax, band.by - band.ay) < MIN_DRAW) return;
+        const from = toSourcePoint({ x: band.ax, y: band.ay }, band.view);
+        const to = toSourcePoint({ x: band.bx, y: band.by }, band.view);
+        ctx.addOverlayAt("arrow", arrowRect(from, to), { from, to });
+        return;
+      }
       const r = bandRect(band);
       if (r.w < MIN_DRAW || r.h < MIN_DRAW) return;
       // Drawn on the zoomed frame, stored against source pixels, so it stays
@@ -117,6 +148,14 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
     const onMove = (e: PointerEvent) => {
       const p = pointAt(e.clientX, e.clientY);
       if (!p) return;
+      if (grab.mode === "from" || grab.mode === "to") {
+        // An endpoint follows the pointer outright; `updateOverlay` re-derives
+        // the arrow's bounding rect from the pair.
+        const point = toSourcePoint({ x: clamp01(p.x), y: clamp01(p.y) }, grab.view);
+        const patch = grab.mode === "from" ? { from: point } : { to: point };
+        ctx.applyLive(() => ops.updateOverlay(grab.from, grab.index, patch));
+        return;
+      }
       // View-space movement is source-space movement scaled by the zoom.
       const dx = (p.x - grab.ox) * grab.view.w;
       const dy = (p.y - grab.oy) * grab.view.h;
@@ -155,7 +194,7 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
     setBand({ ax: x, ay: y, bx: x, by: y, view });
   };
 
-  const startGrab = (e: ReactPointerEvent, index: number, mode: "move" | "resize") => {
+  const startGrab = (e: ReactPointerEvent, index: number, mode: Grab["mode"]) => {
     const view = zoomAt(edits.zooms, player.timeRef.current);
     if (!measure(view)) return;
     const p = pointAt(e.clientX, e.clientY);
@@ -206,10 +245,45 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
           />
         )}
 
+        {/* An arrow in flight draws as the line it will become, not as a band. */}
+        {band && tool === "arrow" && (
+          <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <line
+              x1={band.ax * 100}
+              y1={band.ay * 100}
+              x2={band.bx * 100}
+              y2={band.by * 100}
+              stroke="rgb(110 231 183)"
+              strokeWidth={0.8}
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+        )}
+
         {!drawing &&
           edits.overlays.map((o, i) => {
             if (t < o.start || t > o.end) return null;
             const sel = selected?.kind === "overlay" && selected.index === i;
+            if (o.type === "arrow") {
+              const ends = endpoints(o);
+              return (["from", "to"] as const).map((end) => {
+                const p = toViewPoint(ends[end], view);
+                return (
+                  <div
+                    key={`ov-${i}-${o.start}-${end}`}
+                    role="button"
+                    tabIndex={-1}
+                    aria-label={`Drag the arrow's ${end === "from" ? "tail" : "head"}`}
+                    title={`arrow ${o.start.toFixed(1)}–${o.end.toFixed(1)}s`}
+                    onPointerDown={(ev) => startGrab(ev, i, end)}
+                    style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
+                    className={`pointer-events-auto absolute -ml-1.5 -mt-1.5 h-3 w-3 cursor-move rounded-full border ${
+                      sel ? "border-emerald-200 bg-emerald-300" : "border-emerald-200/70 bg-emerald-400/70"
+                    }`}
+                  />
+                );
+              });
+            }
             return (
               <div
                 key={`ov-${i}-${o.start}`}

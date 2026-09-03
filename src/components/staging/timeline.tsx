@@ -168,10 +168,15 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
   const laneLabel =
     "pointer-events-none absolute left-0.5 top-1/2 z-20 -translate-y-1/2 rounded-sm bg-surface/85 px-1 text-[9px] leading-none text-muted-dim";
 
-  /** "Blur" when it is the only one, "Callout 2" when it is not. */
+  /**
+   * "Blur" when it is the only one of its type, "Ellipse 2" when it is not.
+   * A step is always labelled by its own badge number ("Step 3"), which is
+   * what is drawn on the frame — never by its position in the list.
+   */
   const overlayLabel = (i: number) => {
-    const { type } = edits.overlays[i];
+    const { type, n } = edits.overlays[i];
     const name = type.charAt(0).toUpperCase() + type.slice(1);
+    if (type === "step") return `Step ${n ?? 1}`;
     const total = edits.overlays.reduce((n, o) => n + (o.type === type ? 1 : 0), 0);
     if (total < 2) return name;
     const nth = edits.overlays.slice(0, i + 1).reduce((n, o) => n + (o.type === type ? 1 : 0), 0);
