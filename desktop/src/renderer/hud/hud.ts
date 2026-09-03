@@ -77,4 +77,66 @@ function noteInteract(): void {
 document.addEventListener("pointerenter", () => noteInteract(), true);
 document.addEventListener("pointermove", () => noteInteract(), { passive: true });
 
+/**
+ * Dragging the pill.
+ *
+ * `-webkit-app-region: drag` is deliberately absent from `hud.css`: it never
+ * moved this window (see `main/hud.ts#installHudIpc` for why) and leaving it in
+ * would mean two mechanisms fighting over the same mouse-down. The gesture is
+ * ours end to end — screen coordinates go to main, main calls `setPosition`.
+ */
+const pill = document.getElementById("pill") as HTMLDivElement;
+
+let dragPointer: number | null = null;
+/** The latest un-sent screen point, coalesced to one IPC per animation frame. */
+let pendingMove: { x: number; y: number } | null = null;
+let moveFrame = 0;
+
+function flushMove(): void {
+  moveFrame = 0;
+  if (!pendingMove || dragPointer === null) return;
+  api?.dragMove(pendingMove);
+  pendingMove = null;
+}
+
+function endDrag(event: PointerEvent): void {
+  if (dragPointer !== event.pointerId) return;
+  dragPointer = null;
+  pendingMove = null;
+  if (moveFrame) {
+    cancelAnimationFrame(moveFrame);
+    moveFrame = 0;
+  }
+  if (pill.hasPointerCapture(event.pointerId)) pill.releasePointerCapture(event.pointerId);
+  document.body.classList.remove("dragging");
+  api?.dragEnd();
+}
+
+pill.addEventListener("pointerdown", (event: PointerEvent) => {
+  // Left button only, and never on a control: the buttons are the pill's whole
+  // point and a drag that starts on one would eat the click.
+  if (event.button !== 0 || dragPointer !== null) return;
+  if ((event.target as Element | null)?.closest("#controls")) return;
+
+  dragPointer = event.pointerId;
+  // Capture so the drag survives the pointer leaving the 284×48 pill — which
+  // it always does, because the window moves to follow the cursor.
+  pill.setPointerCapture(event.pointerId);
+  document.body.classList.add("dragging");
+  api?.dragStart({ x: event.screenX, y: event.screenY });
+});
+
+pill.addEventListener("pointermove", (event: PointerEvent) => {
+  if (dragPointer !== event.pointerId) return;
+  // A pointermove can outrun the window server; only the newest point matters.
+  pendingMove = { x: event.screenX, y: event.screenY };
+  if (!moveFrame) moveFrame = requestAnimationFrame(flushMove);
+});
+
+pill.addEventListener("pointerup", endDrag);
+pill.addEventListener("pointercancel", endDrag);
+// Belt and braces: a capture lost to a window change would otherwise strand the
+// main process holding a live drag.
+pill.addEventListener("lostpointercapture", endDrag);
+
 api?.onApply(apply);

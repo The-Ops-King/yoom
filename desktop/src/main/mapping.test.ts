@@ -7,6 +7,7 @@ import {
   bubbleCentreToNormalized,
   bubbleWindowSize,
   clamp01,
+  clampToWorkArea,
   cycleShape,
   hudDefaultBounds,
   recorderWindowVisibility,
@@ -217,6 +218,60 @@ describe("hudDefaultBounds", () => {
     const bounds = hudDefaultBounds({ x: 0, y: 0, width: NaN, height: NaN });
     expect(bounds.x).toBe(0);
     expect(bounds.y).toBe(HUD_TOP_INSET);
+  });
+});
+
+describe("clampToWorkArea", () => {
+  // A 1920×1080 screen with a 25px menu bar and a dock reserving 60px.
+  const area = { x: 0, y: 25, width: 1920, height: 995 };
+  const size = { width: 300, height: 64 };
+
+  it("leaves a window that is already inside alone", () => {
+    const at = { x: 810, y: 37, ...size };
+    expect(clampToWorkArea(at, area)).toEqual(at);
+  });
+
+  it("clamps to every edge of the work area", () => {
+    expect(clampToWorkArea({ x: -500, y: 37, ...size }, area).x).toBe(0);
+    expect(clampToWorkArea({ x: 5000, y: 37, ...size }, area).x).toBe(1920 - 300);
+    // Above the work area is behind the menu bar, where the pill is ungrabbable.
+    expect(clampToWorkArea({ x: 810, y: -100, ...size }, area).y).toBe(25);
+    expect(clampToWorkArea({ x: 810, y: 5000, ...size }, area).y).toBe(25 + 995 - 64);
+  });
+
+  it("respects a work area whose origin is not (0, 0)", () => {
+    const second = { x: -1440, y: -300, width: 1440, height: 900 };
+    expect(clampToWorkArea({ x: -9999, y: -9999, ...size }, second)).toMatchObject({
+      x: -1440,
+      y: -300,
+    });
+    expect(clampToWorkArea({ x: 9999, y: 9999, ...size }, second)).toMatchObject({
+      x: -1440 + 1440 - 300,
+      y: -300 + 900 - 64,
+    });
+  });
+
+  it("always returns integers — a fractional setPosition blurs the window", () => {
+    const out = clampToWorkArea({ x: 810.4, y: 37.6, ...size }, area);
+    expect(out.x).toBe(810);
+    expect(out.y).toBe(38);
+  });
+
+  it("pins a window larger than the work area to the origin", () => {
+    const huge = { x: 500, y: 500, width: 4000, height: 4000 };
+    expect(clampToWorkArea(huge, area)).toMatchObject({ x: 0, y: 25 });
+  });
+
+  it("survives a work area that went non-finite (display unplugged mid-drag)", () => {
+    const out = clampToWorkArea(
+      { x: 810, y: 37, ...size },
+      { x: NaN, y: NaN, width: NaN, height: NaN },
+    );
+    expect(out).toMatchObject({ x: 0, y: 0 });
+  });
+
+  it("keeps the window's size untouched", () => {
+    expect(clampToWorkArea({ x: -1, y: -1, ...size }, area)).toMatchObject(size);
   });
 });
 

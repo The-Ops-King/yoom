@@ -7,7 +7,7 @@ import {
   type HudStatus,
 } from "../shared/ipc";
 import { onRecorderStatus, stopCursorTracking } from "./cursor";
-import { hudDefaultBounds, recorderWindowVisibility } from "./mapping";
+import { clampToWorkArea, hudDefaultBounds, recorderWindowVisibility } from "./mapping";
 import {
   hideRecorderWindow,
   registerShellWebContents,
@@ -129,10 +129,9 @@ function createHudWindow(): BrowserWindow {
   // AUTO_HIDE above and README.md § "The recording HUD".
   win.setContentProtection(true);
 
-  // A `-webkit-app-region: drag` gesture is handled by macOS, not by the page:
-  // once the drag starts the renderer stops receiving `pointermove`, so the
-  // idle timer that `hud.ts` feeds would fire mid-drag and hide the pill out
-  // from under the cursor. The window's own move events are the interaction.
+  // The pill is dragged by us, not by the window server (see `installHudIpc`),
+  // so the renderer keeps feeding `noteHudInteraction` for the whole gesture.
+  // These stay as a belt-and-braces cover for a move from anywhere else.
   win.on("move", () => noteHudInteraction());
   win.on("moved", () => noteHudInteraction());
 
@@ -140,6 +139,7 @@ function createHudWindow(): BrowserWindow {
     unregisterShellWebContents(wcId);
     hudWindow = null;
     hudLoaded = false;
+    drag = null;
   });
 
   hudLoaded = false;
@@ -289,6 +289,7 @@ export function destroyHud(): void {
   alive()?.destroy();
   hudWindow = null;
   hudLoaded = false;
+  drag = null;
   state = INITIAL;
 }
 
@@ -299,6 +300,24 @@ const ACTIONS: readonly DesktopShortcut[] = [
   "restart",
   "cancel",
 ];
+
+/**
+ * The in-flight manual drag: the window's bounds and the pointer's screen
+ * position at the moment of `pointerdown`. Deltas are measured against these,
+ * never against the previous move, so a dropped or reordered event cannot make
+ * the pill creep away from the cursor.
+ */
+let drag: { originX: number; originY: number; startX: number; startY: number } | null = null;
+
+/** A screen point off the wire. Untrusted: it comes from a renderer. */
+function parsePoint(value: unknown): { x: number; y: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const { x, y } = raw;
+  if (typeof x !== "number" || !Number.isFinite(x)) return null;
+  if (typeof y !== "number" || !Number.isFinite(y)) return null;
+  return { x, y };
+}
 
 export function installHudIpc(): void {
   ipcMain.on(IPC.setHudState, (_e, next: unknown) => {
@@ -317,4 +336,50 @@ export function installHudIpc(): void {
   });
 
   ipcMain.on(IPC.hudInteract, () => noteHudInteraction());
+
+  /**
+   * Manual dragging, because `-webkit-app-region: drag` never moved this
+   * window. The HUD is only ever on screen during a take, and during a take
+   * `setHudState` has already called `hideRecorderWindow()` — the app has no
+   * ordinary window up and is almost never the active application, which is
+   * exactly the case where macOS spends the mouse-down on activation instead
+   * of starting a window drag. `acceptFirstMouse: true` gets the click to the
+   * page but does not turn it into a drag. So the page reports screen
+   * coordinates and we move the window ourselves.
+   */
+  ipcMain.on(IPC.hudDragStart, (_e, point: unknown) => {
+    const start = parsePoint(point);
+    const win = alive();
+    if (!start || !win) return;
+    const bounds = win.getBounds();
+    drag = { originX: bounds.x, originY: bounds.y, startX: start.x, startY: start.y };
+    noteHudInteraction();
+  });
+
+  ipcMain.on(IPC.hudDragMove, (_e, point: unknown) => {
+    const at = parsePoint(point);
+    const win = alive();
+    if (!at || !drag || !win) return;
+    const bounds = win.getBounds();
+    const next = {
+      x: drag.originX + (at.x - drag.startX),
+      y: drag.originY + (at.y - drag.startY),
+      width: bounds.width,
+      height: bounds.height,
+    };
+    // Clamp against the display the pill is being dragged ONTO, so a drag
+    // across a multi-monitor arrangement is not pinned to the first screen.
+    const area = screen.getDisplayNearestPoint({
+      x: Math.round(at.x),
+      y: Math.round(at.y),
+    }).workArea;
+    const clamped = clampToWorkArea(next, area);
+    win.setPosition(clamped.x, clamped.y);
+    noteHudInteraction();
+  });
+
+  ipcMain.on(IPC.hudDragEnd, () => {
+    drag = null;
+    noteHudInteraction();
+  });
 }

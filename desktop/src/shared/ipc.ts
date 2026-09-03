@@ -46,6 +46,12 @@ export interface HudState {
   markers: number;
 }
 
+/** A point in SCREEN coordinates — `PointerEvent.screenX/screenY`. */
+export interface HudDragPoint {
+  x: number;
+  y: number;
+}
+
 export interface BubbleAppearance {
   shape: BubbleShape;
   size: BubbleSize;
@@ -117,6 +123,21 @@ export const IPC = {
    */
   hudInteract: "yoom:hud:interact",
 
+  /**
+   * HUD renderer → main. Payload: `{ x, y }` in SCREEN coordinates.
+   *
+   * The pill is dragged by the app, not by the window server: see
+   * `main/hud.ts#installHudIpc` for why `-webkit-app-region: drag` never
+   * worked here. `hudDragStart` latches the window's bounds and the grab
+   * point, `hudDragMove` moves the window by the delta since that point, and
+   * `hudDragEnd` (no payload) drops the latch.
+   */
+  hudDragStart: "yoom:hud:drag-start",
+  /** HUD renderer → main. Payload: `{ x, y }` in screen coordinates. */
+  hudDragMove: "yoom:hud:drag-move",
+  /** HUD renderer → main. No payload. */
+  hudDragEnd: "yoom:hud:drag-end",
+
   /** main → bubble renderer. Payload: BubbleAppearance. */
   bubbleApply: "yoom:bubble:apply",
   /** main → bubble renderer. Payload: string | null (deviceId). */
@@ -184,6 +205,10 @@ export interface HudApi {
   onApply(cb: (state: HudState) => void): void;
   action(action: DesktopShortcut): void;
   interact(): void;
+  /** Manual window drag — see `IPC.hudDragStart`. Screen coordinates. */
+  dragStart(point: HudDragPoint): void;
+  dragMove(point: HudDragPoint): void;
+  dragEnd(): void;
 }
 
 declare global {

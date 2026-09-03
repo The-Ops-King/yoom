@@ -170,6 +170,37 @@ export function hudDefaultBounds(workArea: Bounds): Bounds {
   };
 }
 
+/**
+ * Keep a window's top-left inside `workArea`, so a manual drag (see
+ * `hud.ts#installHudIpc`) cannot fling the pill behind the menu bar or off the
+ * bottom of the screen where it can never be grabbed back.
+ *
+ * The result is always integral: `BrowserWindow#setPosition` takes device-
+ * independent pixels and a fractional position makes macOS blur the window.
+ *
+ * A window larger than the work area (or a work area reporting garbage, which
+ * a display unplugged mid-drag does) clamps to the area's origin rather than
+ * producing a negative range or NaN.
+ */
+export function clampToWorkArea(bounds: Bounds, workArea: Bounds): Bounds {
+  const fin = (v: number): number => (Number.isFinite(v) ? v : 0);
+  const areaX = fin(workArea.x);
+  const areaY = fin(workArea.y);
+  const areaW = Math.max(0, fin(workArea.width));
+  const areaH = Math.max(0, fin(workArea.height));
+  const width = Math.max(0, fin(bounds.width));
+  const height = Math.max(0, fin(bounds.height));
+
+  const maxX = areaX + Math.max(0, areaW - width);
+  const maxY = areaY + Math.max(0, areaH - height);
+  return {
+    x: Math.round(Math.min(Math.max(fin(bounds.x), areaX), maxX)),
+    y: Math.round(Math.min(Math.max(fin(bounds.y), areaY), maxY)),
+    width: bounds.width,
+    height: bounds.height,
+  };
+}
+
 /** Statuses during which the recorder window is deliberately off screen. */
 const HIDDEN_DURING: ReadonlySet<HudStatus> = new Set([
   "countdown",

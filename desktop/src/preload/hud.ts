@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DesktopShortcut, HudState } from "../shared/ipc";
+import type { DesktopShortcut, HudDragPoint, HudState } from "../shared/ipc";
 import { IPC } from "./hud.channels";
 
 contextBridge.exposeInMainWorld("__yoomHud", {
@@ -11,5 +11,14 @@ contextBridge.exposeInMainWorld("__yoomHud", {
   },
   interact(): void {
     ipcRenderer.send(IPC.hudInteract);
+  },
+  dragStart(point: HudDragPoint): void {
+    ipcRenderer.send(IPC.hudDragStart, point);
+  },
+  dragMove(point: HudDragPoint): void {
+    ipcRenderer.send(IPC.hudDragMove, point);
+  },
+  dragEnd(): void {
+    ipcRenderer.send(IPC.hudDragEnd);
   },
 });
