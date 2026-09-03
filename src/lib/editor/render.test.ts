@@ -609,3 +609,75 @@ describe("preloadOverlayImages", () => {
     vi.stubGlobal("Image", undefined);
   });
 });
+
+/**
+ * Motion blur is composited, so what matters is the alpha AT each draw — the
+ * shared `fakeCtx` only keeps the last value assigned to a property, hence a
+ * local context that snapshots `globalAlpha` on every `drawImage`.
+ */
+describe("drawFrame motion blur", () => {
+  function alphaCtx() {
+    const draws: number[] = [];
+    const clips: string[] = [];
+    let alpha = 1;
+    const target = {
+      get globalAlpha() { return alpha; },
+      set globalAlpha(v: number) { alpha = v; },
+      drawImage: () => { draws.push(alpha); },
+      clip: () => { clips.push("clip"); },
+    };
+    const handler: ProxyHandler<typeof target> = {
+      get(t, prop) {
+        if (prop === "draws") return draws;
+        if (prop === "clips") return clips;
+        if (prop === "globalAlpha") return t.globalAlpha;
+        if (prop === "drawImage") return t.drawImage;
+        if (prop === "clip") return t.clip;
+        return () => undefined;
+      },
+      set(t, prop, value) {
+        if (prop === "globalAlpha") t.globalAlpha = value as number;
+        return true;
+      },
+    };
+    return new Proxy(target, handler) as unknown as CanvasRenderingContext2D & {
+      draws: number[];
+      clips: string[];
+    };
+  }
+
+  /** Mid ease-in, so the view's centre really is travelling at t = 0.7. */
+  const moving = {
+    ...base,
+    zooms: [{ start: 0.5, end: 3, rect: { x: 0.5, y: 0.5, w: 0.4, h: 0.4 }, ramp: 0.4 }],
+  };
+  /** Where `moving` is halfway through its ramp. */
+  const T = 0.7;
+  const inputs = (edits: typeof base): RenderInputs => ({
+    screen: video(1920, 1080), camera: null, mode: "screen", edits, background: null,
+  });
+
+  it("draws the source once when nothing is moving", () => {
+    const ctx = alphaCtx();
+    drawFrame(ctx, inputs(base), T, 1920, 1080);
+    expect(ctx.draws).toEqual([1]);
+  });
+
+  it("draws three taps at 1, 1/2, 1/3 while the view travels", () => {
+    const ctx = alphaCtx();
+    drawFrame(ctx, inputs(moving), T, 1920, 1080);
+    expect(ctx.draws).toEqual([1, 0.5, 1 / 3]);
+  });
+
+  it("clips the taps so a ghost cannot spill out of the picture", () => {
+    const ctx = alphaCtx();
+    drawFrame(ctx, inputs(moving), T, 1920, 1080);
+    expect(ctx.clips.length).toBeGreaterThan(0);
+  });
+
+  it("honours `motionBlur: false`", () => {
+    const ctx = alphaCtx();
+    drawFrame(ctx, inputs({ ...moving, motionBlur: false }), T, 1920, 1080);
+    expect(ctx.draws).toEqual([1]);
+  });
+});

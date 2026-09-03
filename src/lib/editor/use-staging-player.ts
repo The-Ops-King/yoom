@@ -397,6 +397,9 @@ export function useStagingPlayer(
               cursorAt: cursorAtRef.current,
               keysAt: inputRef.current.keysAt,
               smoothCursorAt: inputRef.current.smoothCursorAt,
+              // The editing canvas, not the file: `drawFrame` uses this for
+              // chrome the export must not burn in.
+              preview: true,
             };
             drawFrame(ctx, inputs, t, canvas.width, canvas.height);
             dirtyRef.current = false;
