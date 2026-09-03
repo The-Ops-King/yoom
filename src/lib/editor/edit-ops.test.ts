@@ -96,6 +96,24 @@ describe("edit-ops", () => {
     expect(e.overlays[0].rect).toEqual(arrowRect(e.overlays[0].from!, { x: 0.9, y: 0.9 }));
   });
 
+  it("stops an arrow at the frame edge instead of deforming it", () => {
+    let e = ops.addOverlay(start(), {
+      type: "arrow",
+      start: 0,
+      end: 3,
+      rect: { x: 0, y: 0, w: 1, h: 1 },
+      from: { x: 0.5, y: 0.5 },
+      to: { x: 0.8, y: 0.6 },
+    });
+    // Shove the box far past the right edge: the translation is clamped, so
+    // the arrow keeps its length and angle and simply stops against the wall.
+    e = ops.updateOverlay(e, 0, { rect: { x: 0.9, y: 0.5, w: 0.3, h: 0.1 } });
+    const { from, to } = e.overlays[0];
+    expect(to!.x).toBeCloseTo(1);
+    expect(to!.x - from!.x).toBeCloseTo(0.3);
+    expect(to!.y - from!.y).toBeCloseTo(0.1);
+  });
+
   it("only steps are numbered", () => {
     const e = ops.addOverlay(start(), { type: "ellipse", start: 0, end: 1, rect: { x: 0, y: 0, w: 0.1, h: 0.1 } });
     expect(e.overlays[0].n).toBeUndefined();

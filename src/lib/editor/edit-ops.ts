@@ -130,14 +130,17 @@ export function updateOverlay(e: VideoEdits, index: number, patch: Partial<Overl
       if (merged.end <= merged.start) merged.end = merged.start + MIN_SPAN;
       merged.rect = clampRect(merged.rect);
       if (merged.type === "arrow" && patch.rect && !patch.from && !patch.to) {
-        const dx = merged.rect.x - o.rect.x;
-        const dy = merged.rect.y - o.rect.y;
-        const shift = (p: Point | undefined, fallback: Point) => {
-          const base = p ?? fallback;
-          return { x: base.x + dx, y: base.y + dy };
-        };
-        merged.from = shift(o.from, { x: o.rect.x, y: o.rect.y });
-        merged.to = shift(o.to, { x: o.rect.x + o.rect.w, y: o.rect.y + o.rect.h });
+        const a = o.from ?? { x: o.rect.x, y: o.rect.y };
+        const b = o.to ?? { x: o.rect.x + o.rect.w, y: o.rect.y + o.rect.h };
+        // Clamp the TRANSLATION against both endpoints at once, not each
+        // endpoint on its own: clamping them separately would shorten the
+        // arrow (or swing it) as it is dragged into a wall instead of just
+        // stopping it there.
+        const span = (lo: number, hi: number, d: number) => Math.min(1 - hi, Math.max(-lo, d));
+        const dx = span(Math.min(a.x, b.x), Math.max(a.x, b.x), merged.rect.x - o.rect.x);
+        const dy = span(Math.min(a.y, b.y), Math.max(a.y, b.y), merged.rect.y - o.rect.y);
+        merged.from = { x: a.x + dx, y: a.y + dy };
+        merged.to = { x: b.x + dx, y: b.y + dy };
       }
       return withArrowRect(merged);
     }),
