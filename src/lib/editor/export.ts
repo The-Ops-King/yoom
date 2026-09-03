@@ -1,6 +1,7 @@
 import fixWebmDuration from "fix-webm-duration";
 import type { VideoEdits } from "@/lib/edits";
-import type { RecordingMode } from "@/lib/recording/types";
+import type { CursorSample, RecordingMode } from "@/lib/recording/types";
+import { createCursorSampler } from "./cursor-path";
 import { editedToSource, keptRanges } from "./cuts";
 import { drawFrame, outputSize, type RenderInputs } from "./render";
 
@@ -18,6 +19,13 @@ export interface RenderOptions {
   signal: AbortSignal;
   /** Canvas capture rate; defaults to 30 fps. */
   fps?: number;
+  /**
+   * The take's cursor track (`t` in SOURCE seconds), for `follow` zooms. It
+   * lives in memory only — it is never part of `videos.edits` — so the export
+   * has to be handed it explicitly or follow zooms burn in on their stored
+   * rects. Omit it for a browser take, which has no track.
+   */
+  cursor?: CursorSample[];
 }
 
 export interface RenderResult { blob: Blob; thumbnail: Blob | null; width: number; height: number }
@@ -232,6 +240,8 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
       screen: sources.mode === "camera" ? null : primary,
       camera: sources.mode === "camera" ? primary : camera,
       mode: sources.mode, edits, background,
+      // Built once per render: O(n) over the track, then O(log n) a frame.
+      cursorAt: opts.cursor?.length ? createCursorSampler(opts.cursor) : undefined,
     };
 
     stream = canvas.captureStream(fps);

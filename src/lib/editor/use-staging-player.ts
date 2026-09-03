@@ -2,7 +2,8 @@
 
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { VideoEdits } from "@/lib/edits";
-import type { RecordingMode } from "@/lib/recording/types";
+import type { CursorSample, RecordingMode } from "@/lib/recording/types";
+import { createCursorSampler } from "./cursor-path";
 import {
   editedDurationIn,
   editedToSourceIn,
@@ -66,6 +67,12 @@ export interface StagingPlayer {
 export interface StagingPlayerOptions {
   /** Mute the primary element. The preview plays its audio by default. */
   muted?: boolean;
+  /**
+   * The take's cursor track (`t` in seconds), for `follow` zooms. A stable
+   * reference: the smoothed track is rebuilt whenever this array identity
+   * changes, not on every render.
+   */
+  cursor?: CursorSample[];
 }
 
 type Size = { width: number; height: number };
@@ -126,6 +133,12 @@ export function useStagingPlayer(
   const muted = options?.muted ?? false;
   const mutedRef = useRef(muted);
 
+  // The smoothed cursor track, rebuilt only when the samples array itself
+  // changes — the draw loop asks it for a position on every frame.
+  const cursor = options?.cursor;
+  const cursorAt = useMemo(() => (cursor?.length ? createCursorSampler(cursor) : undefined), [cursor]);
+  const cursorAtRef = useRef(cursorAt);
+
   /** Push the exact playhead — for seek, pause, and end of playback. */
   const pushTime = useCallback((t: number) => {
     timeRef.current = t;
@@ -138,6 +151,11 @@ export function useStagingPlayer(
     rangesRef.current = ranges;
     dirtyRef.current = true;
   }, [edits, ranges]);
+
+  useEffect(() => {
+    cursorAtRef.current = cursorAt;
+    dirtyRef.current = true;
+  }, [cursorAt]);
 
   // Hidden decoders. One primary (screen, or camera in camera-only mode) plus,
   // in screen+camera, a muted camera element kept in sync by the draw loop.
@@ -323,6 +341,7 @@ export function useStagingPlayer(
               mode,
               edits: e,
               background: bgRef.current,
+              cursorAt: cursorAtRef.current,
             };
             drawFrame(ctx, inputs, t, canvas.width, canvas.height);
             dirtyRef.current = false;
