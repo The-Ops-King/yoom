@@ -11,8 +11,7 @@ import {
 } from "@/lib/edits";
 import { bubbleHeightFor, cameraAt } from "@/lib/editor/camera-track";
 import * as ops from "@/lib/editor/edit-ops";
-import { SIZE_FRACTION } from "@/lib/recording/geometry";
-import type { BubbleShape, BubbleSize } from "@/lib/recording/types";
+import type { BubbleShape } from "@/lib/recording/types";
 import { contentRect } from "../content-rect";
 import type { StagingContext } from "../types";
 
@@ -28,12 +27,6 @@ const SHAPES: { id: BubbleShape; label: string }[] = [
   { id: "rounded", label: "Rounded" },
   { id: "square", label: "Square" },
   { id: "portrait", label: "Portrait" },
-];
-
-const SIZES: { id: BubbleSize; label: string }[] = [
-  { id: "small", label: "S" },
-  { id: "medium", label: "M" },
-  { id: "large", label: "L" },
 ];
 
 const MODE_LABEL: Record<CameraMode, string> = {
@@ -156,14 +149,6 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
     ctx.apply((e) => ops.upsertCameraKeyframe(e, t, { shape, rect: refit(cur.rect, cur.rect.w, h) }));
   };
 
-  const setSize = (size: BubbleSize) => {
-    const t = player.timeRef.current;
-    const cur = cameraAt(track, t);
-    const w = SIZE_FRACTION[size];
-    const h = Math.min(1, bubbleHeightFor(cur.shape, w, aspect));
-    ctx.apply((e) => ops.upsertCameraKeyframe(e, t, { mode: "bubble", rect: refit(cur.rect, w, h) }));
-  };
-
   const setMode = (mode: CameraMode) => atPlayhead({ mode });
 
   /**
@@ -247,17 +232,6 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
           >
             {sample.mode === "hidden" ? "Show camera" : "Hide camera"}
           </button>
-          {SIZES.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className={btn}
-              aria-label={`${s.label} bubble at the playhead`}
-              onClick={() => setSize(s.id)}
-            >
-              {s.label}
-            </button>
-          ))}
         </div>
         <p className="text-[11px] text-muted-dim">Drag the dashed box on the preview to move or resize it.</p>
       </div>
