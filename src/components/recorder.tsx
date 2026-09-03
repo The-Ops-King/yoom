@@ -149,12 +149,16 @@ export function Recorder() {
 
   return (
     <main
+      // The chrome is a control surface, not a document: dragging on it should
+      // move a bubble or scrub, never paint a blue highlight across the labels.
+      // `user-select` inherits, so the staging details form opts its own fields
+      // back in with `select-text` (typing is unaffected either way).
       className={
         stagingView
-          ? "flex min-h-screen flex-col items-center gap-6 p-8"
+          ? "flex min-h-screen select-none flex-col items-center gap-6 p-8"
           : twoColumn
-            ? "flex h-screen gap-6 overflow-hidden p-6"
-            : "flex h-screen items-center justify-center overflow-hidden p-8"
+            ? "flex h-screen select-none gap-6 overflow-hidden p-6"
+            : "flex h-screen select-none items-center justify-center overflow-hidden p-8"
       }
     >
       {state.status === "countdown" && (

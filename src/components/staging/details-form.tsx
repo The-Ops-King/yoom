@@ -11,8 +11,11 @@ const DEBOUNCE_MS = 400;
 
 const FORMAT_HINT = "3–40 lowercase letters, numbers or hyphens.";
 
+// `select-text`: the staging chrome sets `select-none`, and `user-select`
+// inherits into form controls — typing still works, but the caret cannot
+// select anything, which makes editing a title feel broken.
 const field =
-  "w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-dim focus:border-accent/50 focus:ring-1 focus:ring-accent/20";
+  "w-full select-text rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-dim focus:border-accent/50 focus:ring-1 focus:ring-accent/20";
 
 const label = "block text-[11px] uppercase tracking-wider text-muted-dim";
 

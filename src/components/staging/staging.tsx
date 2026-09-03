@@ -396,7 +396,7 @@ export function Staging(props: StagingProps) {
   );
 
   return (
-    <div className="grid w-full max-w-6xl gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div className="grid w-full max-w-6xl select-none gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
       <div className="space-y-3">
         <Preview ctx={ctx} />
         <Timeline ctx={ctx} />

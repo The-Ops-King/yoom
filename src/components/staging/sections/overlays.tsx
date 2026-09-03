@@ -30,8 +30,10 @@ const IMAGE_WIDTH = 0.4;
 const btn =
   "rounded-md border border-border bg-surface-raised px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground";
 const active = "rounded-md border border-accent bg-accent/15 px-2 py-1 text-[11px] font-medium text-foreground";
+// `select-text` because the staging root sets `select-none` and `user-select`
+// inherits: without it the caret cannot select the value to retype it.
 const field =
-  "w-20 rounded-md border border-border bg-surface-raised px-1.5 py-1 text-[11px] tabular-nums text-foreground";
+  "w-20 select-text rounded-md border border-border bg-surface-raised px-1.5 py-1 text-[11px] tabular-nums text-foreground";
 
 /** A half-typed or emptied number field must not push `NaN` into the edits. */
 const num = (v: string, fallback: number) => (Number.isFinite(Number(v)) && v !== "" ? Number(v) : fallback);
