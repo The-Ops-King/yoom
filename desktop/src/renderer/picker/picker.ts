@@ -11,9 +11,22 @@ const audioNote = document.getElementById("audio-note") as HTMLParagraphElement;
 let all: SourceInfo[] = [];
 let tab: "screen" | "window" = "screen";
 let selected = 0;
+/** The source recorded last time, if it is still around. See `main/picker.ts`. */
+let lastSourceId: string | null = null;
 
 function visible(): SourceInfo[] {
   return all.filter((s) => s.kind === tab);
+}
+
+/**
+ * Where the cursor lands when a tab is (re)shown: on last take's source if it
+ * is in this tab, otherwise on the first entry. The picker itself is never
+ * skipped — macOS wants a deliberate choice for every capture — so this only
+ * decides what Enter or a single click confirms.
+ */
+function defaultIndex(): number {
+  const index = visible().findIndex((s) => s.id === lastSourceId);
+  return index === -1 ? 0 : index;
 }
 
 function render(): void {
@@ -56,6 +69,13 @@ function render(): void {
     label.append(name);
     li.append(label);
 
+    if (source.id === lastSourceId) {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = "Last time";
+      li.append(badge);
+    }
+
     li.addEventListener("click", () => {
       selected = index;
       choose();
@@ -78,12 +98,12 @@ function choose(): void {
 
 tabScreen.addEventListener("click", () => {
   tab = "screen";
-  selected = 0;
+  selected = defaultIndex();
   render();
 });
 tabWindow.addEventListener("click", () => {
   tab = "window";
-  selected = 0;
+  selected = defaultIndex();
   render();
 });
 cancelButton.addEventListener("click", () => api?.cancel());
@@ -107,7 +127,7 @@ window.addEventListener("keydown", (event) => {
   } else if (event.key === "Tab") {
     event.preventDefault();
     tab = tab === "screen" ? "window" : "screen";
-    selected = 0;
+    selected = defaultIndex();
     render();
   }
 });
@@ -115,7 +135,8 @@ window.addEventListener("keydown", (event) => {
 api?.onSources((payload: PickerPayload) => {
   all = payload.sources;
   tab = payload.tab;
-  selected = 0;
+  lastSourceId = payload.lastSourceId ?? null;
+  selected = defaultIndex();
   audioNote.hidden = !payload.audioRequested;
   render();
 });

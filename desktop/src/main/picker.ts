@@ -1,5 +1,6 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BrowserWindow, desktopCapturer, ipcMain } from "electron";
+import { BrowserWindow, app, desktopCapturer, ipcMain } from "electron";
 import { IPC, type PickerPayload, type SourceInfo } from "../shared/ipc";
 import {
   getRecorderWindow,
@@ -32,6 +33,74 @@ export async function listSources(): Promise<SourceInfo[]> {
       thumb: s.thumbnail.toDataURL(),
       icon: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : undefined,
     }));
+}
+
+/**
+ * The last source the user actually recorded, remembered across launches.
+ *
+ * macOS still wants a deliberate choice for every capture, so the picker is
+ * never skipped — but re-picking the same monitor from scratch every take is
+ * the kind of friction Loom does not have. Remembering the pick makes Enter (or
+ * one click) enough.
+ */
+interface LastSource {
+  id: string;
+  name: string;
+  kind: "screen" | "window";
+}
+
+/** `undefined` = not read from disk yet; `null` = read, nothing stored. */
+let lastSource: LastSource | null | undefined;
+
+function lastSourcePath(): string {
+  // Lazily, never at module scope: `getPath` needs the app to be ready.
+  return join(app.getPath("userData"), "last-source.json");
+}
+
+function readLastSource(): LastSource | null {
+  if (lastSource !== undefined) return lastSource;
+  lastSource = null;
+  try {
+    const raw: unknown = JSON.parse(readFileSync(lastSourcePath(), "utf8"));
+    if (raw && typeof raw === "object") {
+      const { id, name, kind } = raw as Record<string, unknown>;
+      if (typeof id === "string" && id && typeof name === "string") {
+        if (kind === "screen" || kind === "window") lastSource = { id, name, kind };
+      }
+    }
+  } catch {
+    // No file yet, or a truncated one from a crash mid-write. Either way the
+    // picker just opens with nothing preselected; this is a convenience.
+  }
+  return lastSource;
+}
+
+/** Called once the pick has actually produced a stream. */
+export function rememberLastSource(source: LastSource): void {
+  const next = { id: source.id, name: source.name, kind: source.kind };
+  lastSource = next;
+  try {
+    writeFileSync(lastSourcePath(), JSON.stringify(next), "utf8");
+  } catch (err) {
+    console.error("[yoom] could not remember the last capture source", err);
+  }
+}
+
+/**
+ * The id of the remembered source in TODAY's list, or null.
+ *
+ * Matched by id first. Window ids (`window:<handle>:0`) are handles, so they do
+ * not survive the app being relaunched — for those, fall back to the same kind
+ * with the same title, which is what "Slack" or "Chrome — Yoom" means to the
+ * person looking at the grid. Screen ids are stable and hit the first branch.
+ */
+export function resolveLastSourceId(sources: SourceInfo[]): string | null {
+  const last = readLastSource();
+  if (!last) return null;
+  const exact = sources.find((s) => s.id === last.id);
+  if (exact) return exact.id;
+  const byName = sources.find((s) => s.kind === last.kind && s.name === last.name);
+  return byName?.id ?? null;
 }
 
 function rendererEntry(): { url?: string; file?: string } {

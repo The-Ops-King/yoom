@@ -185,6 +185,12 @@ export interface PickerPayload {
   tab: "screen" | "window";
   /** True when the page asked for audio, so the picker can say so. */
   audioRequested: boolean;
+  /**
+   * The source recorded last time, if it is still in `sources`. Preselected
+   * and badged "Last time" — the picker is never skipped (macOS wants a
+   * deliberate choice every take), but the previous pick is the default.
+   */
+  lastSourceId?: string | null;
 }
 
 export interface BubbleApi {

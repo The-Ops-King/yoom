@@ -76,11 +76,29 @@ nav button[aria-selected="true"] {
 }
 
 #grid li {
+  position: relative;
   border: 1px solid var(--border);
   border-radius: 9px;
   overflow: hidden;
   cursor: default;
   background: rgba(255, 255, 255, 0.03);
+}
+
+/* Last take's source: preselected, and said out loud so the highlight is not
+   mistaken for "wherever the cursor happened to land". */
+#grid li .badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+  background: rgba(13, 13, 13, 0.82);
+  border: 1px solid var(--accent);
+  pointer-events: none;
 }
 
 #grid li[aria-selected="true"] {

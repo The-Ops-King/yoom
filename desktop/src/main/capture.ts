@@ -3,7 +3,7 @@ import { IPC, type SurfacePref } from "../shared/ipc";
 import { setCaptureKind } from "./bubble";
 import { displayIdFromSourceId } from "./cursor-track";
 import { hasScreenAccess, openPrivacyPane } from "./permissions";
-import { listSources, openPicker } from "./picker";
+import { listSources, openPicker, rememberLastSource, resolveLastSourceId } from "./picker";
 
 /**
  * The page announces a surface preference right before it calls
@@ -108,6 +108,9 @@ export function installDisplayMediaHandler(ses: Session): void {
         sources,
         tab: surfacePref === "monitor" ? "screen" : "window",
         audioRequested: request.audioRequested,
+        // The picker preselects this if it is in the tab that opens; the page's
+        // surface preference still decides which tab that is.
+        lastSourceId: resolveLastSourceId(sources),
       });
 
       const source = sources.find((s) => s.id === chosenId);
@@ -127,6 +130,9 @@ export function installDisplayMediaHandler(ses: Session): void {
       // itself for `window` captures while the encoder runs. The same call
       // records the display id for `cursor.ts`.
       setCaptureSource(source);
+      // Remembered only once the pick has survived every guard above, so a
+      // cancelled or denied attempt never becomes next take's default.
+      rememberLastSource({ id: source.id, name: source.name, kind: source.kind });
 
       callback({
         video: { id: source.id, name: source.name },
