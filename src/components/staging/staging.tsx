@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { parseEdits, type CameraTrack, type Overlay, type VideoEdits } from "@/lib/edits";
+import { parseEdits, type CameraTrack, type Overlay, type VideoEdits, type ZoomKind } from "@/lib/edits";
 import { defaultCameraTrack } from "@/lib/editor/camera-track";
 import { createCursorSampler } from "@/lib/editor/cursor-path";
 import * as ops from "@/lib/editor/edit-ops";
@@ -275,9 +275,11 @@ export function Staging(props: StagingProps) {
   );
 
   const addZoomAt = useCallback(
-    (rect: Overlay["rect"]) => {
+    (rect: Overlay["rect"], kind: ZoomKind = "static") => {
       const { start, end } = spanForNew();
-      const next = ops.addZoom(edits, { start, end, rect });
+      // Only a follow zoom carries a `kind`: an absent one already means
+      // static everywhere that reads it, so a plain zoom stays plain on disk.
+      const next = ops.addZoom(edits, kind === "follow" ? { start, end, rect, kind } : { start, end, rect });
       apply(() => next);
       // `insertZoom` re-sorts and can drop the new zoom as a sliver, so find
       // it by its (disjoint, therefore unique) start rather than by position.

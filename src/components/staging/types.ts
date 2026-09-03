@@ -1,4 +1,4 @@
-import type { Marker, Overlay, VideoEdits } from "@/lib/edits";
+import type { Marker, Overlay, VideoEdits, ZoomKind } from "@/lib/edits";
 import type { StagingPlayer } from "@/lib/editor/use-staging-player";
 import type { CursorAt } from "@/lib/editor/zoom";
 import type { FinishInput } from "@/lib/recording/use-recorder";
@@ -53,12 +53,30 @@ export type Details = {
 
 /**
  * Which pointer gesture the preview is in. `select` drags/edits what exists.
- * Every other member but `zoom` is an `OverlayType` drawn by dragging — which
- * is why `image` is NOT here: an image is placed from the Overlays section's
- * file picker, not rubber-banded, so arming it as a tool would let you draw a
- * picture-less image overlay.
+ * Every member but `zoom`/`followZoom` is an `OverlayType` placed by a gesture
+ * — which is why `image` is NOT here: an image is placed from the Overlays
+ * section's file picker, not rubber-banded, so arming it as a tool would let
+ * you draw a picture-less image overlay. (`keys` and `click` are likewise not
+ * drawn: they come from the take's input tracks.)
+ *
+ * `zoom` and `followZoom` differ only in the `ZoomKind` the drag produces.
  */
-export type Tool = "select" | "blur" | "ellipse" | "step" | "highlight" | "underline" | "arrow" | "zoom";
+export type Tool =
+  | "select"
+  | "blur"
+  | "blackout"
+  | "ellipse"
+  | "rect"
+  | "step"
+  | "highlight"
+  | "underline"
+  | "line"
+  | "arrow"
+  | "text"
+  | "emoji"
+  | "draw"
+  | "zoom"
+  | "followZoom";
 
 /**
  * The one selected editable thing, shared by the timeline, the preview and
@@ -117,7 +135,13 @@ export interface StagingContext {
    * `from`/`to`, an image's `src` — and is merged in before the op runs.
    */
   addOverlayAt(type: Overlay["type"], rect: Overlay["rect"], extra?: Partial<Overlay>): void;
-  addZoomAt(rect: Overlay["rect"]): void;
+  /**
+   * Place a new zoom over `rect` at the playhead (or the in/out range). `kind`
+   * defaults to `static`; `follow` makes `rect` the window SIZE and lets the
+   * centre ride the cursor track (see `edits.ts`), which is only meaningful on
+   * a take that has one.
+   */
+  addZoomAt(rect: Overlay["rect"], kind?: ZoomKind): void;
   /**
    * Hand an object URL minted for the edits (an uploaded frame background) to
    * the screen, which revokes it when staging unmounts. Never revoked on

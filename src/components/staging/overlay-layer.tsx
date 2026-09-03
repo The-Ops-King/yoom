@@ -1,16 +1,35 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
-import { arrowRect, clampRect, type Overlay, type Point, type Rect, type VideoEdits } from "@/lib/edits";
+import { MAX_DRAW_POINTS, arrowRect, clampRect, pointsRect, type Overlay, type Point, type Rect, type VideoEdits } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
 import { toOutput, zoomAt } from "@/lib/editor/zoom";
-import type { StagingContext } from "./types";
+import type { StagingContext, Tool } from "./types";
 import { fractionOf, toSource, viewBox } from "./view-map";
 
 /** A band smaller than this in either axis is a click, not a draw. */
 const MIN_DRAW = 0.005;
 /** Smallest normalised side a resize may collapse an overlay to. */
 const MIN_SIDE = 0.01;
+/**
+ * Tools measured by LENGTH rather than by area, so a perfectly horizontal one
+ * is not rejected as a zero-height rect. Both store `from`/`to`.
+ */
+const POINT_PAIR_TOOLS: Tool[] = ["arrow", "line"];
+/** Tools that place a default-sized box on a click, rather than needing a drag. */
+const PLACED_TOOLS: Tool[] = ["text", "emoji"];
+/** The view-space box a clicked (not dragged) `text` / `emoji` overlay gets. */
+const TEXT_BOX = { w: 0.3, h: 0.08 };
+const EMOJI_BOX = { w: 0.1, h: 0.1 };
+/** What a freshly placed text/emoji overlay says until it is edited. */
+const DEFAULT_TEXT = "Text";
+const DEFAULT_EMOJI = "👉";
+/**
+ * Freehand samples closer together than this (in view space) are dropped: a
+ * pointer fires far faster than a stroke needs, and `MAX_DRAW_POINTS` is a
+ * budget worth spending on the length of the stroke, not on its sample rate.
+ */
+const MIN_POINT_GAP = 0.004;
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
@@ -23,12 +42,23 @@ type Measured = { left: number; top: number; x: number; y: number; w: number; h:
  * zoom that was on screen when the drag began, so the release can map back
  * into source space even if playback moved on.
  */
-type Band = { ax: number; ay: number; bx: number; by: number; view: Rect };
+type Band = {
+  ax: number;
+  ay: number;
+  bx: number;
+  by: number;
+  view: Rect;
+  /**
+   * The freehand path so far, in the same view space, present only while the
+   * `draw` tool is armed. `ax`/`ay` is always its first point.
+   */
+  points?: Point[];
+};
 
 /**
  * Moving or resizing an existing overlay in select mode. `from`/`to` drag one
- * end of an arrow: arrows have no box handles, because their endpoints — not
- * their bounding rect — are what is stored (see the note in `edits.ts`).
+ * end of an arrow or a line: neither has box handles, because their endpoints
+ * — not their bounding rect — are what is stored (see the note in `edits.ts`).
  */
 type Grab = {
   index: number;
@@ -82,6 +112,8 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
   const [grab, setGrab] = useState<Grab | null>(null);
 
   const drawing = tool !== "select";
+  /** Both zoom tools band in sky rather than the overlay green. */
+  const isZoomTool = tool === "zoom" || tool === "followZoom";
   const frame = edits.frame;
 
   /**
@@ -111,25 +143,55 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
     if (!band) return;
     const onMove = (e: PointerEvent) => {
       const p = pointAt(e.clientX, e.clientY);
-      if (p) setBand((b) => (b ? { ...b, bx: clamp01(p.x), by: clamp01(p.y) } : b));
+      if (!p) return;
+      const x = clamp01(p.x);
+      const y = clamp01(p.y);
+      setBand((b) => {
+        if (!b) return b;
+        if (!b.points) return { ...b, bx: x, by: y };
+        // Freehand: append, thinned by `MIN_POINT_GAP` and capped so a long
+        // scribble cannot outgrow what `edits.ts` will store.
+        const last = b.points[b.points.length - 1];
+        if (b.points.length >= MAX_DRAW_POINTS || Math.hypot(x - last.x, y - last.y) < MIN_POINT_GAP) {
+          return { ...b, bx: x, by: y };
+        }
+        return { ...b, bx: x, by: y, points: [...b.points, { x, y }] };
+      });
     };
     const onUp = () => {
       setBand(null);
-      // An arrow is a drag from → to, not a band: it is measured by LENGTH, so
-      // a perfectly horizontal one is not rejected as a zero-height rect.
-      if (tool === "arrow") {
+      // An arrow or line is a drag from → to, not a band: it is measured by
+      // LENGTH, so a perfectly horizontal one is not rejected as a zero-height
+      // rect. Everything below stores against SOURCE pixels, so it stays on
+      // what the user pointed at once the zoom ramps out.
+      if (POINT_PAIR_TOOLS.includes(tool)) {
         if (Math.hypot(band.bx - band.ax, band.by - band.ay) < MIN_DRAW) return;
         const from = toSourcePoint({ x: band.ax, y: band.ay }, band.view);
         const to = toSourcePoint({ x: band.bx, y: band.by }, band.view);
-        ctx.addOverlayAt("arrow", arrowRect(from, to), { from, to });
+        ctx.addOverlayAt(tool as Overlay["type"], arrowRect(from, to), { from, to });
         return;
       }
-      const r = bandRect(band);
-      if (r.w < MIN_DRAW || r.h < MIN_DRAW) return;
-      // Drawn on the zoomed frame, stored against source pixels, so it stays
-      // on what the user pointed at once the zoom ramps out.
+      if (tool === "draw") {
+        // The path is the overlay and the rect is only its bounding box
+        // (`edits.ts`); a stroke that never moved is not a stroke.
+        const points = (band.points ?? []).map((p) => toSourcePoint(p, band.view));
+        const rect = points.length >= 2 ? pointsRect(points) : null;
+        if (rect) ctx.addOverlayAt("draw", rect, { points });
+        return;
+      }
+      let r = bandRect(band);
+      if (r.w < MIN_DRAW || r.h < MIN_DRAW) {
+        // Text and emoji are PLACED as much as drawn: a click drops a
+        // default-sized box centred on it rather than doing nothing.
+        if (!PLACED_TOOLS.includes(tool)) return;
+        const box = tool === "text" ? TEXT_BOX : EMOJI_BOX;
+        r = { x: band.ax - box.w / 2, y: band.ay - box.h / 2, w: box.w, h: box.h };
+      }
       const rect = clampRect(toSource(r, band.view));
-      if (tool === "zoom") ctx.addZoomAt(rect);
+      if (tool === "zoom") ctx.addZoomAt(rect, "static");
+      else if (tool === "followZoom") ctx.addZoomAt(rect, "follow");
+      else if (tool === "text") ctx.addOverlayAt("text", rect, { text: DEFAULT_TEXT });
+      else if (tool === "emoji") ctx.addOverlayAt("emoji", rect, { text: DEFAULT_EMOJI });
       else if (tool !== "select") ctx.addOverlayAt(tool, rect);
     };
     window.addEventListener("pointermove", onMove);
@@ -159,6 +221,21 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
       // View-space movement is source-space movement scaled by the zoom.
       const dx = (p.x - grab.ox) * grab.view.w;
       const dy = (p.y - grab.oy) * grab.view.h;
+      const dragged = grab.from.overlays[grab.index];
+      if (grab.mode === "move" && dragged?.type === "draw" && dragged.points?.length) {
+        // A stroke's PATH is what is stored and its rect is only the bounding
+        // box (`edits.ts`), so a body drag has to move the points — patching
+        // the rect alone would be thrown away when the box is re-derived.
+        // The delta is clamped against the whole stroke at once, exactly like
+        // an arrow's: clamping each point on its own would squash the drawing
+        // into the wall instead of stopping it there.
+        const span = (lo: number, hi: number, d: number) => Math.min(1 - hi, Math.max(-lo, d));
+        const cdx = span(grab.rect.x, grab.rect.x + grab.rect.w, dx);
+        const cdy = span(grab.rect.y, grab.rect.y + grab.rect.h, dy);
+        const points = dragged.points.map((q) => ({ x: q.x + cdx, y: q.y + cdy }));
+        ctx.applyLive(() => ops.updateOverlay(grab.from, grab.index, { points }));
+        return;
+      }
       const r = grab.rect;
       const rect: Rect =
         grab.mode === "move"
@@ -191,7 +268,7 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
     player.pause();
     const x = clamp01(p.x);
     const y = clamp01(p.y);
-    setBand({ ax: x, ay: y, bx: x, by: y, view });
+    setBand({ ax: x, ay: y, bx: x, by: y, view, ...(tool === "draw" ? { points: [{ x, y }] } : null) });
   };
 
   const startGrab = (e: ReactPointerEvent, index: number, mode: Grab["mode"]) => {
@@ -236,27 +313,40 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
         `render.ts` clips its own overlay pass.
       */}
       <div className="absolute overflow-hidden" style={pctBox(cf)}>
-        {band && (
+        {/* A band is the wrong shape for the tools measured by length or path. */}
+        {band && !POINT_PAIR_TOOLS.includes(tool) && tool !== "draw" && (
           <div
             className={`absolute border-2 border-dashed ${
-              tool === "zoom" ? "border-sky-300 bg-sky-400/15" : "border-emerald-300 bg-emerald-400/15"
+              isZoomTool ? "border-sky-300 bg-sky-400/15" : "border-emerald-300 bg-emerald-400/15"
             }`}
             style={pctBox(bandRect(band))}
           />
         )}
 
-        {/* An arrow in flight draws as the line it will become, not as a band. */}
-        {band && tool === "arrow" && (
+        {/* An arrow, a line or a stroke in flight draws as what it will become. */}
+        {band && (POINT_PAIR_TOOLS.includes(tool) || tool === "draw") && (
           <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-            <line
-              x1={band.ax * 100}
-              y1={band.ay * 100}
-              x2={band.bx * 100}
-              y2={band.by * 100}
-              stroke="rgb(110 231 183)"
-              strokeWidth={0.8}
-              vectorEffect="non-scaling-stroke"
-            />
+            {tool === "draw" ? (
+              <polyline
+                points={(band.points ?? []).map((p) => `${p.x * 100},${p.y * 100}`).join(" ")}
+                fill="none"
+                stroke="rgb(110 231 183)"
+                strokeWidth={0.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            ) : (
+              <line
+                x1={band.ax * 100}
+                y1={band.ay * 100}
+                x2={band.bx * 100}
+                y2={band.by * 100}
+                stroke="rgb(110 231 183)"
+                strokeWidth={0.8}
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
           </svg>
         )}
 
@@ -264,7 +354,9 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
           edits.overlays.map((o, i) => {
             if (t < o.start || t > o.end) return null;
             const sel = selected?.kind === "overlay" && selected.index === i;
-            if (o.type === "arrow") {
+            // An arrow and a line are both stored as their endpoints, so both
+            // are grabbed by them rather than by a bounding box.
+            if (o.type === "arrow" || o.type === "line") {
               const ends = endpoints(o);
               return (["from", "to"] as const).map((end) => {
                 const p = toViewPoint(ends[end], view);
@@ -273,8 +365,8 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
                     key={`ov-${i}-${o.start}-${end}`}
                     role="button"
                     tabIndex={-1}
-                    aria-label={`Drag the arrow's ${end === "from" ? "tail" : "head"}`}
-                    title={`arrow ${o.start.toFixed(1)}–${o.end.toFixed(1)}s`}
+                    aria-label={`Drag the ${o.type}'s ${end === "from" ? "tail" : "head"}`}
+                    title={`${o.type} ${o.start.toFixed(1)}–${o.end.toFixed(1)}s`}
                     onPointerDown={(ev) => startGrab(ev, i, end)}
                     style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
                     className={`pointer-events-auto absolute -ml-1.5 -mt-1.5 h-3 w-3 cursor-move rounded-full border ${
@@ -294,13 +386,21 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
                   sel ? "border-emerald-200 bg-emerald-300/10" : "border-emerald-400/70 border-dashed"
                 }`}
               >
-                <div
-                  role="button"
-                  tabIndex={-1}
-                  aria-label={`Resize the ${o.type} overlay`}
-                  onPointerDown={(e) => startGrab(e, i, "resize")}
-                  className="absolute -bottom-1.5 -right-1.5 h-3 w-3 cursor-se-resize rounded-sm border border-emerald-200 bg-emerald-400"
-                />
+                {/*
+                  No resize handle on a stroke: its box is DERIVED from the
+                  path (`edits.ts`), so a rect patch would be recomputed away
+                  the moment it landed. It still drags as a body, which moves
+                  the points themselves.
+                */}
+                {o.type !== "draw" && (
+                  <div
+                    role="button"
+                    tabIndex={-1}
+                    aria-label={`Resize the ${o.type} overlay`}
+                    onPointerDown={(e) => startGrab(e, i, "resize")}
+                    className="absolute -bottom-1.5 -right-1.5 h-3 w-3 cursor-se-resize rounded-sm border border-emerald-200 bg-emerald-400"
+                  />
+                )}
               </div>
             );
           })}
