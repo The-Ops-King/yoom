@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MAX_ZOOMS, type Zoom } from "@/lib/edits";
-import { FULL_RECT, fitView, insertZoom, toOutput, zoomAt } from "./zoom";
+import { effectiveRect, FULL_RECT, fitView, insertZoom, toOutput, zoomAt } from "./zoom";
 
 const z = { start: 2, end: 6, rect: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 } };
 
@@ -93,6 +93,60 @@ describe("zoomAt chaining", () => {
     const cut: Zoom = { ...b, ramp: 0 };
     expect(zoomAt([a, cut], 2.9)).toEqual(a.rect);
     expect(zoomAt([a, cut], 3)).toEqual(cut.rect);
+  });
+});
+
+describe("follow zooms", () => {
+  /** A follow zoom: a 0.4 × 0.4 window whose stored position is ignored. */
+  const f: Zoom = { start: 0, end: 10, rect: { x: 0, y: 0, w: 0.4, h: 0.4 }, ramp: 0, follow: true };
+  /** The cursor at the middle of the frame, then hard against the top-left. */
+  const at = (t: number) => (t < 5 ? { x: 0.5, y: 0.5 } : { x: 0, y: 0 });
+
+  it("centres the window on the cursor", () => {
+    expect(zoomAt([f], 1, at)).toEqual({ x: 0.3, y: 0.3, w: 0.4, h: 0.4 });
+  });
+
+  it("clamps the window inside the frame", () => {
+    expect(zoomAt([f], 6, at)).toEqual({ x: 0, y: 0, w: 0.4, h: 0.4 });
+    expect(zoomAt([f], 6, () => ({ x: 1, y: 1 }))).toEqual({ x: 0.6, y: 0.6, w: 0.4, h: 0.4 });
+  });
+
+  it("keeps the stored rect without a sampler, or before the track starts", () => {
+    expect(zoomAt([f], 1)).toEqual(f.rect);
+    expect(zoomAt([f], 1, () => null)).toEqual(f.rect);
+  });
+
+  it("leaves a non-follow zoom alone even with a sampler", () => {
+    expect(zoomAt([z], 4, at)).toEqual(z.rect);
+  });
+
+  it("ramps from the full frame to the followed rect", () => {
+    const ramped: Zoom = { ...f, ramp: 0.4 };
+    const enter = zoomAt([ramped], 0.2, at);
+    expect(enter.w).toBeGreaterThan(0.4);
+    expect(enter.w).toBeLessThan(1);
+    // Halfway between the full frame's centre and the cursor-centred window.
+    expect(enter.x).toBeCloseTo((1 - enter.w) / 2, 9);
+    expect(zoomAt([ramped], 1, at)).toEqual({ x: 0.3, y: 0.3, w: 0.4, h: 0.4 });
+  });
+
+  it("chains between two zooms using their effective rects", () => {
+    const a: Zoom = { start: 0, end: 3, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, ramp: 0.4 };
+    const b: Zoom = { start: 3, end: 6, rect: { x: 0, y: 0, w: 0.4, h: 0.4 }, ramp: 0.4, follow: true };
+    // b follows to (0.3, 0.3); the shared frame is the midpoint of the two.
+    const mid = zoomAt([a, b], 3, () => ({ x: 0.5, y: 0.5 }));
+    expect(mid.x).toBeCloseTo(0.15, 9);
+    expect(mid.w).toBeCloseTo(0.45, 9);
+  });
+
+  it("insertZoom keeps `follow` when it trims a zoom", () => {
+    const out = insertZoom([{ ...f, end: 4 }], { start: 2, end: 8, rect: z.rect });
+    expect(out[0]).toEqual({ ...f, end: 2 });
+  });
+
+  it("effectiveRect is the identity for a rect zoom and the window for a follow zoom", () => {
+    expect(effectiveRect(z, 4, at)).toBe(z.rect);
+    expect(effectiveRect(f, 1, at)).toEqual({ x: 0.3, y: 0.3, w: 0.4, h: 0.4 });
   });
 });
 

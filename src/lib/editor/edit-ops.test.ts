@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_EDITS, MAX_CUTS, parseEdits } from "@/lib/edits";
+import { arrowRect, EMPTY_EDITS, MAX_CUTS, parseEdits } from "@/lib/edits";
 import { cameraAt, defaultCameraTrack } from "./camera-track";
 import * as ops from "./edit-ops";
 
@@ -16,10 +16,10 @@ describe("edit-ops", () => {
     expect(e.cuts).toEqual([{ start: 1, end: 3 }]);
     expect(ops.removeCut(e, 0).cuts).toEqual([]);
   });
-  it("addOverlay assigns callout numbers and respects the cap", () => {
+  it("addOverlay assigns step numbers and respects the cap", () => {
     let e = start();
-    e = ops.addOverlay(e, { type: "callout", start: 0, end: 3, rect: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } });
-    e = ops.addOverlay(e, { type: "callout", start: 0, end: 3, rect: { x: 0.5, y: 0.5, w: 0.2, h: 0.2 } });
+    e = ops.addOverlay(e, { type: "step", start: 0, end: 3, rect: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } });
+    e = ops.addOverlay(e, { type: "step", start: 0, end: 3, rect: { x: 0.5, y: 0.5, w: 0.2, h: 0.2 } });
     expect(e.overlays.map((o) => o.n)).toEqual([1, 2]);
     for (let i = 0; i < 70; i++) e = ops.addOverlay(e, { type: "blur", start: i, end: i + 1, rect: { x: 0, y: 0, w: 0.1, h: 0.1 } });
     expect(e.overlays).toHaveLength(64);
@@ -56,14 +56,49 @@ describe("edit-ops", () => {
     expect(e.zooms[1].end).toBeGreaterThan(e.zooms[1].start);
     expect(ops.removeZoom(e, 0).zooms).toHaveLength(1);
   });
-  it("callout numbering never duplicates after a removal", () => {
+  it("step numbering never duplicates after a removal", () => {
     let e = start();
-    e = ops.addOverlay(e, { type: "callout", start: 0, end: 1, rect: { x: 0, y: 0, w: 0.1, h: 0.1 } });
-    e = ops.addOverlay(e, { type: "callout", start: 1, end: 2, rect: { x: 0, y: 0, w: 0.1, h: 0.1 } });
-    e = ops.addOverlay(e, { type: "callout", start: 2, end: 3, rect: { x: 0, y: 0, w: 0.1, h: 0.1 } });
-    e = ops.removeOverlay(e, 1); // drops the n=2 callout
-    e = ops.addOverlay(e, { type: "callout", start: 3, end: 4, rect: { x: 0, y: 0, w: 0.1, h: 0.1 } });
+    e = ops.addOverlay(e, { type: "step", start: 0, end: 1, rect: { x: 0, y: 0, w: 0.1, h: 0.1 } });
+    e = ops.addOverlay(e, { type: "step", start: 1, end: 2, rect: { x: 0, y: 0, w: 0.1, h: 0.1 } });
+    e = ops.addOverlay(e, { type: "step", start: 2, end: 3, rect: { x: 0, y: 0, w: 0.1, h: 0.1 } });
+    e = ops.removeOverlay(e, 1); // drops the n=2 step
+    e = ops.addOverlay(e, { type: "step", start: 3, end: 4, rect: { x: 0, y: 0, w: 0.1, h: 0.1 } });
     expect(e.overlays.map((o) => o.n)).toEqual([1, 3, 4]);
+  });
+
+  it("addOverlay derives an arrow's rect from its endpoints", () => {
+    const e = ops.addOverlay(start(), {
+      type: "arrow",
+      start: 0,
+      end: 3,
+      rect: { x: 0, y: 0, w: 1, h: 1 },
+      from: { x: 0.6, y: 0.8 },
+      to: { x: 0.2, y: 0.3 },
+    });
+    expect(e.overlays[0].rect).toEqual(arrowRect({ x: 0.6, y: 0.8 }, { x: 0.2, y: 0.3 }));
+  });
+
+  it("updateOverlay moves an arrow's endpoints with its rect and re-derives the rect", () => {
+    let e = ops.addOverlay(start(), {
+      type: "arrow",
+      start: 0,
+      end: 3,
+      rect: { x: 0, y: 0, w: 1, h: 1 },
+      from: { x: 0.2, y: 0.2 },
+      to: { x: 0.4, y: 0.4 },
+    });
+    // Dragging the box translates both points by the same delta...
+    e = ops.updateOverlay(e, 0, { rect: { x: 0.3, y: 0.3, w: 0.2, h: 0.2 } });
+    expect(e.overlays[0].from!.x).toBeCloseTo(0.3);
+    expect(e.overlays[0].to!.y).toBeCloseTo(0.5);
+    // ...and moving one endpoint re-derives the bounding box.
+    e = ops.updateOverlay(e, 0, { to: { x: 0.9, y: 0.9 } });
+    expect(e.overlays[0].rect).toEqual(arrowRect(e.overlays[0].from!, { x: 0.9, y: 0.9 }));
+  });
+
+  it("only steps are numbered", () => {
+    const e = ops.addOverlay(start(), { type: "ellipse", start: 0, end: 1, rect: { x: 0, y: 0, w: 0.1, h: 0.1 } });
+    expect(e.overlays[0].n).toBeUndefined();
   });
   it("out-of-range removes and updates return the same reference", () => {
     const withCut = ops.addCut(start(), { start: 1, end: 2 });
@@ -109,9 +144,12 @@ describe("edit-ops", () => {
     expect(e.cuts.some((c) => c.start === newCut.start && c.end === newCut.end)).toBe(true);
     expect(e.cuts.some((c) => c.start === 0)).toBe(false);
   });
-  it("updateZoom preserves ramp when the patch doesn't override it", () => {
-    let e = ops.addZoom(start(), { start: 1, end: 4, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, ramp: 0.7 });
+  it("updateZoom preserves ramp and follow when the patch doesn't override them", () => {
+    let e = ops.addZoom(start(), { start: 1, end: 4, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, ramp: 0.7, follow: true });
     e = ops.updateZoom(e, 0, { end: 5 });
     expect(e.zooms[0].ramp).toBe(0.7);
+    expect(e.zooms[0].follow).toBe(true);
+    // …and drops it when the patch does.
+    expect(ops.updateZoom(e, 0, { follow: false }).zooms[0].follow).toBe(false);
   });
 });

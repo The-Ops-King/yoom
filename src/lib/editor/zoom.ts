@@ -2,6 +2,13 @@ import { MAX_ZOOMS, type Rect, type Zoom } from "@/lib/edits";
 import { easeInOutCubic, lerpRect } from "@/lib/recording/geometry";
 
 export const FULL_RECT: Rect = Object.freeze({ x: 0, y: 0, w: 1, h: 1 });
+
+/**
+ * A smoothed cursor position at a source time, or `null` when the take has no
+ * cursor sample at or before it. `lib/editor/cursor-path` builds these.
+ */
+export type CursorAt = (t: number) => { x: number; y: number } | null;
+
 export const DEFAULT_RAMP_S = 0.4;
 /** Zooms (or trimmed remnants) shorter than this are dropped as slivers. */
 const MIN_ZOOM_S = 0.05;
@@ -39,12 +46,35 @@ function chained(a: Zoom, b: Zoom): boolean {
 }
 
 /**
+ * The rect a zoom actually shows at `t`.
+ *
+ * For an ordinary zoom that is its stored `rect` (by reference — callers must
+ * not mutate it). A `follow` zoom takes only the SIZE from its rect and
+ * centres that window on the smoothed cursor, clamped so it stays inside the
+ * source; with no sampler, or before the cursor track starts, it falls back to
+ * the stored rect so a take whose cursor track is missing still plays.
+ */
+export function effectiveRect(z: Zoom, t: number, cursorAt?: CursorAt): Rect {
+  if (!z.follow || !cursorAt) return z.rect;
+  const p = cursorAt(t);
+  if (!p) return z.rect;
+  const { w, h } = z.rect;
+  return {
+    x: Math.min(Math.max(p.x - w / 2, 0), Math.max(0, 1 - w)),
+    y: Math.min(Math.max(p.y - h / 2, 0), Math.max(0, 1 - h)),
+    w,
+    h,
+  };
+}
+
+/**
  * The rect-to-rect ease between two chained zooms, for a `t` in the gap
  * between them. Touching zooms (`gap === 0`) have no gap to ease across, so
  * their window straddles the shared frame instead — see `zoomAt`.
  */
-function gapEase(a: Zoom, b: Zoom, t: number): Rect {
-  return lerpRect(a.rect, b.rect, easeInOutCubic((t - a.end) / (b.start - a.end)));
+function gapEase(a: Zoom, b: Zoom, t: number, cursorAt?: CursorAt): Rect {
+  const e = easeInOutCubic((t - a.end) / (b.start - a.end));
+  return lerpRect(effectiveRect(a, t, cursorAt), effectiveRect(b, t, cursorAt), e);
 }
 
 /**
@@ -59,8 +89,13 @@ function gapEase(a: Zoom, b: Zoom, t: number): Rect {
  * across `[A.end - r, A.end + r]` with `r = min(rampA, rampB)` (so the shared
  * frame is exactly the midpoint rect); zooms with a gap ease across the whole
  * gap, `[A.end, B.start]`. Either way no full-frame sample happens in between.
+ *
+ * `cursorAt` (optional) is the take's smoothed cursor sampler: every rect
+ * below is a zoom's EFFECTIVE rect, so a `follow` zoom's window rides the
+ * cursor and the ramps and chains ease between the windows as they stand at
+ * `t`. Without it, follow zooms behave exactly like ordinary ones.
  */
-export function zoomAt(zooms: Zoom[], t: number): Rect {
+export function zoomAt(zooms: Zoom[], t: number, cursorAt?: CursorAt): Rect {
   const z = zooms.find((zz) => t >= zz.start && t < zz.end);
   if (!z) {
     // Not inside a zoom: the only non-full-frame answer is a chained gap.
@@ -70,10 +105,11 @@ export function zoomAt(zooms: Zoom[], t: number): Rect {
       if (o.end <= t && (!a || o.end > a.end)) a = o;
       if (o.start > t && (!b || o.start < b.start)) b = o;
     }
-    return a && b && b.start > a.end && chained(a, b) ? gapEase(a, b, t) : FULL_RECT;
+    return a && b && b.start > a.end && chained(a, b) ? gapEase(a, b, t, cursorAt) : FULL_RECT;
   }
+  const rect = effectiveRect(z, t, cursorAt);
   const ramp = rampOf(z);
-  if (ramp <= 0) return z.rect;
+  if (ramp <= 0) return rect;
   const sinceStart = t - z.start;
   const untilEnd = z.end - t;
 
@@ -83,22 +119,22 @@ export function zoomAt(zooms: Zoom[], t: number): Rect {
       // A gap's transition already finished at `z.start`; a touching pair's
       // runs on for `r` past it, having started `r` before.
       const r = prev.end === z.start ? Math.min(rampOf(prev), ramp) : 0;
-      if (sinceStart >= r) return z.rect;
-      return lerpRect(prev.rect, z.rect, easeInOutCubic(0.5 + sinceStart / (2 * r)));
+      if (sinceStart >= r) return rect;
+      return lerpRect(effectiveRect(prev, t, cursorAt), rect, easeInOutCubic(0.5 + sinceStart / (2 * r)));
     }
-    return lerpRect(FULL_RECT, z.rect, easeInOutCubic(sinceStart / ramp));
+    return lerpRect(FULL_RECT, rect, easeInOutCubic(sinceStart / ramp));
   }
 
   if (untilEnd < ramp) {
     const next = nextOf(zooms, z);
     if (next && chained(z, next)) {
       const r = next.start === z.end ? Math.min(ramp, rampOf(next)) : 0;
-      if (untilEnd > r) return z.rect;
-      return lerpRect(z.rect, next.rect, easeInOutCubic(0.5 - untilEnd / (2 * r)));
+      if (untilEnd > r) return rect;
+      return lerpRect(rect, effectiveRect(next, t, cursorAt), easeInOutCubic(0.5 - untilEnd / (2 * r)));
     }
-    return lerpRect(z.rect, FULL_RECT, easeInOutCubic(1 - untilEnd / ramp));
+    return lerpRect(rect, FULL_RECT, easeInOutCubic(1 - untilEnd / ramp));
   }
-  return z.rect;
+  return rect;
 }
 
 /**
