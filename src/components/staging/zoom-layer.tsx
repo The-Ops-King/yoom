@@ -130,7 +130,13 @@ export function ZoomLayer({ ctx }: { ctx: StagingContext }) {
     liveRef.current = null;
     // The rect the gesture starts from is the one on screen: for a follow
     // zoom that is the cursor-centred window, not its (ignored) stored origin.
-    const rect = effectiveRect(zoom, player.timeRef.current, cursorAt);
+    // A RESIZE is the exception — it writes the rect back, and a follow zoom's
+    // stored origin is what it falls back to the moment "Follow mouse" is
+    // unticked, so sizing off the cursor-centred box would teleport it to
+    // wherever the pointer happened to be.
+    const follows = zoom.follow === true && cursorAt !== undefined;
+    const rect =
+      mode === "resize" && follows ? zoom.rect : effectiveRect(zoom, player.timeRef.current, cursorAt);
     setDrag({ mode, index, start: zoom.start, ox: p.x, oy: p.y, rect, view, from: edits });
   };
 

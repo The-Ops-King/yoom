@@ -150,15 +150,24 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
               />
             </label>
           </div>
-          {ctx.cursor.length > 0 && (
+          {/*
+            Hidden when there is no cursor track — UNLESS the zoom is already
+            following one: a take restored from a draft has the flag but not
+            the track, and hiding the checkbox would leave no way to untick it.
+          */}
+          {(ctx.cursor.length > 0 || zoom.follow === true) && (
             <label className="flex items-center gap-1.5 text-[11px] text-muted">
               <input
                 type="checkbox"
                 className="accent-accent"
+                disabled={ctx.cursor.length === 0}
                 checked={zoom.follow === true}
                 onChange={(e) => editZoom({ follow: e.target.checked })}
               />
               Follow mouse
+              {ctx.cursor.length === 0 && (
+                <span className="text-muted-dim">· no mouse track for this take</span>
+              )}
             </label>
           )}
           <p className="text-[11px] text-muted-dim">

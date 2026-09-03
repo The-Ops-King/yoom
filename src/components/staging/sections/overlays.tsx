@@ -174,7 +174,15 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                   min={1}
                   value={overlay.n ?? 1}
                   className={field}
-                  onChange={(e) => ctx.apply((ed) => ops.updateOverlay(ed, index, { n: num(e.target.value, overlay.n ?? 1) }))}
+                  onChange={(e) =>
+                    ctx.apply((ed) =>
+                      // A badge is drawn as text, so it has to stay a counting
+                      // number even while the field is being typed into.
+                      ops.updateOverlay(ed, index, {
+                        n: Math.max(1, Math.round(num(e.target.value, overlay.n ?? 1))),
+                      }),
+                    )
+                  }
                 />
               </label>
             )}
