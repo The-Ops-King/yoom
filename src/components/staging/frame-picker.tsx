@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { COLOR_SWATCHES, FRAME_PRESETS, resolvePresetId } from "@/lib/recording/presets";
+import { DEFAULT_FRAME } from "@/lib/recording/settings";
 import type { FrameConfig } from "@/lib/recording/types";
 import {
   addWallpaper,
@@ -107,6 +108,20 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
     });
   }, [onChange]);
 
+  /**
+   * Delete a saved wallpaper — and, when it is the one in use, put the frame
+   * back on the default background. Otherwise `wallpaperId` is left pointing
+   * at bytes that no longer exist: the tile is gone, nothing looks selected,
+   * and the export quietly renders the frame with no background at all.
+   */
+  const deleteWallpaper = useCallback(
+    async (id: string) => {
+      await remove(id);
+      if (frame.background.wallpaperId === id) onChange({ background: DEFAULT_FRAME.background });
+    },
+    [frame.background.wallpaperId, onChange, remove],
+  );
+
   return (
     <div className="space-y-3 rounded-lg border border-border bg-surface p-3">
       <div className="flex items-center justify-between">
@@ -189,7 +204,7 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
                   <button
                     type="button"
                     aria-label={`Delete wallpaper ${item.name}`}
-                    onClick={() => void remove(item.id)}
+                    onClick={() => void deleteWallpaper(item.id)}
                     className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full border border-border bg-surface text-[10px] leading-none text-muted transition-colors group-hover:flex hover:text-foreground"
                   >
                     ×

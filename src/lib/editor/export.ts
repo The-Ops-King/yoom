@@ -218,6 +218,8 @@ export async function loadBackground(edits: VideoEdits): Promise<HTMLImageElemen
     return v;
   }
 
+  // The URL to revoke if this all comes to nothing — only ever one we minted.
+  let mintedUrl = minted ? src : null;
   let img = new Image(); img.crossOrigin = "anonymous"; img.src = src;
   let ok = await img.decode().then(() => true, () => false);
   if (!ok && !minted && bg.wallpaperId) {
@@ -225,13 +227,18 @@ export async function loadBackground(edits: VideoEdits): Promise<HTMLImageElemen
     const fresh = await mintWallpaperUrl(bg.wallpaperId);
     if (fresh) {
       img = new Image(); img.crossOrigin = "anonymous"; img.src = fresh;
-      minted = true;
+      mintedUrl = fresh;
       ok = await img.decode().then(() => true, () => false);
-      if (!ok) URL.revokeObjectURL(fresh);
     }
   }
-  if (minted && ok) mintedBackgrounds.add(img);
-  else if (minted) return null;
+  // Nothing beats a broken element: `drawBackground` reads a zero natural size
+  // and draws nothing from it on every frame, while the caller goes on
+  // believing it has a background — so say so instead, and let it fall back.
+  if (!ok) {
+    if (mintedUrl) URL.revokeObjectURL(mintedUrl);
+    return null;
+  }
+  if (mintedUrl) mintedBackgrounds.add(img);
   return img;
 }
 
