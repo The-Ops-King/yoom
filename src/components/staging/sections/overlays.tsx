@@ -4,6 +4,7 @@ import type { ChangeEvent } from "react";
 import {
   DEFAULT_OVERLAY_THICKNESS,
   DEFAULT_TEXT_SIZE,
+  MAX_OVERLAYS,
   MAX_OVERLAY_THICKNESS,
   MAX_TEXT_SIZE,
   MIN_TEXT_SIZE,
@@ -80,6 +81,12 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
   const { edits, selected, tool } = ctx;
   const index = selected?.kind === "overlay" ? selected.index : -1;
   const overlay = index >= 0 ? edits.overlays[index] : undefined;
+  /**
+   * `addOverlay` silently refuses past the cap, so arming a tool that cannot
+   * place anything would look like the preview had stopped responding. Say it
+   * on the buttons instead.
+   */
+  const full = edits.overlays.length >= MAX_OVERLAYS;
 
   /**
    * Place an uploaded image centred at `IMAGE_WIDTH` of the frame, keeping its
@@ -93,6 +100,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
     // Reset first: picking the same file twice must fire `change` again.
     e.target.value = "";
     if (!file) return;
+    if (full) return;
     const url = URL.createObjectURL(file);
     ctx.registerBlobUrl(url);
     const img = new Image();
@@ -121,19 +129,27 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
             key={t.id}
             type="button"
             aria-pressed={tool === t.id}
+            disabled={full && tool !== t.id}
             className={tool === t.id ? active : btn}
             onClick={() => ctx.setTool(tool === t.id ? "select" : t.id)}
           >
             {t.label}
           </button>
         ))}
-        <label className={`${btn} cursor-pointer`}>
+        <label
+          aria-disabled={full}
+          className={`${btn} ${full ? "cursor-not-allowed opacity-30" : "cursor-pointer"}`}
+        >
           Add image
-          <input type="file" accept="image/*" className="sr-only" onChange={pickImage} />
+          <input type="file" accept="image/*" className="sr-only" disabled={full} onChange={pickImage} />
         </label>
       </div>
 
-      <p className="text-[11px] text-muted-dim">{HINTS[tool] ?? "Drag on the video to draw. Esc cancels."}</p>
+      <p className="text-[11px] text-muted-dim">
+        {full
+          ? `That is all ${MAX_OVERLAYS} overlays — delete one to add another.`
+          : (HINTS[tool] ?? "Drag on the video to draw. Esc cancels.")}
+      </p>
 
       {overlay ? (
         <div className="space-y-2 border-t border-border pt-2">

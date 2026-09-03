@@ -379,6 +379,9 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
             return (
               <div
                 key={`ov-${i}-${o.start}`}
+                role="button"
+                tabIndex={-1}
+                aria-label={`Move the ${o.type} overlay`}
                 title={`${o.type} ${o.start.toFixed(1)}–${o.end.toFixed(1)}s`}
                 onPointerDown={(e) => startGrab(e, i, "move")}
                 style={pctBox(toOutput(o.rect, view))}
