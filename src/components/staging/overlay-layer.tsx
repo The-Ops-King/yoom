@@ -183,7 +183,7 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
   const startBand = (e: ReactPointerEvent) => {
     // Read the live playhead, not the 10 Hz mirror: the zoom on screen is the
     // one the band has to be measured and mapped through.
-    const view = zoomAt(edits.zooms, player.timeRef.current);
+    const view = zoomAt(edits.zooms, player.timeRef.current, ctx.cursorAt);
     if (!drawing || !measure(view)) return;
     const p = pointAt(e.clientX, e.clientY);
     if (!p) return;
@@ -195,7 +195,7 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
   };
 
   const startGrab = (e: ReactPointerEvent, index: number, mode: Grab["mode"]) => {
-    const view = zoomAt(edits.zooms, player.timeRef.current);
+    const view = zoomAt(edits.zooms, player.timeRef.current, ctx.cursorAt);
     if (!measure(view)) return;
     const p = pointAt(e.clientX, e.clientY);
     const o = edits.overlays[index];
@@ -216,7 +216,7 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
   });
 
   const t = player.time;
-  const view = zoomAt(edits.zooms, t);
+  const view = zoomAt(edits.zooms, t, ctx.cursorAt);
 
   // The layer element covers the canvas, so the fitted view box as a fraction
   // of the output size is also its fraction of the element.
