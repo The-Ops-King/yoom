@@ -138,7 +138,11 @@ export function preloadOverlayImages(edits: VideoEdits): Promise<void> {
   for (const o of edits.overlays) {
     if (o.type !== "image" || !o.src) continue;
     const img = overlayImage(o.src);
-    if (!img || (img.complete && img.naturalWidth > 0)) continue;
+    // `complete` is the only safe "settled" test: an image that already FAILED
+    // is complete with a zero natural size, and waiting on its load/error
+    // would hang forever because both have already fired. A broken one is
+    // skipped by `drawOverlay` anyway.
+    if (!img || img.complete) continue;
     pending.push(
       new Promise<void>((resolve) => {
         img.onload = () => resolve();
@@ -151,17 +155,30 @@ export function preloadOverlayImages(edits: VideoEdits): Promise<void> {
 
 /**
  * `zoom` is the current magnification (1 / view.w), so effects sized in output
- * pixels rather than source fractions still grow with the zoom.
+ * pixels rather than source fractions still grow with the zoom. `strokeBase`
+ * is the CONTENT box's height — the frame's own height — which is what
+ * `thickness` is normalised to; `content` here is the *fitted view* box, and a
+ * free-aspect zoom letterboxes that to a fraction of the frame, so sizing a
+ * stroke off it would thin every line out on a wide zoom.
  */
-function drawOverlay(ctx: CanvasRenderingContext2D, o: Overlay, t: number, content: Rect, W: number, zoom: number) {
+function drawOverlay(
+  ctx: CanvasRenderingContext2D,
+  o: Overlay,
+  t: number,
+  content: Rect,
+  W: number,
+  zoom: number,
+  strokeBase: number,
+) {
   const x = content.x + o.rect.x * content.w;
   const y = content.y + o.rect.y * content.h;
   const w = o.rect.w * content.w;
   const h = o.rect.h * content.h;
   const color = o.color ?? "#f5c542";
   // Thickness is normalised to the frame HEIGHT and stays constant in output
-  // pixels under a zoom — a 4× zoom must not give you a 4× fatter stroke.
-  const stroke = Math.max(1, (o.thickness ?? DEFAULT_OVERLAY_THICKNESS) * content.h);
+  // pixels under a zoom — a 4× zoom must not give you a 4× fatter stroke, and
+  // a wide one must not give you a thinner line (hence `strokeBase`).
+  const stroke = Math.max(1, (o.thickness ?? DEFAULT_OVERLAY_THICKNESS) * strokeBase);
   /** A normalised point (already mapped through the zoom) in output pixels. */
   const at = (p: Point) => ({ x: content.x + p.x * content.w, y: content.y + p.y * content.h });
   ctx.save();
@@ -382,7 +399,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
             from: o.from && toPoint(o.from, view),
             to: o.to && toPoint(o.to, view),
           };
-    drawOverlay(ctx, mapped, t, dest, W, zoom);
+    drawOverlay(ctx, mapped, t, dest, W, zoom, content.h);
   }
   ctx.restore();
   ctx.restore();

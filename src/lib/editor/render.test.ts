@@ -19,16 +19,22 @@ beforeAll(() => { vi.stubGlobal("Path2D", StubPath2D); });
 afterAll(() => { vi.unstubAllGlobals(); });
 
 type Call = [string, unknown[]];
+/** `props` holds the last value assigned to each context property (`lineWidth`, `fillStyle`, ...). */
 function fakeCtx() {
   const calls: Call[] = [];
+  const props: Record<string, unknown> = {};
   const handler: ProxyHandler<object> = {
     get(_t, prop) {
       if (prop === "calls") return calls;
+      if (prop === "props") return props;
       return (...args: unknown[]) => { calls.push([String(prop), args]); return undefined; };
     },
-    set() { return true; },
+    set(_t, prop, value) { props[String(prop)] = value; return true; },
   };
-  return new Proxy({}, handler) as unknown as CanvasRenderingContext2D & { calls: Call[] };
+  return new Proxy({}, handler) as unknown as CanvasRenderingContext2D & {
+    calls: Call[];
+    props: Record<string, unknown>;
+  };
 }
 const video = (w: number, h: number) => ({ videoWidth: w, videoHeight: h, readyState: 4 }) as unknown as HTMLVideoElement;
 
@@ -344,6 +350,53 @@ describe("drawOverlay", () => {
     expect((draws[1][1] as unknown[]).slice(1)).toEqual([480, 300, 960, 480]);
     // The element is decoded once and reused across frames.
     expect(loaded).toHaveLength(1);
+    vi.stubGlobal("Image", undefined);
+  });
+});
+
+describe("overlay stroke width", () => {
+  const src = video(1920, 1080);
+  const ellipse = { type: "ellipse" as const, start: 0, end: 10, rect: { x: 0.3, y: 0.3, w: 0.2, h: 0.2 }, thickness: 0.01 };
+  const draw = (zooms: NonNullable<RenderInputs["edits"]["zooms"]>) => {
+    const ctx = fakeCtx();
+    drawFrame(
+      ctx,
+      { screen: src, camera: null, mode: "screen", edits: { ...base, camera: null, zooms, overlays: [ellipse] }, background: null },
+      5,
+      1920,
+      1080,
+    );
+    return ctx.props.lineWidth as number;
+  };
+
+  it("is the same under a free-aspect zoom as it is unzoomed", () => {
+    // 0.01 of the 1080-tall content box. The zoom below fits a 2.5:1 region
+    // into that box, letterboxing it to 432 px tall — sizing the stroke off
+    // the fitted box rather than the frame would thin it out 2.5×.
+    expect(draw([])).toBeCloseTo(10.8);
+    expect(draw([{ start: 0, end: 10, rect: { x: 0.2, y: 0.4, w: 0.5, h: 0.2 }, ramp: 0 }])).toBeCloseTo(10.8);
+  });
+});
+
+describe("preloadOverlayImages", () => {
+  it("resolves for an image that has already failed to load", async () => {
+    // `complete` with a zero natural size is how a FAILED image looks; its
+    // load/error events have long since fired, so waiting on them would hang.
+    class DeadImage {
+      complete = true;
+      naturalWidth = 0;
+      naturalHeight = 0;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      src = "";
+    }
+    vi.stubGlobal("Image", DeadImage);
+    const overlays = [{ type: "image" as const, start: 0, end: 5, rect: { x: 0, y: 0, w: 0.5, h: 0.5 }, src: "blob:dead-1" }];
+    const settled = await Promise.race([
+      preloadOverlayImages({ ...base, overlays }).then(() => "done"),
+      new Promise((r) => setTimeout(() => r("hung"), 50)),
+    ]);
+    expect(settled).toBe("done");
     vi.stubGlobal("Image", undefined);
   });
 });
