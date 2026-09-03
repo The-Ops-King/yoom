@@ -88,6 +88,45 @@ describe("drawFrame", () => {
     // A zoom can push a mapped overlay past the frame, so it is clipped first.
     expect(names.lastIndexOf("clip", overlayFill)).toBeGreaterThan(-1);
   });
+  it("letterboxes a zoom whose rect does not keep the source aspect", () => {
+    const ctx = fakeCtx();
+    // A half-width, full-height view is 960 × 1080 of source pixels: fitted
+    // into the 1920 × 1080 content box it is pillarboxed to 960 wide.
+    const e = { ...base, camera: null, zooms: [{ start: 0, end: 10, rect: { x: 0, y: 0, w: 0.5, h: 1 }, ramp: 0 }] };
+    drawFrame(ctx, inputs(e), 5, 1920, 1080);
+    const draw = ctx.calls.find((c) => c[0] === "drawImage")!;
+    expect(draw[1].slice(1, 5)).toEqual([0, 0, 960, 1080]);
+    expect(draw[1].slice(5, 9)).toEqual([480, 0, 960, 1080]);
+  });
+  it("anchors overlays to the fitted view box, not the whole content box", () => {
+    const ctx = fakeCtx();
+    const e = { ...base, camera: null,
+      zooms: [{ start: 0, end: 10, rect: { x: 0, y: 0, w: 0.5, h: 1 }, ramp: 0 }],
+      overlays: [{ type: "highlight" as const, start: 0, end: 10, rect: { x: 0.1, y: 0.1, w: 0.1, h: 0.1 } }] };
+    drawFrame(ctx, inputs(e), 5, 1920, 1080);
+    const names = ctx.calls.map((c) => c[0]);
+    const overlayFill = names.lastIndexOf("fillRect");
+    // Mapped through the zoom to x 0.2 of the view, then into the 960-wide
+    // dest box that starts at 480 — not into the full-width content box.
+    for (const [i, want] of [672, 108, 192, 108].entries()) {
+      expect(ctx.calls[overlayFill][1][i] as number).toBeCloseTo(want, 6);
+    }
+  });
+  it("shows the frame background, not black, in a framed letterbox", () => {
+    const framed = { ...base, camera: null,
+      frame: { enabled: true, padding: 0.05, radius: 0.01, shadow: false, background: { kind: "color" as const, color: "#0f0" } },
+      zooms: [{ start: 0, end: 10, rect: { x: 0, y: 0, w: 0.5, h: 1 }, ramp: 0 }] };
+    const ctx = fakeCtx();
+    drawFrame(ctx, inputs(framed), 5, 2112, 1272);
+    // The background is repainted inside the content box before the picture,
+    // so the pillars are the frame background rather than the shadow's black.
+    const fills = ctx.calls.filter((c) => c[0] === "fillRect");
+    expect(fills.length).toBeGreaterThanOrEqual(2);
+    // ...and it is not repainted when the view fills the content box exactly.
+    const exact = fakeCtx();
+    drawFrame(exact, inputs({ ...framed, zooms: [] }), 5, 2112, 1272);
+    expect(exact.calls.filter((c) => c[0] === "fillRect")).toHaveLength(1);
+  });
   it("cross-fades both camera modes while a mode change is settling", () => {
     const ctx = fakeCtx();
     const track: CameraTrack = { shape: "circle", mirror: false, keyframes: [

@@ -2,7 +2,7 @@ import type { CameraMode, Overlay, Rect, VideoEdits } from "@/lib/edits";
 import { computeFrameLayout, coverCrop, shapeRadius } from "@/lib/recording/geometry";
 import type { BackgroundConfig, RecordingMode } from "@/lib/recording/types";
 import { cameraAt } from "./camera-track";
-import { FULL_RECT, toOutput, zoomAt } from "./zoom";
+import { FULL_RECT, fitView, toOutput, zoomAt } from "./zoom";
 
 export interface RenderInputs {
   screen: HTMLVideoElement | null;
@@ -195,18 +195,34 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
     const offY = (H - layout.canvasH * scale) / 2;
     content = { x: offX + layout.dest.x * scale, y: offY + layout.dest.y * scale, w: layout.dest.w * scale, h: layout.dest.h * scale };
     radius = layout.radius * scale;
+  } else {
+    const scale = Math.min(W / sw, H / sh);
+    content = { x: (W - sw * scale) / 2, y: (H - sh * scale) / 2, w: sw * scale, h: sh * scale };
+  }
+
+  // A zoom rect may have any aspect, so the view is *fitted* inside the
+  // content box rather than stretched across it; what is left over is
+  // letterbox. Camera-only is the exception: it cover-crops the box, because
+  // a letterboxed selfie looks broken (see `drawPrimary`).
+  const dest = camOnly ? content : fitView(view, sw, sh, content);
+  const letterboxed = dest.w < content.w - 0.5 || dest.h < content.h - 0.5;
+
+  if (framed && frame) {
     drawBackground(ctx, W, H, frame.background, inputs.background);
     if (frame.shadow) {
       ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = W * 0.02; ctx.shadowOffsetY = W * 0.008;
       ctx.fillStyle = "#000"; ctx.fill(framePath(content.x, content.y, content.w, content.h, radius)); ctx.restore();
     }
     ctx.save(); ctx.clip(framePath(content.x, content.y, content.w, content.h, radius));
-    drawPrimary(content); ctx.restore();
+    // The shadow pass fills the whole content box black; repaint the frame
+    // background over it so the letterbox reads as the frame's padding
+    // growing, not as black bars inside the screen.
+    if (letterboxed) drawBackground(ctx, W, H, frame.background, inputs.background);
+    drawPrimary(dest); ctx.restore();
   } else {
+    // Unframed, the letterbox is simply the black the canvas is cleared to.
     ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
-    const scale = Math.min(W / sw, H / sh);
-    content = { x: (W - sw * scale) / 2, y: (H - sh * scale) / 2, w: sw * scale, h: sh * scale };
-    drawPrimary(content);
+    drawPrimary(dest);
   }
 
   // Camera (screen+camera only; camera-only mode already drew the camera as `src`).
@@ -243,15 +259,18 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
   }
 
   // Overlays live on source pixels, so they move with the zoom; the bubble did
-  // not. Clipped to the content box: a zoom can push an overlay's mapped rect
-  // outside the frame, and it must not bleed onto the padding or letterbox.
+  // not. Their coordinate box is the *fitted* view box, not the whole content
+  // box — that is where those source pixels actually landed. Clipped to it as
+  // well: a zoom can push an overlay's mapped rect outside the view, and it
+  // must not bleed onto the frame padding or the letterbox.
   ctx.save();
   ctx.clip(framePath(content.x, content.y, content.w, content.h, radius));
+  if (letterboxed) ctx.clip(buildPath(dest.x, dest.y, dest.w, dest.h, 0));
   const zoom = view.w > 0 ? 1 / view.w : 1;
   for (const o of inputs.edits.overlays) {
     if (t < o.start || t > o.end) continue;
     const mapped = view === FULL_RECT ? o : { ...o, rect: toOutput(o.rect, view) };
-    drawOverlay(ctx, mapped, t, content, W, zoom);
+    drawOverlay(ctx, mapped, t, dest, W, zoom);
   }
   ctx.restore();
   ctx.restore();
