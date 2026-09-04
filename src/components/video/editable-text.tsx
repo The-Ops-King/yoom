@@ -121,7 +121,7 @@ export function EditableText({
       )}
       <p aria-live="polite" className="min-h-4 px-2 text-xs">
         {state.error ? (
-          <span className="text-red-400/90">{state.error}</span>
+          <span className="text-danger-text/90">{state.error}</span>
         ) : pending ? (
           <span className="text-muted-dim">Saving…</span>
         ) : state.ok ? (

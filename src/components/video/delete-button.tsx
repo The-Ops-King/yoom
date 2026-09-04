@@ -31,12 +31,12 @@ export function DeleteButton({ videoId, title }: DeleteButtonProps) {
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg border border-red-500/30 px-3 py-2 text-sm text-red-400/90 transition-colors hover:bg-red-500/10 disabled:opacity-40"
+        className="rounded-lg border border-danger/30 px-3 py-2 text-sm text-danger-text/90 transition-colors hover:bg-danger/10 disabled:opacity-40"
       >
         {pending ? "Deleting…" : "Delete"}
       </button>
       {state.error && (
-        <p aria-live="polite" className="text-xs text-red-400/90">
+        <p aria-live="polite" className="text-xs text-danger-text/90">
           {state.error}
         </p>
       )}

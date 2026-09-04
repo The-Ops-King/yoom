@@ -8,13 +8,13 @@ import type {
   SurfacePref,
 } from "./types";
 
-/** The countdown a fresh take gets: "3 · Ready? · Go!". */
-export const COUNTDOWN_SECONDS = 3;
 /**
- * The countdown a restart gets: "Ready? · Go!". Short on purpose — the user is
- * already set up and mid-flow, they just want to take it again.
+ * The countdown every take gets: "Ready? · Go!" — two beats, no numbers. A
+ * numeric "3" first felt like a delay rather than a cue.
  */
-export const RESTART_COUNTDOWN_SECONDS = 2;
+export const COUNTDOWN_SECONDS = 2;
+/** A restart counts the same way: the user is set up and mid-flow. */
+export const RESTART_COUNTDOWN_SECONDS = COUNTDOWN_SECONDS;
 export const MAX_DURATION_MS = 30 * 60 * 1000;
 
 export type RecorderStatus =

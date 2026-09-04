@@ -10,7 +10,7 @@ export function ViewersTable({ viewers }: { viewers: ViewerRow[] }) {
   if (viewers.length === 0) {
     return (
       <section className="rounded-xl border border-border bg-surface p-3">
-        <h2 className="text-[11px] uppercase tracking-wider text-muted-dim">
+        <h2 className="text-[11px] font-mono uppercase tracking-[0.14em] text-muted-dim">
           Recent viewers
         </h2>
         <p className="mt-2 text-sm text-muted">No views yet.</p>
@@ -20,7 +20,7 @@ export function ViewersTable({ viewers }: { viewers: ViewerRow[] }) {
 
   return (
     <section className="rounded-xl border border-border bg-surface p-3">
-      <h2 className="text-[11px] uppercase tracking-wider text-muted-dim">
+      <h2 className="text-[11px] font-mono uppercase tracking-[0.14em] text-muted-dim">
         Recent viewers
       </h2>
       <div className="mt-2 overflow-x-auto">

@@ -6,9 +6,9 @@ interface CountdownProps {
 }
 
 /**
- * The last two ticks are words, not numbers: "Ready?" then "Go!". A 2-second
- * restart is therefore entirely words, and the 3-second first take reads
- * "3 · Ready? · Go!".
+ * The last two ticks are words, not numbers: "Ready?" then "Go!". Every take
+ * counts from 2, so the countdown is entirely words; a longer count (any
+ * `seconds` on START) would show its leading ticks as digits.
  *
  * The desktop HUD renders the same labels off the same `countdown` number, so
  * this mapping has a twin in `desktop/src/renderer/hud`.

@@ -12,7 +12,7 @@ export function RetentionBars({ buckets }: { buckets: number[] }) {
 
   return (
     <section className="rounded-xl border border-border bg-surface p-3">
-      <h2 className="text-[11px] uppercase tracking-wider text-muted-dim">
+      <h2 className="text-[11px] font-mono uppercase tracking-[0.14em] text-muted-dim">
         Retention
       </h2>
       <svg
@@ -33,7 +33,7 @@ export function RetentionBars({ buckets }: { buckets: number[] }) {
               width={barWidth}
               height={height}
               rx={2}
-              fill={count === 0 ? "#2e2e35" : "#e85a4f"}
+              fill={count === 0 ? "#1c1b19" : "#3f7d5c"}
             />
           );
         })}

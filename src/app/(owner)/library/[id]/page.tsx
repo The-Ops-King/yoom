@@ -121,7 +121,7 @@ export default async function VideoDetailPage({ params, searchParams }: PageProp
 
         {edits.markers.length > 0 && (
           <section className="rounded-xl border border-border bg-surface p-3">
-            <h2 className="text-[11px] uppercase tracking-wider text-muted-dim">
+            <h2 className="text-[11px] font-mono uppercase tracking-[0.14em] text-muted-dim">
               Markers
             </h2>
             <ol className="mt-2 space-y-1 text-xs text-muted">

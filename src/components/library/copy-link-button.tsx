@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { copyText } from "@/lib/clipboard";
+import { Toast } from "@/components/toast";
 
 type CopyLinkButtonProps = {
   url: string;
@@ -8,33 +10,43 @@ type CopyLinkButtonProps = {
   className?: string;
 };
 
+type Outcome = "copied" | "failed" | null;
+
 export function CopyLinkButton({
   url,
   label = "Copy link",
   className,
 }: CopyLinkButtonProps) {
-  const [copied, setCopied] = useState(false);
+  const [outcome, setOutcome] = useState<Outcome>(null);
+  const clear = useCallback(() => setOutcome(null), []);
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Insecure context; the URL is always shown next to the button.
-    }
+    setOutcome((await copyText(url)) ? "copied" : "failed");
   }
 
   return (
-    <button
-      type="button"
-      onClick={copy}
-      className={
-        className ??
-        "shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-all hover:bg-accent-hover"
-      }
-    >
-      <span aria-live="polite">{copied ? "Copied!" : label}</span>
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={copy}
+        className={
+          className ??
+          "shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-all hover:bg-accent-hover"
+        }
+      >
+        {outcome === "copied" ? "Copied!" : label}
+      </button>
+      {outcome === "copied" && (
+        <Toast message="Link copied to clipboard" onDone={clear} />
+      )}
+      {outcome === "failed" && (
+        <Toast
+          tone="error"
+          message="Couldn't copy — select the link and copy it by hand"
+          onDone={clear}
+          durationMs={4000}
+        />
+      )}
+    </>
   );
 }

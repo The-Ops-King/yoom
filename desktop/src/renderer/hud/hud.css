@@ -1,11 +1,11 @@
 :root {
   color-scheme: dark;
-  --bg: #171717;
-  --raised: #232323;
-  --border: #2e2e2e;
-  --fg: #f5f5f5;
-  --muted: #9a9a9a;
-  --accent: #e85a4f;
+  --bg: #0c0b0a;
+  --raised: #1c1b19;
+  --border: rgba(138, 133, 124, 0.12);
+  --fg: #f5f3ee;
+  --muted: #8a857c;
+  --accent: #3f7d5c;
 }
 
 * {
@@ -141,7 +141,7 @@ body.counting #controls {
 }
 
 #controls button:hover {
-  background: #303030;
+  background: #1c1b19;
   border-color: var(--border);
 }
 
@@ -155,7 +155,7 @@ body.counting #controls {
 }
 
 #controls button.primary:hover {
-  background: #d24d43;
+  background: #4a8e6a;
 }
 
 #controls svg {

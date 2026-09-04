@@ -3,6 +3,7 @@
 import { formatElapsed } from "@/components/recorder/preview-stage";
 import { keptRanges } from "@/lib/editor/cuts";
 import type { StagingContext } from "../types";
+import * as ui from "../ui";
 
 /**
  * The take's summary and the one button that ends staging: render, then
@@ -26,7 +27,7 @@ export function UploadSection({ ctx }: { ctx: StagingContext }) {
       : null;
 
   return (
-    <div className="space-y-3">
+    <div className={ui.section}>
       <dl className="space-y-1 text-[11px]">
         <div className="flex items-center justify-between gap-2">
           <dt className="text-muted-dim">Length</dt>
@@ -58,7 +59,7 @@ export function UploadSection({ ctx }: { ctx: StagingContext }) {
         {reason}
       </p>
       {ctx.error && (
-        <p role="alert" className="text-[11px] text-red-400/90">
+        <p role="alert" className="text-[11px] text-danger-text/90">
           {ctx.error}
         </p>
       )}

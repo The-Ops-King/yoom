@@ -119,6 +119,17 @@ function installNavigationGuard(win: BrowserWindow): void {
  * is denied outright.
  * (Electron session docs, §`ses.setPermissionRequestHandler(handler)`.)
  */
+/**
+ * What the web app may do inside the shell. Chromium asks the check handler
+ * for `clipboard-sanitized-write` before `navigator.clipboard.writeText`
+ * resolves; without it "Copy link" fails silently in the packaged app.
+ */
+const APP_PERMISSIONS: ReadonlySet<string> = new Set([
+  "media",
+  "display-capture",
+  "clipboard-sanitized-write",
+]);
+
 export function installPermissionHandlers(ses: Session): void {
   const origin = appOrigin();
 
@@ -140,15 +151,13 @@ export function installPermissionHandlers(ses: Session): void {
       (wc ? shellWebContentsIds.has(wc.id) : false);
 
     const allowed =
-      (isApp && (permission === "media" || permission === "display-capture")) ||
+      (isApp && APP_PERMISSIONS.has(permission)) ||
       (isShell && permission === "media");
     callback(allowed);
   });
 
   ses.setPermissionCheckHandler((wc, permission, requestingOrigin) => {
-    if (requestingOrigin === origin) {
-      return permission === "media" || permission === "display-capture";
-    }
+    if (requestingOrigin === origin) return APP_PERMISSIONS.has(permission);
     const isShell =
       isShellUrl(wc?.getURL()) || (wc ? shellWebContentsIds.has(wc.id) : false);
     return isShell && permission === "media";

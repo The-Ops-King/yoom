@@ -20,7 +20,7 @@ export default async function OwnerLayout({
   }
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 px-4 py-6">
+    <div className="mx-auto flex min-h-screen w-full max-w-[1280px] flex-col gap-6 px-[clamp(20px,5vw,72px)] py-6">
       <header className="flex items-center justify-between border-b border-border-subtle pb-4">
         <Link href="/" aria-label="Yoom home">
           <YoomLogo size="sm" />

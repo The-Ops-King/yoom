@@ -9,10 +9,12 @@ import { drawFrame, outputSize, preloadOverlayImages, type RenderInputs } from "
  */
 /** Every corner radius any `roundRect` was built with, in call order. */
 const radii: number[] = [];
+/** Every box any `roundRect` was built with, in call order. */
+const boxes: number[][] = [];
 class StubPath2D {
   ops: string[] = [];
   rect() { this.ops.push("rect"); }
-  roundRect(_x: number, _y: number, _w: number, _h: number, r: number) { this.ops.push("roundRect"); radii.push(r); }
+  roundRect(x: number, y: number, w: number, h: number, r: number) { this.ops.push("roundRect"); radii.push(r); boxes.push([x, y, w, h]); }
   arc() { this.ops.push("arc"); }
 }
 beforeAll(() => { vi.stubGlobal("Path2D", StubPath2D); });
@@ -124,14 +126,25 @@ describe("drawFrame", () => {
       zooms: [{ start: 0, end: 10, rect: { x: 0, y: 0, w: 0.5, h: 1 }, ramp: 0 }] };
     const ctx = fakeCtx();
     drawFrame(ctx, inputs(framed), 5, 2112, 1272);
-    // The background is repainted inside the content box before the picture,
-    // so the pillars are the frame background rather than the shadow's black.
+    // Nothing paints black over the pillars: the only fill is the wallpaper
+    // itself, and the clip hugs the fitted picture so the letterbox stays it.
     const fills = ctx.calls.filter((c) => c[0] === "fillRect");
-    expect(fills.length).toBeGreaterThanOrEqual(2);
-    // ...and it is not repainted when the view fills the content box exactly.
-    const exact = fakeCtx();
-    drawFrame(exact, inputs({ ...framed, zooms: [] }), 5, 2112, 1272);
-    expect(exact.calls.filter((c) => c[0] === "fillRect")).toHaveLength(1);
+    expect(fills).toHaveLength(1);
+    expect(ctx.calls.filter((c) => c[0] === "fillStyle")).toHaveLength(0);
+  });
+  it("hugs the drop shadow to the picture, not the whole content box, when zoomed", () => {
+    // A 0.4-wide view: geometry no other test builds, so the module-level
+    // frame-path cache cannot hand back a path recorded before this test.
+    const framed = { ...base, camera: null,
+      frame: { enabled: true, padding: 0.05, radius: 0.01, shadow: true, background: { kind: "color" as const, color: "#0f0" } },
+      zooms: [{ start: 0, end: 10, rect: { x: 0, y: 0, w: 0.4, h: 1 }, ramp: 0 }] };
+    boxes.length = 0;
+    drawFrame(fakeCtx(), inputs(framed), 5, 2112, 1272);
+    // At 2112×1272 the content box is exactly the padded 1920×1080 at (96,96);
+    // a 0.4-wide view fits as 768×1080 centred in it, so the shadow (and the
+    // clip) are built around that fitted box — nothing spans the full 1920.
+    expect(boxes.some(([x, , w]) => Math.abs(x - 672) < 1 && Math.abs(w - 768) < 1)).toBe(true);
+    expect(boxes.some(([, , w]) => Math.abs(w - 1920) < 1)).toBe(false);
   });
   it("cross-fades both camera modes while a mode change is settling", () => {
     const ctx = fakeCtx();

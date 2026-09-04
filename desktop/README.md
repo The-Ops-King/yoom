@@ -19,7 +19,7 @@ things a browser on macOS cannot do:
    small always-on-top pill — timer, pause, stop, mark, discard — is the whole
    UI. This is the "make the app disappear" behaviour.
 
-There is no dock icon; the app lives in the menu bar.
+The app lives in the menu bar and the Dock; closing the recorder window keeps it running, and a Dock click reopens it.
 
 ## Requirements
 
@@ -31,7 +31,7 @@ either the deployment or `npm run dev` in the repo root.
 ```sh
 cd desktop
 npm install
-npm run icons     # once, generates the tray template PNGs
+npm run icons     # once, generates the app icon and tray template PNGs
 npm run dev       # YOOM_DEV=1 → loads http://localhost:3000
 ```
 
@@ -134,7 +134,7 @@ If Chromium's CoreAudio tap misbehaves, `YOOM_LEGACY_AUDIO=1` forces the older
 
 ## The recording HUD
 
-Entering the 3-2-1 countdown **hides** the recorder window (it is not closed —
+Entering the "Ready? Go!" countdown **hides** the recorder window (it is not closed —
 the encoder, the compositor and the unsaved-work guard all live in that
 renderer) and puts a 320×48 pill at the top centre of the screen:
 
@@ -260,8 +260,8 @@ spec's `cursorHidden` flag is therefore always `false` on this platform.
 
 ## Debugging
 
-There is no menu bar (`LSUIElement: true`), so the usual View → Toggle
-Developer Tools is not there.
+The shell sets no application menu, so the usual View → Toggle Developer
+Tools is not there.
 
 - **Recorder window DevTools:** tray → Developer → Developer tools. Opens
   detached, so it does not resize the page mid-recording.

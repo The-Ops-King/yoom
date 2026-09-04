@@ -14,6 +14,7 @@ import {
 import * as ops from "@/lib/editor/edit-ops";
 import { contentRect } from "../content-rect";
 import type { StagingContext, Tool } from "../types";
+import * as ui from "../ui";
 
 /** The drawable overlay tools, in rail order. `image` is not one: it is placed from the file picker. */
 const TOOLS: { id: Tool; label: string }[] = [
@@ -66,13 +67,8 @@ const HINTS: Partial<Record<Tool, string>> = {
   emoji: "Click to place it, or drag to size it. Esc cancels.",
 };
 
-const btn =
-  "rounded-md border border-border bg-surface-raised px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground";
-const active = "rounded-md border border-accent bg-accent/15 px-2 py-1 text-[11px] font-medium text-foreground";
 // `select-text` because the staging root sets `select-none` and `user-select`
 // inherits: without it the caret cannot select the value to retype it.
-const field =
-  "w-20 select-text rounded-md border border-border bg-surface-raised px-1.5 py-1 text-[11px] tabular-nums text-foreground";
 
 /** A half-typed or emptied number field must not push `NaN` into the edits. */
 const num = (v: string, fallback: number) => (Number.isFinite(Number(v)) && v !== "" ? Number(v) : fallback);
@@ -122,7 +118,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
   };
 
   return (
-    <div className="space-y-3">
+    <div className={ui.section}>
       <div className="flex flex-wrap gap-1.5">
         {TOOLS.map((t) => (
           <button
@@ -130,7 +126,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
             type="button"
             aria-pressed={tool === t.id}
             disabled={full && tool !== t.id}
-            className={tool === t.id ? active : btn}
+            className={tool === t.id ? ui.btnActive : ui.btn}
             onClick={() => ctx.setTool(tool === t.id ? "select" : t.id)}
           >
             {t.label}
@@ -138,14 +134,14 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
         ))}
         <label
           aria-disabled={full}
-          className={`${btn} ${full ? "cursor-not-allowed opacity-30" : "cursor-pointer"}`}
+          className={`${ui.btn} ${full ? "cursor-not-allowed opacity-30" : "cursor-pointer"}`}
         >
           Add image
           <input type="file" accept="image/*" className="sr-only" disabled={full} onChange={pickImage} />
         </label>
       </div>
 
-      <p className="text-[11px] text-muted-dim">
+      <p className={ui.hint}>
         {full
           ? `That is all ${MAX_OVERLAYS} overlays — delete one to add another.`
           : (HINTS[tool] ?? "Drag on the video to draw. Esc cancels.")}
@@ -153,7 +149,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
 
       {overlay ? (
         <div className="space-y-2 border-t border-border pt-2">
-          <span className="text-[11px] uppercase tracking-wider text-muted-dim">{overlay.type}</span>
+          <span className={ui.label}>{overlay.type}</span>
 
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-1 text-[11px] text-muted">
@@ -163,7 +159,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                 step={0.1}
                 min={0}
                 value={overlay.start}
-                className={field}
+                className={ui.field}
                 onChange={(e) =>
                   ctx.apply((ed) => ops.updateOverlay(ed, index, { start: num(e.target.value, overlay.start) }))
                 }
@@ -176,7 +172,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                 step={0.1}
                 min={0}
                 value={overlay.end}
-                className={field}
+                className={ui.field}
                 onChange={(e) => ctx.apply((ed) => ops.updateOverlay(ed, index, { end: num(e.target.value, overlay.end) }))}
               />
             </label>
@@ -235,7 +231,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                   step={1}
                   min={1}
                   value={overlay.n ?? 1}
-                  className={field}
+                  className={ui.field}
                   onChange={(e) =>
                     ctx.apply((ed) =>
                       // A badge is drawn as text, so it has to stay a counting
@@ -269,7 +265,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
           </div>
 
           {overlay.type === "arrow" && (
-            <div className="space-y-1">
+            <div className={ui.group}>
               <span className="text-[11px] text-muted">Style</span>
               <div className="flex flex-wrap gap-1.5">
                 {ARROW_STYLES.map((s) => {
@@ -279,7 +275,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                       key={s.id}
                       type="button"
                       aria-pressed={on}
-                      className={on ? active : btn}
+                      className={on ? ui.btnActive : ui.btn}
                       onClick={() => ctx.apply((ed) => ops.updateOverlay(ed, index, { style: s.id }))}
                     >
                       {s.label}
@@ -288,7 +284,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                 })}
               </div>
               {overlay.style === "curved" && (
-                <p className="text-[11px] text-muted-dim">
+                <p className={ui.hint}>
                   Bows through the midpoint by default; drag either end to re-aim it.
                 </p>
               )}
@@ -339,13 +335,13 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                 <button
                   type="button"
                   aria-pressed={overlay.bg === undefined}
-                  className={overlay.bg === undefined ? active : btn}
+                  className={overlay.bg === undefined ? ui.btnActive : ui.btn}
                   onClick={() => ctx.apply((ed) => ops.updateOverlay(ed, index, { bg: undefined }))}
                 >
                   None
                 </button>
               </div>
-              <p className="text-[11px] text-muted-dim">Wraps inside the box you drew; drag its corner to rewrap.</p>
+              <p className={ui.hint}>Wraps inside the box you drew; drag its corner to rewrap.</p>
             </div>
           )}
 
@@ -358,7 +354,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                     type="button"
                     aria-label={`Use ${emoji}`}
                     aria-pressed={overlay.text === emoji}
-                    className={`${overlay.text === emoji ? active : btn} text-sm leading-none`}
+                    className={`${overlay.text === emoji ? ui.btnActive : ui.btn} text-sm leading-none`}
                     onClick={() => ctx.apply((ed) => ops.updateOverlay(ed, index, { text: emoji }))}
                   >
                     {emoji}
@@ -370,7 +366,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                 <input
                   type="text"
                   value={overlay.text ?? ""}
-                  className={field}
+                  className={ui.field}
                   onChange={(e) => ctx.apply((ed) => ops.updateOverlay(ed, index, { text: e.target.value }))}
                 />
               </label>
@@ -379,7 +375,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
 
           <button
             type="button"
-            className="text-[11px] text-red-400/80 hover:text-red-300"
+            className="text-[11px] text-danger-text/80 hover:text-danger-hover"
             onClick={() => {
               ctx.apply((ed) => ops.removeOverlay(ed, index));
               ctx.setSelected(null);
@@ -389,7 +385,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
           </button>
         </div>
       ) : (
-        <p className="text-[11px] text-muted-dim">
+        <p className={ui.hint}>
           {edits.overlays.length === 0
             ? "No overlays yet."
             : `${edits.overlays.length} overlay${edits.overlays.length === 1 ? "" : "s"} · click one on the video or the timeline to edit it.`}

@@ -12,15 +12,13 @@ import {
 import * as ops from "@/lib/editor/edit-ops";
 import { isDesktop } from "@/lib/recording/desktop-bridge";
 import type { StagingContext } from "../types";
+import * as ui from "../ui";
 
 /** Where a new key-tracking range puts its badge: bottom centre, like CleanShot. */
 const KEYS_RECT: Rect = { x: 0.35, y: 0.86, w: 0.3, h: 0.08 };
 /** How long a key-tracking range covers when it is added from here. */
 const KEYS_SPAN_S = 5;
 
-const btn =
-  "rounded-md border border-border bg-surface-raised px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground disabled:opacity-30 disabled:hover:text-muted";
-const active = "rounded-md border border-accent bg-accent/15 px-2 py-1 text-[11px] font-medium text-foreground";
 
 const STYLES: { id: CursorStyle; label: string; hint: string }[] = [
   { id: "none", label: "None", hint: "Draw nothing over the capture" },
@@ -69,9 +67,9 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
   };
 
   return (
-    <div className="space-y-3">
-      <div className="space-y-1">
-        <span className="text-[11px] uppercase tracking-wider text-muted-dim">Cursor</span>
+    <div className={ui.section}>
+      <div className={ui.group}>
+        <span className={ui.label}>Cursor</span>
         <div role="radiogroup" aria-label="Cursor style" className="flex flex-wrap gap-1.5">
           {STYLES.map((s) => {
             // `smooth` needs a path to draw along; without a track it would
@@ -86,7 +84,7 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
                 aria-checked={on}
                 disabled={disabled}
                 title={disabled ? "No mouse track for this take" : s.hint}
-                className={on ? active : btn}
+                className={on ? ui.btnActive : ui.btn}
                 onClick={() => ctx.apply((e) => ops.setCursor(e, { ...cursor, style: s.id }))}
               >
                 {s.label}
@@ -94,13 +92,13 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
             );
           })}
         </div>
-        <p className="text-[11px] text-muted-dim">
+        <p className={ui.hint}>
           {STYLES.find((s) => s.id === cursor.style)?.hint}
         </p>
       </div>
 
-      <div className="space-y-1">
-        <label htmlFor="cursor-size" className="block text-[11px] uppercase tracking-wider text-muted-dim">
+      <div className={ui.group}>
+        <label htmlFor="cursor-size" className={ui.label}>
           Size {cursor.size.toFixed(1)}×
         </label>
         <input
@@ -119,7 +117,7 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
         />
       </div>
 
-      <label className="flex items-center gap-2 text-[11px] text-muted">
+      <label className={ui.check}>
         <input
           type="checkbox"
           checked={edits.motionBlur !== false}
@@ -128,14 +126,14 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
         Motion blur while a zoom moves
       </label>
 
-      <div className="space-y-1">
-        <span className="text-[11px] uppercase tracking-wider text-muted-dim">
+      <div className={ui.group}>
+        <span className={ui.label}>
           Click ripples {clicks.length > 0 && `(${clicks.filter((c) => c.on).length}/${clicks.length})`}
         </span>
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
-            className={btn}
+            className={ui.btn}
             disabled={clicks.length === 0}
             onClick={() => ctx.apply((e) => ops.setAllClicks(e, true))}
           >
@@ -143,32 +141,32 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
           </button>
           <button
             type="button"
-            className={btn}
+            className={ui.btn}
             disabled={clicks.length === 0}
             onClick={() => ctx.apply((e) => ops.setAllClicks(e, false))}
           >
             All off
           </button>
         </div>
-        <p className="text-[11px] text-muted-dim">
+        <p className={ui.hint}>
           {clicks.length > 0
-            ? "Toggle one at a time on the Clicks lane."
+            ? "Each click is a dot on the Clicks lane — click one to mute it, click it again to bring it back. Filled is on, hollow is off."
             : "This take captured no clicks."}
         </p>
       </div>
 
-      <div className="space-y-1">
-        <span className="text-[11px] uppercase tracking-wider text-muted-dim">Key tracking</span>
+      <div className={ui.group}>
+        <span className={ui.label}>Key tracking</span>
         <button
           type="button"
-          className={btn}
+          className={ui.btn}
           disabled={ctx.keys.length === 0}
           title={ctx.keys.length === 0 ? "This take captured no key presses" : undefined}
           onClick={addKeysRange}
         >
           Add range at playhead
         </button>
-        <p className="text-[11px] text-muted-dim">
+        <p className={ui.hint}>
           {KEYS_SPAN_S}s of keycaps at the bottom of the frame. Drag its lane to move it, or its
           box on the preview to re-place the badge.
         </p>
@@ -180,7 +178,7 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
         arrive without a single click or key press.
       */}
       {!hasInput && (
-        <p className="text-[11px] leading-relaxed text-muted-dim">
+        <p className={ui.hint}>
           {isDesktop()
             ? "No clicks or keys were captured. macOS needs Input Monitoring for the desktop app — grant it in System Settings ▸ Privacy & Security ▸ Input Monitoring, then record again. Window captures never produce a click track."
             : "Clicks and key presses are captured by the desktop app only."}

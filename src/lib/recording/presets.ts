@@ -24,7 +24,7 @@ export const FRAME_PRESETS: BackgroundPreset[] = [
   { id: "g05", label: "Forest", src: "/backgrounds/g05.svg", swatch: grad("#0b3d2e", "#1f7a4d", "#8fd694") },
   { id: "g06", label: "Sunrise", src: "/backgrounds/g06.svg", swatch: grad("#f5734c", "#e8465a", "#7a2a6b") },
   { id: "g07", label: "Ocean", src: "/backgrounds/g07.svg", swatch: grad("#1e3a8a", "#0ea5b7", "#67e8c3") },
-  { id: "g08", label: "Graphite", src: "/backgrounds/g08.svg", swatch: grad("#2c2c32", "#1a1a1e", "#0c0c0f") },
+  { id: "g08", label: "Graphite", src: "/backgrounds/g08.svg", swatch: grad("#2c2c32", "#0c0b0a", "#0c0c0f") },
   { id: "g09", label: "Mint", src: "/backgrounds/g09.svg", swatch: grad("#0f766e", "#34d399", "#d9f99d") },
   { id: "g10", label: "Rose", src: "/backgrounds/g10.svg", swatch: grad("#7a1f4b", "#d6467f", "#ffc4d6") },
   { id: "g11", label: "Amber", src: "/backgrounds/g11.svg", swatch: grad("#7c3a00", "#e0891a", "#fcd34d") },
@@ -57,11 +57,11 @@ export function resolvePresetId(id: string | undefined): string | undefined {
 
 /** Solid colours offered next to the gradients. */
 export const COLOR_SWATCHES = [
-  "#1a1a1e",
-  "#232328",
+  "#0c0b0a",
+  "#1c1b19",
   "#0f172a",
   "#134e4a",
   "#7c2d12",
-  "#e85a4f",
-  "#f0f0f2",
+  "#3f7d5c",
+  "#f5f3ee",
 ];

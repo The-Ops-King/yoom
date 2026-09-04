@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { copyText } from "@/lib/clipboard";
 import { YoomLogo } from "./logo";
 import { DeviceSelector } from "./device-selector";
 import { AudioControls } from "./recorder/audio-controls";
@@ -96,13 +97,11 @@ export function Recorder() {
   );
 
   async function copyShareUrl() {
-    try {
-      await navigator.clipboard.writeText(state.shareUrl);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Insecure context — the input is selectable as a fallback.
-    }
+    // Falls back to execCommand where the async clipboard is denied; the
+    // input stays selectable if even that fails.
+    if (!(await copyText(state.shareUrl))) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
   }
 
   if (state.status === "done") {
@@ -157,7 +156,7 @@ export function Recorder() {
     return (
       <main className="flex min-h-screen items-center justify-center p-8">
         <div className="w-full max-w-md space-y-5 text-center">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-dim">
+          <p className="text-xs font-medium font-mono uppercase tracking-[0.14em] text-muted-dim">
             {rendering ? "Rendering" : "Uploading"}
           </p>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface">
@@ -270,7 +269,7 @@ export function Recorder() {
           */}
           {readyPanel && state.mode !== "camera" && (
             <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-muted-dim">
+              <span className="text-[11px] font-medium font-mono uppercase tracking-[0.14em] text-muted-dim">
                 Sharing
               </span>
               <span className="min-w-0 flex-1 truncate text-sm text-foreground">
@@ -326,7 +325,7 @@ export function Recorder() {
           {readyPanel && modeToggle}
 
           {state.error && (
-            <p className="text-center text-sm text-red-400/90">{state.error}</p>
+            <p className="text-center text-sm text-danger-text/90">{state.error}</p>
           )}
           {state.notice && (
             <p className="text-center text-sm text-muted">{state.notice}</p>
@@ -442,7 +441,7 @@ export function Recorder() {
                   onClick={actions.cancel}
                   title="Cancel recording (⌘⇧X)"
                   aria-label="Cancel recording"
-                  className="flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/5 px-4 py-2.5 text-sm font-medium text-red-400/90 transition-colors hover:bg-red-500/10 hover:text-red-300"
+                  className="flex items-center gap-1.5 rounded-lg border border-danger/40 bg-danger/5 px-4 py-2.5 text-sm font-medium text-danger-text/90 transition-colors hover:bg-danger/10 hover:text-danger-hover"
                 >
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
                     <path

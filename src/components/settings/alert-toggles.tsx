@@ -37,7 +37,7 @@ export function AlertToggles({ settings }: { settings: Settings }) {
             type="checkbox"
             name={field.name}
             defaultChecked={settings[field.name]}
-            className="mt-0.5 h-4 w-4 accent-[#e85a4f]"
+            className="mt-0.5 h-4 w-4 accent-accent"
           />
           <span>
             <span className="block text-sm text-foreground">{field.label}</span>
@@ -56,7 +56,7 @@ export function AlertToggles({ settings }: { settings: Settings }) {
         </button>
         <p aria-live="polite" className="text-xs">
           {state.error ? (
-            <span className="text-red-400/90">{state.error}</span>
+            <span className="text-danger-text/90">{state.error}</span>
           ) : state.ok ? (
             <span className="text-muted-dim">Saved</span>
           ) : null}

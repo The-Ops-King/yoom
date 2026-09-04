@@ -36,26 +36,26 @@ export function SlugEditor({ videoId, slug, prefix }: SlugEditorProps) {
       <label htmlFor="slug-input" className="block text-xs text-muted-dim">
         Share link
       </label>
-      <div className="flex items-center gap-2">
-        <div className="flex flex-1 items-center rounded-lg border border-border bg-surface px-3 py-2">
-          <span className="shrink-0 select-all text-sm text-muted-dim">{prefix}</span>
-          <input
-            id="slug-input"
-            name="slug"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            disabled={pending}
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-            maxLength={40}
-            className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none"
-          />
-        </div>
+      {/* One pill: prefix, slug, and the Save button inside it, so the
+          button never sits flush against the column edge looking cut off. */}
+      <div className="flex items-center gap-2 rounded-lg border border-border bg-surface py-1.5 pl-3 pr-1.5 focus-within:border-muted-dim">
+        <span className="shrink-0 select-all text-sm text-muted-dim">{prefix}</span>
+        <input
+          id="slug-input"
+          name="slug"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          disabled={pending}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          maxLength={40}
+          className="min-w-0 flex-1 bg-transparent py-0.5 text-sm text-foreground outline-none"
+        />
         <button
           type="submit"
           disabled={pending || normalized === slug}
-          className="shrink-0 rounded-lg border border-border px-3 py-2 text-sm text-muted transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          className="shrink-0 rounded-md bg-accent px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-surface-raised disabled:text-muted-dim"
         >
           {pending ? "Saving…" : "Save"}
         </button>
@@ -67,7 +67,7 @@ export function SlugEditor({ videoId, slug, prefix }: SlugEditorProps) {
       )}
       <p aria-live="polite" className="min-h-4 text-xs">
         {state.error ? (
-          <span className="text-red-400/90">{state.error}</span>
+          <span className="text-danger-text/90">{state.error}</span>
         ) : state.ok ? (
           <span className="text-muted-dim">
             Saved — the old link now redirects here.

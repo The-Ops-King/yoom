@@ -99,7 +99,7 @@ export function VideoCard({
           </span>
         </div>
         <div className="space-y-1 p-3 pb-2">
-          <h2 className="truncate text-sm font-medium text-foreground group-hover:text-accent">
+          <h2 className="truncate text-sm font-medium text-foreground group-hover:text-accent-text">
             {video.title}
           </h2>
           {/* Relative times are computed from the clock, so the server and the

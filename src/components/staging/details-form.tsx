@@ -5,6 +5,7 @@ import { formatElapsed } from "@/components/recorder/preview-stage";
 import { MAX_DESCRIPTION, MAX_TITLE } from "@/lib/limits";
 import { normalizeSlug, SLUG_RE } from "@/lib/slug";
 import type { Details, StagingContext } from "./types";
+import * as ui from "./ui";
 
 /** How long the slug input rests before the availability check fires. */
 const DEBOUNCE_MS = 400;
@@ -14,10 +15,7 @@ const FORMAT_HINT = "3–40 lowercase letters, numbers or hyphens.";
 // `select-text`: the staging chrome sets `select-none`, and `user-select`
 // inherits into form controls — typing still works, but the caret cannot
 // select anything, which makes editing a title feel broken.
-const field =
-  "w-full select-text rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-dim focus:border-accent/50 focus:ring-1 focus:ring-accent/20";
 
-const label = "block text-[11px] uppercase tracking-wider text-muted-dim";
 
 type SlugStatus = "auto" | "checking" | "unchecked" | "available" | "taken" | "invalid" | "error";
 
@@ -52,11 +50,11 @@ function hintFor(status: SlugStatus, slug: string): { text: string; tone: string
     case "available":
       return { text: `${slug} is available.`, tone: "text-emerald-400/90" };
     case "taken":
-      return { text: `${slug} is taken.`, tone: "text-red-400/90" };
+      return { text: `${slug} is taken.`, tone: "text-danger-text/90" };
     case "error":
-      return { text: "Could not check that link — try again.", tone: "text-red-400/90" };
+      return { text: "Could not check that link — try again.", tone: "text-danger-text/90" };
     default:
-      return { text: FORMAT_HINT, tone: "text-red-400/90" };
+      return { text: FORMAT_HINT, tone: "text-danger-text/90" };
   }
 }
 
@@ -163,9 +161,9 @@ export function DetailsForm({ ctx }: { ctx: StagingContext }) {
   const hint = hintFor(status, normalized);
 
   return (
-    <div className="space-y-3">
-      <div className="space-y-1">
-        <label className={label} htmlFor="staging-title">
+    <div className={ui.section}>
+      <div className={ui.group}>
+        <label className={ui.label} htmlFor="staging-title">
           Title
         </label>
         <input
@@ -174,12 +172,12 @@ export function DetailsForm({ ctx }: { ctx: StagingContext }) {
           maxLength={MAX_TITLE}
           placeholder="Untitled recording"
           onChange={(e) => setDetails((d) => ({ ...d, title: e.target.value }))}
-          className={field}
+          className={ui.input}
         />
       </div>
 
-      <div className="space-y-1">
-        <label className={label} htmlFor="staging-description">
+      <div className={ui.group}>
+        <label className={ui.label} htmlFor="staging-description">
           Description
         </label>
         <textarea
@@ -189,12 +187,12 @@ export function DetailsForm({ ctx }: { ctx: StagingContext }) {
           rows={3}
           placeholder="Optional"
           onChange={(e) => setDetails((d) => ({ ...d, description: e.target.value }))}
-          className={`${field} resize-y`}
+          className={`${ui.input} resize-y`}
         />
       </div>
 
-      <div className="space-y-1">
-        <label className={label} htmlFor="staging-slug">
+      <div className={ui.group}>
+        <label className={ui.label} htmlFor="staging-slug">
           Share link
         </label>
         <input
@@ -206,13 +204,13 @@ export function DetailsForm({ ctx }: { ctx: StagingContext }) {
           autoCorrect="off"
           maxLength={40}
           placeholder="auto"
-          className={field}
+          className={ui.input}
         />
         <p aria-live="polite" className={`min-h-4 text-[11px] ${hint.tone}`}>
           {hint.text}
         </p>
         {normalized !== draft && normalized !== "" && (
-          <p className="text-[11px] text-muted-dim">
+          <p className={ui.hint}>
             Saved as <span className="text-muted">{normalized}</span>
           </p>
         )}

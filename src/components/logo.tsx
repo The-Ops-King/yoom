@@ -25,14 +25,14 @@ export function YoomLogo({ size = "md", showText = true, className = "" }: YoomL
         {/* Geometric Y: two diagonal strokes converging to a vertical */}
         <path
           d="M10 8L24 26L38 8"
-          stroke="#e85a4f"
+          stroke="#3f7d5c"
           strokeWidth="4.5"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
         <path
           d="M24 26L24 40"
-          stroke="#e85a4f"
+          stroke="#3f7d5c"
           strokeWidth="4.5"
           strokeLinecap="round"
         />
@@ -41,7 +41,7 @@ export function YoomLogo({ size = "md", showText = true, className = "" }: YoomL
           cx="24"
           cy="26"
           r="4"
-          fill="#e85a4f"
+          fill="#3f7d5c"
         />
       </svg>
       {showText && (

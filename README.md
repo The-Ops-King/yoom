@@ -151,7 +151,7 @@ npm test        # vitest (unit tests for the pure modules)
   *Tab* captures.
 - **Mode switching** — the mode and capture-surface pickers stay live in *setup*:
   changing either tears the capture down and re-acquires with the new choice.
-- **Flow** — 3-second countdown (skippable) before the first take, pause/resume,
+- **Flow** — a two-beat "Ready? Go!" countdown (skippable) before each take, pause/resume,
   **Restart** (immediate — no second countdown), **Cancel** (trash: discards the take
   and returns to setup with the capture still live), then a review screen to play
   back, discard, or upload. 30-minute cap; Safari records `video/mp4`.

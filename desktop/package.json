@@ -10,7 +10,7 @@
     "start": "electron-vite preview",
     "build": "npm run typecheck && electron-vite build && electron-builder --mac dmg zip --publish never",
     "build:renderer": "electron-vite build",
-    "icons": "node build/make-tray-icons.mjs",
+    "icons": "electron build/make-icons.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.renderer.json",
     "test": "vitest run"
   },

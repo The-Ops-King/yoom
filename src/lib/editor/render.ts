@@ -583,17 +583,20 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
     ctx.restore();
   };
 
+  // The box the picture occupies: the fitted view when a zoom's aspect leaves
+  // letterbox, else the whole content box.
+  const pic = letterboxed ? dest : content;
+
   if (framed && frame) {
     drawBackground(ctx, W, H, frame.background, inputs.background);
+    // The frame (shadow + rounded clip) hugs the PICTURE, not the content box —
+    // otherwise a zoom's shadow outlines a full-width screen that is mostly
+    // wallpaper, and the letterbox reads as black bars inside the frame.
     if (frame.shadow) {
       ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = W * 0.02; ctx.shadowOffsetY = W * 0.008;
-      ctx.fillStyle = "#000"; ctx.fill(framePath(content.x, content.y, content.w, content.h, radius)); ctx.restore();
+      ctx.fillStyle = "#000"; ctx.fill(framePath(pic.x, pic.y, pic.w, pic.h, radius)); ctx.restore();
     }
-    ctx.save(); ctx.clip(framePath(content.x, content.y, content.w, content.h, radius));
-    // The shadow pass fills the whole content box black; repaint the frame
-    // background over it so the letterbox reads as the frame's padding
-    // growing, not as black bars inside the screen.
-    if (letterboxed) drawBackground(ctx, W, H, frame.background, inputs.background);
+    ctx.save(); ctx.clip(framePath(pic.x, pic.y, pic.w, pic.h, radius));
     drawSource(dest); ctx.restore();
   } else {
     // Unframed, the letterbox is simply the black the canvas is cleared to.
@@ -640,8 +643,9 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
   // well: a zoom can push an overlay's mapped rect outside the view, and it
   // must not bleed onto the frame padding or the letterbox.
   ctx.save();
-  ctx.clip(framePath(content.x, content.y, content.w, content.h, radius));
-  if (letterboxed) ctx.clip(buildPath(dest.x, dest.y, dest.w, dest.h, 0));
+  // Same rounded box the picture was clipped to (the fitted view when
+  // letterboxed), so overlays share the picture's corners and edges.
+  ctx.clip(framePath(pic.x, pic.y, pic.w, pic.h, radius));
   const zoom = view.w > 0 ? 1 / view.w : 1;
   const zoomY = view.h > 0 ? 1 / view.h : 1;
   for (const o of inputs.edits.overlays) {

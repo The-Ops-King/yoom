@@ -36,9 +36,9 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
-    // Menu-bar only. Pairs with LSUIElement: true in electron-builder.yml so
-    // the packaged app has no dock icon and no app switcher entry either.
-    app.dock?.hide();
+    // Lives in the menu bar AND the Dock: the tray is the fast path, but a
+    // Dock icon is what makes the app findable and ⌘-Tab-able. Closing the
+    // window keeps the app alive; a Dock click reopens it via `activate`.
 
     // installBubbleIpc() owns IPC.setBubbleVisible, IPC.setRecordingActive,
     // IPC.setBubbleAppearance and IPC.setCameraDevice; capture.ts calls
@@ -67,8 +67,7 @@ if (!app.requestSingleInstanceLock()) {
     void warmPermissionsAtLaunch();
   });
 
-  // With no dock icon there is no dock click to reopen from, but the tray's
-  // "Open recorder" goes through the same path.
+  // Dock click (and the tray's "Open recorder") reopen the recorder window.
   app.on("activate", () => {
     if (!getRecorderWindow()) createRecorderWindow();
   });

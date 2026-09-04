@@ -7,7 +7,7 @@ export default function VideoNotFound() {
       <p className="text-sm text-muted">
         It may have been deleted, or the link is wrong.
       </p>
-      <Link href="/library" className="text-sm text-accent hover:underline">
+      <Link href="/library" className="text-sm text-accent-text hover:underline">
         Back to the library
       </Link>
     </main>

@@ -65,7 +65,7 @@ export function AudioControls({
 
   return (
     <div className="space-y-3 rounded-lg border border-border bg-surface p-3">
-      <span className="text-xs font-medium uppercase tracking-wider text-muted-dim">
+      <span className="text-xs font-medium font-mono uppercase tracking-[0.14em] text-muted-dim">
         Audio
       </span>
 

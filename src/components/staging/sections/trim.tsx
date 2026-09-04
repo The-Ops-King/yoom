@@ -2,12 +2,11 @@
 
 import * as ops from "@/lib/editor/edit-ops";
 import type { StagingContext } from "../types";
+import * as ui from "../ui";
 
 /** Seconds a marker's one-click cut spans. */
 const MARKER_CUT_S = 2;
 
-const btn =
-  "rounded-md border border-border bg-surface-raised px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground disabled:opacity-30 disabled:hover:text-muted";
 
 function fmt(t: number): string {
   return `${t.toFixed(1)}s`;
@@ -20,17 +19,17 @@ export function TrimSection({ ctx }: { ctx: StagingContext }) {
   const bothSet = inPoint !== null && outPoint !== null;
 
   return (
-    <div className="space-y-3">
+    <div className={ui.section}>
       <div className="flex flex-wrap gap-1.5">
-        <button type="button" className={btn} onClick={() => ctx.setInPoint(player.timeRef.current)}>
+        <button type="button" className={ui.btn} onClick={() => ctx.setInPoint(player.timeRef.current)}>
           Set in (I)
         </button>
-        <button type="button" className={btn} onClick={() => ctx.setOutPoint(player.timeRef.current)}>
+        <button type="button" className={ui.btn} onClick={() => ctx.setOutPoint(player.timeRef.current)}>
           Set out (O)
         </button>
         <button
           type="button"
-          className={btn}
+          className={ui.btn}
           disabled={!bothSet}
           onClick={() => {
             if (inPoint === null || outPoint === null) return;
@@ -45,7 +44,7 @@ export function TrimSection({ ctx }: { ctx: StagingContext }) {
         </button>
       </div>
 
-      <p className="text-[11px] text-muted-dim">
+      <p className={ui.hint}>
         In {inPoint === null ? "—" : fmt(inPoint)} · Out {outPoint === null ? "—" : fmt(outPoint)}
       </p>
 
@@ -55,7 +54,7 @@ export function TrimSection({ ctx }: { ctx: StagingContext }) {
         </span>
         <button
           type="button"
-          className={btn}
+          className={ui.btn}
           disabled={!trimmed}
           onClick={() => ctx.apply((e) => ops.setTrim(e, duration, { start: 0, end: duration }))}
         >
@@ -63,12 +62,12 @@ export function TrimSection({ ctx }: { ctx: StagingContext }) {
         </button>
       </div>
 
-      <div className="space-y-1">
-        <span className="text-[11px] uppercase tracking-wider text-muted-dim">Cuts ({edits.cuts.length})</span>
+      <div className={ui.group}>
+        <span className={ui.label}>Cuts ({edits.cuts.length})</span>
         {edits.cuts.length === 0 ? (
-          <p className="text-[11px] text-muted-dim">No cuts yet.</p>
+          <p className={ui.hint}>No cuts yet.</p>
         ) : (
-          <ul className="space-y-1">
+          <ul className={ui.group}>
             {edits.cuts.map((cut, i) => (
               <li key={`${cut.start}-${cut.end}`} className="flex items-center justify-between gap-2">
                 <button
@@ -90,7 +89,7 @@ export function TrimSection({ ctx }: { ctx: StagingContext }) {
                     ctx.apply((e) => ops.removeCut(e, i));
                     ctx.setSelected(null);
                   }}
-                  className="text-[11px] text-red-400/80 hover:text-red-300"
+                  className="text-[11px] text-danger-text/80 hover:text-danger-hover"
                 >
                   Remove
                 </button>
@@ -101,11 +100,11 @@ export function TrimSection({ ctx }: { ctx: StagingContext }) {
       </div>
 
       {edits.markers.length > 0 && (
-        <div className="space-y-1">
-          <span className="text-[11px] uppercase tracking-wider text-muted-dim">
+        <div className={ui.group}>
+          <span className={ui.label}>
             Markers ({edits.markers.length})
           </span>
-          <ul className="space-y-1">
+          <ul className={ui.group}>
             {edits.markers.map((m) => (
               <li key={m.t} className="flex items-center justify-between gap-1.5">
                 <button
@@ -117,7 +116,7 @@ export function TrimSection({ ctx }: { ctx: StagingContext }) {
                 </button>
                 <button
                   type="button"
-                  className={btn}
+                  className={ui.btn}
                   onClick={() =>
                     ctx.apply((e) =>
                       ops.addCut(e, { start: Math.max(0, m.t - MARKER_CUT_S), end: m.t }),
@@ -128,7 +127,7 @@ export function TrimSection({ ctx }: { ctx: StagingContext }) {
                 </button>
                 <button
                   type="button"
-                  className={btn}
+                  className={ui.btn}
                   onClick={() =>
                     ctx.apply((e) =>
                       ops.addCut(e, { start: m.t, end: Math.min(duration, m.t + MARKER_CUT_S) }),

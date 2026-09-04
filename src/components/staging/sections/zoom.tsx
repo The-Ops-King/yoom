@@ -4,6 +4,7 @@ import { clampRect, type Rect, type Zoom, type ZoomKind } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
 import { DEFAULT_RAMP_S } from "@/lib/editor/zoom";
 import type { StagingContext } from "../types";
+import * as ui from "../ui";
 
 /** What "Focus whole take" zooms to when nothing is selected to copy. */
 const CENTRE_HALF: Rect = { x: 0.25, y: 0.25, w: 0.5, h: 0.5 };
@@ -11,13 +12,8 @@ const CENTRE_HALF: Rect = { x: 0.25, y: 0.25, w: 0.5, h: 0.5 };
 /** Smallest side a zoom may be typed down to, as a percentage of the source. */
 const MIN_PCT = 5;
 
-const btn =
-  "rounded-md border border-border bg-surface-raised px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground disabled:opacity-30 disabled:hover:text-muted";
-const active = "rounded-md border border-accent bg-accent/15 px-2 py-1 text-[11px] font-medium text-foreground";
 // `select-text` because the staging root sets `select-none` and `user-select`
 // inherits: without it the caret cannot select the value to retype it.
-const field =
-  "w-20 select-text rounded-md border border-border bg-surface-raised px-1.5 py-1 text-[11px] tabular-nums text-foreground";
 
 const fmt = (t: number) => `${t.toFixed(1)}s`;
 
@@ -72,12 +68,12 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
   const pct = (v: number) => Math.round(v * 100);
 
   return (
-    <div className="space-y-3">
+    <div className={ui.section}>
       <div className="flex flex-wrap gap-1.5">
         <button
           type="button"
           aria-pressed={tool === "zoom"}
-          className={tool === "zoom" ? active : btn}
+          className={tool === "zoom" ? ui.btnActive : ui.btn}
           onClick={() => ctx.setTool(tool === "zoom" ? "select" : "zoom")}
         >
           Zoom
@@ -88,14 +84,14 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
           aria-pressed={tool === "followZoom"}
           disabled={!hasCursor}
           title={hasCursor ? undefined : "No mouse track for this take"}
-          className={tool === "followZoom" ? active : btn}
+          className={tool === "followZoom" ? ui.btnActive : ui.btn}
           onClick={() => ctx.setTool(tool === "followZoom" ? "select" : "followZoom")}
         >
           Follow zoom
         </button>
         <button
           type="button"
-          className={btn}
+          className={ui.btn}
           disabled={duration <= 0}
           onClick={() =>
             // Deliberately not `addZoomAt`: this one spans the take rather
@@ -107,7 +103,7 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
         </button>
       </div>
 
-      <p className="text-[11px] text-muted-dim">
+      <p className={ui.hint}>
         {tool === "followZoom"
           ? "Drag the window SIZE; its centre rides the mouse. It holds for 3 s or the in/out range."
           : "Drag the region to zoom into; it holds for 3 s or the in/out range."}
@@ -123,7 +119,7 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
                 step={0.1}
                 min={0}
                 value={zoom.start}
-                className={field}
+                className={ui.field}
                 onChange={(e) => editZoom({ start: num(e.target.value, zoom.start) })}
               />
             </label>
@@ -134,7 +130,7 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
                 step={0.1}
                 min={0}
                 value={zoom.end}
-                className={field}
+                className={ui.field}
                 onChange={(e) => editZoom({ end: num(e.target.value, zoom.end) })}
               />
             </label>
@@ -146,7 +142,7 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
                 min={0}
                 max={2}
                 value={zoom.ramp ?? DEFAULT_RAMP_S}
-                className={field}
+                className={ui.field}
                 onChange={(e) =>
                   editZoom({ ramp: Math.min(2, Math.max(0, num(e.target.value, zoom.ramp ?? DEFAULT_RAMP_S))) })
                 }
@@ -162,7 +158,7 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
                 min={MIN_PCT}
                 max={100}
                 value={pct(zoom.rect.w)}
-                className={field}
+                className={ui.field}
                 onChange={(e) => editSize("w", num(e.target.value, pct(zoom.rect.w)))}
               />
             </label>
@@ -174,7 +170,7 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
                 min={MIN_PCT}
                 max={100}
                 value={pct(zoom.rect.h)}
-                className={field}
+                className={ui.field}
                 onChange={(e) => editSize("h", num(e.target.value, pct(zoom.rect.h)))}
               />
             </label>
@@ -185,13 +181,13 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
             draft has the kind but not the track, and disabling both buttons
             would leave no way back to Static.
           */}
-          <div className="space-y-1">
+          <div className={ui.group}>
             <span className="text-[11px] text-muted">Kind</span>
             <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 aria-pressed={!following}
-                className={following ? btn : active}
+                className={following ? ui.btn : ui.btnActive}
                 onClick={() => setKind("static")}
               >
                 Static
@@ -200,22 +196,22 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
                 type="button"
                 aria-pressed={following}
                 disabled={!hasCursor && !following}
-                className={following ? active : btn}
+                className={following ? ui.btnActive : ui.btn}
                 onClick={() => setKind("follow")}
               >
                 Follow mouse
               </button>
-              {!hasCursor && <span className="text-[11px] text-muted-dim">· no mouse track for this take</span>}
+              {!hasCursor && <span className={ui.hint}>· no mouse track for this take</span>}
             </div>
           </div>
-          <p className="text-[11px] text-muted-dim">
+          <p className={ui.hint}>
             {following
               ? "Width and height set the window size; its centre follows the mouse, smoothed and kept inside the frame."
               : "Any aspect: the region is fitted inside the frame, so a tall or wide zoom letterboxes rather than stretching. Drag the box on the preview to move or resize it."}
           </p>
           <button
             type="button"
-            className="text-[11px] text-red-400/80 hover:text-red-300"
+            className="text-[11px] text-danger-text/80 hover:text-danger-hover"
             onClick={() => {
               ctx.apply((ed) => ops.removeZoom(ed, index));
               ctx.setSelected(null);
@@ -226,12 +222,12 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
         </div>
       )}
 
-      <div className="space-y-1">
-        <span className="text-[11px] uppercase tracking-wider text-muted-dim">Zooms ({edits.zooms.length})</span>
+      <div className={ui.group}>
+        <span className={ui.label}>Zooms ({edits.zooms.length})</span>
         {edits.zooms.length === 0 ? (
-          <p className="text-[11px] text-muted-dim">No zooms yet.</p>
+          <p className={ui.hint}>No zooms yet.</p>
         ) : (
-          <ul className="space-y-1">
+          <ul className={ui.group}>
             {edits.zooms.map((z, i) => (
               <li key={`${z.start}-${z.end}`} className="flex items-center justify-between gap-2">
                 <span className={`flex-1 text-[11px] ${i === index ? "text-foreground" : "text-muted"}`}>
@@ -240,7 +236,7 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
                 </span>
                 <button
                   type="button"
-                  className={btn}
+                  className={ui.btn}
                   onClick={() => {
                     ctx.setSelected({ kind: "zoom", index: i });
                     // Land past the ease-in so the held rect is what shows.
@@ -252,7 +248,7 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
                 <button
                   type="button"
                   aria-label={`Remove zoom ${i + 1}`}
-                  className="text-[11px] text-red-400/80 hover:text-red-300"
+                  className="text-[11px] text-danger-text/80 hover:text-danger-hover"
                   onClick={() => {
                     ctx.apply((ed) => ops.removeZoom(ed, i));
                     ctx.setSelected(null);

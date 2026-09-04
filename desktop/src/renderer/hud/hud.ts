@@ -29,9 +29,9 @@ const PLAY_ICON =
  * What the countdown shows. Purely presentational — the web app still counts
  * in whole seconds, this only decides the wording.
  *
- * The initial start counts from 3, so it reads "3 · Ready? · Go!". A restart
- * counts from 2 and reads "Ready? · Go!" — no number at all, because after a
- * restart you are not waiting for the app, you are waiting for yourself.
+ * Every take counts from 2 and reads "Ready? · Go!" — no number at all: you
+ * are not waiting for the app, you are waiting for yourself. A longer count
+ * would show its leading ticks as digits.
  */
 export function countdownLabel(seconds: number): string {
   const n = Math.max(1, Math.round(seconds));

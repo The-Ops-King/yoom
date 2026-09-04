@@ -39,10 +39,10 @@ describe("appUrl", () => {
 });
 
 describe("shareBaseUrl", () => {
-  it("defaults to the app origin", () => {
+  it("defaults to the public share domain, never the serving origin", () => {
     delete process.env.NEXT_PUBLIC_SHARE_BASE_URL;
-    process.env.NEXT_PUBLIC_APP_URL = "https://yoom.vercel.app";
-    expect(shareBaseUrl()).toBe("https://yoom.vercel.app");
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+    expect(shareBaseUrl()).toBe("https://jtylerray.com");
   });
 
   it("uses the configured share origin", () => {

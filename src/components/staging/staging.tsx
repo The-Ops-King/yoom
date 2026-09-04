@@ -437,9 +437,11 @@ export function Staging(props: StagingProps) {
     ],
   );
 
+  // No `overflow-hidden` on the grid: Preview and Timeline each clip their own
+  // content, and a clipping ancestor would kill the rail's `sticky`.
   return (
-    <div className="grid w-full max-w-6xl select-none gap-4 overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px]">
-      <div className="space-y-3">
+    <div className="grid w-full max-w-[1280px] select-none gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="min-w-0 space-y-3">
         <Preview ctx={ctx} />
         <Timeline ctx={ctx} />
       </div>

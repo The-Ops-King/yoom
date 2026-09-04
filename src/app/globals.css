@@ -1,45 +1,86 @@
-@import "tailwindcss";
+/* Scoped to `src` so the code samples in docs/superpowers/plans/*.md stop
+   generating dead utilities (they still carry the pre-restyle palette). */
+@import "tailwindcss" source("../../src");
 
+/* Palette, type and radii ported from jtylerray.com — warm ink ground,
+   bone text, muted green accent, hairline structure. */
 @theme inline {
-  --color-background: #1a1a1e;
-  --color-surface: #232328;
-  --color-surface-raised: #2c2c32;
-  --color-border: #38383f;
-  --color-border-subtle: #2e2e35;
-  --color-foreground: #f0f0f2;
-  --color-muted: #8b8b96;
-  --color-muted-dim: #5c5c66;
-  --color-accent: #e85a4f;
-  --color-accent-hover: #f06b60;
+  --color-background: #0c0b0a;
+  --color-background-deep: #070605;
+  --color-surface: #141312;
+  --color-surface-raised: #1c1b19;
+  --color-border: rgba(138, 133, 124, 0.12);
+  --color-border-subtle: rgba(138, 133, 124, 0.07);
+  --color-foreground: #f5f3ee;
+  --color-muted: #8a857c;
+  --color-muted-dim: #5e5a54;
+  --color-accent: #3f7d5c;
+  --color-accent-hover: #4a8e6a;
+  /* The accent reads too dim as body text on ink; this is its text weight. */
+  --color-accent-text: #5e9e78;
+
+  /* Destructive and marker colours. Tailwind's red-400/amber-400 are cool and
+     saturated against this ground, so these are warmed to sit with the ink. */
+  --color-danger: #b8543d;
+  --color-danger-text: #d1735a;
+  --color-danger-hover: #e08e77;
+  --color-warn: #c9973f;
+  --color-warn-bright: #dbb05e;
+
+  --font-display: var(--font-inter-tight), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Tighter than Tailwind's defaults, to match the site's 6px control / 8px card. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
 }
 
-/* Body gradient and grain */
+/* Ink ground with a faint structural grid and a single accent lens at the top. */
 body {
-  background: radial-gradient(ellipse at 50% 0%, #232328 0%, #1a1a1e 70%);
+  background-color: #0c0b0a;
+  background-image:
+    radial-gradient(
+      circle 640px at 50% -10%,
+      rgba(63, 125, 92, 0.17),
+      transparent 70%
+    ),
+    repeating-linear-gradient(
+      to right,
+      rgba(138, 133, 124, 0.028) 0 1px,
+      transparent 1px 64px
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      rgba(138, 133, 124, 0.028) 0 1px,
+      transparent 1px 64px
+    );
   background-attachment: fixed;
   min-height: 100vh;
+  letter-spacing: -0.01em;
+  text-rendering: optimizeLegibility;
 }
 
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.025;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 256px 256px;
-  z-index: 9999;
+/* Headings carry the display face and its tight tracking. */
+h1,
+h2,
+h3 {
+  font-family: var(--font-inter-tight), ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.032em;
 }
 
 /* Smooth scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #38383f transparent;
+  scrollbar-color: rgba(138, 133, 124, 0.24) transparent;
 }
 
 /* Custom select arrow */
 select.device-select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b8b96' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a857c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
   background-size: 14px;
@@ -48,7 +89,19 @@ select.device-select {
 
 /* Progress bar glow */
 .progress-bar {
-  box-shadow: 0 0 12px rgba(232, 90, 79, 0.25);
+  box-shadow: 0 0 12px rgba(63, 125, 92, 0.3);
+}
+
+/* Floating toast: rises in from just below its resting spot */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Recording dot pulse */

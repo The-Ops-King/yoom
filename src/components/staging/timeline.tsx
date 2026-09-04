@@ -228,7 +228,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
                 ctx.setSelected({ kind: "cut", index: i });
               }}
               className={`absolute inset-y-0 border-x ${
-                isSel("cut", i) ? "border-red-400 bg-red-500/40" : "border-red-500/40 bg-red-500/20"
+                isSel("cut", i) ? "border-danger-text bg-danger/40" : "border-danger/40 bg-danger/20"
               }`}
               style={{ left: pct(c.start), width: pct(c.end - c.start) }}
             />
@@ -236,7 +236,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
           {edits.markers.map((m, i) => (
             <div
               key={`marker-${i}`}
-              className="pointer-events-none absolute top-0 h-2 w-px bg-amber-300"
+              className="pointer-events-none absolute top-0 h-2 w-px bg-warn-bright"
               style={{ left: pct(m.t) }}
             />
           ))}
@@ -244,7 +244,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
             <div className="pointer-events-none absolute inset-y-0 w-px bg-emerald-400" style={{ left: pct(ctx.inPoint) }} />
           )}
           {ctx.outPoint !== null && (
-            <div className="pointer-events-none absolute inset-y-0 w-px bg-orange-400" style={{ left: pct(ctx.outPoint) }} />
+            <div className="pointer-events-none absolute inset-y-0 w-px bg-warn" style={{ left: pct(ctx.outPoint) }} />
           )}
           <div
             role="slider"
@@ -375,19 +375,34 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
                   All off
                 </button>
               </span>
+              {/*
+                The button is a transparent 16px column spanning the lane, so
+                there is something to actually hit; the dot inside is what you
+                see. A 6px marker with no padding was unclickable in practice.
+                Wider than 16px would start swallowing neighbouring clicks on a
+                click-heavy take.
+              */}
               {clicks.map((c, i) => (
                 <button
                   key={`click-${i}`}
                   type="button"
-                  title={`Click at ${c.t.toFixed(2)}s — ${c.on ? "on" : "off"}`}
+                  title={`Click at ${c.t.toFixed(2)}s — ${c.on ? "on, click to mute" : "off, click to restore"}`}
                   aria-pressed={c.on}
-                  className={`absolute top-1/2 z-30 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rotate-45 border ${
-                    c.on ? "border-amber-200 bg-amber-400" : "border-amber-400/60 bg-transparent"
-                  }`}
+                  aria-label={`Click ripple at ${c.t.toFixed(2)} seconds`}
+                  className="group absolute inset-y-0 z-30 flex w-4 -translate-x-1/2 items-center justify-center"
                   style={{ left: pct(c.t) }}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => ctx.apply((e) => ops.toggleClick(e, i))}
-                />
+                >
+                  <span
+                    aria-hidden
+                    className={`h-2.5 w-2.5 rounded-full border transition-transform group-hover:scale-125 ${
+                      c.on
+                        ? "border-warn-bright bg-warn"
+                        : "border-warn/50 bg-transparent"
+                    }`}
+                  />
+                </button>
               ))}
             </div>
           )}
@@ -433,7 +448,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
         </div>
 
         {/* Above the lane clips (z-30), which would otherwise paint over it. */}
-        <div ref={headRef} className="pointer-events-none absolute inset-y-0 z-40 w-0.5 -translate-x-1/2 bg-red-500" />
+        <div ref={headRef} className="pointer-events-none absolute inset-y-0 z-40 w-0.5 -translate-x-1/2 bg-danger-hover" />
       </div>
 
       <div className="flex items-center justify-between text-[11px] text-muted-dim">

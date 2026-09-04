@@ -41,21 +41,21 @@ function layout(headline: string, rows: [string, string][], link: string): strin
       ([label, value]) =>
         `<tr><td style="padding:4px 12px 4px 0;color:#8b8b96;font-size:13px;">${escapeHtml(
           label,
-        )}</td><td style="padding:4px 0;color:#f0f0f2;font-size:13px;">${escapeHtml(
+        )}</td><td style="padding:4px 0;color:#f5f3ee;font-size:13px;">${escapeHtml(
           value,
         )}</td></tr>`,
     )
     .join("");
 
   return [
-    `<div style="background:#1a1a1e;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">`,
-    `<h1 style="margin:0 0 16px;color:#f0f0f2;font-size:18px;font-weight:600;">${escapeHtml(
+    `<div style="background:#0c0b0a;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">`,
+    `<h1 style="margin:0 0 16px;color:#f5f3ee;font-size:18px;font-weight:600;">${escapeHtml(
       headline,
     )}</h1>`,
     `<table style="border-collapse:collapse;margin-bottom:20px;">${cells}</table>`,
-    `<a href="${escapeHtml(link)}" style="display:inline-block;background:#e85a4f;color:#ffffff;`,
+    `<a href="${escapeHtml(link)}" style="display:inline-block;background:#3f7d5c;color:#f5f3ee;`,
     `text-decoration:none;padding:10px 16px;border-radius:8px;font-size:14px;">Open the recording</a>`,
-    `<p style="margin:16px 0 0;color:#5c5c66;font-size:12px;">${escapeHtml(link)}</p>`,
+    `<p style="margin:16px 0 0;color:#5e5a54;font-size:12px;">${escapeHtml(link)}</p>`,
     `</div>`,
   ].join("");
 }

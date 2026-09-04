@@ -52,7 +52,7 @@ export function PasswordGate() {
           autoFocus
         />
         {error && (
-          <p className="text-sm text-red-400/90 text-center">{error}</p>
+          <p className="text-sm text-danger-text/90 text-center">{error}</p>
         )}
         <button
           type="submit"

@@ -167,11 +167,11 @@ describe("mode and surface selection", () => {
 describe("countdown and recording", () => {
   const setup = () => run(init(), [{ type: "ACQUIRE" }, ACQUIRED]);
 
-  it("START enters a 3-second countdown", () => {
+  it("START enters the two-beat 'Ready? Go!' countdown", () => {
     const s = recorderReducer(setup(), { type: "START" });
     expect(s.status).toBe("countdown");
-    expect(s.countdown).toBe(3);
-    expect(COUNTDOWN_SECONDS).toBe(3);
+    expect(s.countdown).toBe(2);
+    expect(COUNTDOWN_SECONDS).toBe(2);
   });
 
   it("START takes the countdown length as a parameter", () => {
@@ -185,10 +185,9 @@ describe("countdown and recording", () => {
 
   it("COUNTDOWN_TICK walks down and then starts recording", () => {
     let s = recorderReducer(setup(), { type: "START" });
+    expect(s.countdown).toBe(2); // "Ready?"
     s = recorderReducer(s, { type: "COUNTDOWN_TICK" });
-    expect(s.countdown).toBe(2);
-    s = recorderReducer(s, { type: "COUNTDOWN_TICK" });
-    expect(s.countdown).toBe(1);
+    expect(s.countdown).toBe(1); // "Go!"
     s = recorderReducer(s, { type: "COUNTDOWN_TICK" });
     expect(s.status).toBe("recording");
     expect(s.elapsedMs).toBe(0);
@@ -241,7 +240,7 @@ describe("countdown and recording", () => {
       { type: "RESTART" },
     ]);
     expect(rec.status).toBe("countdown");
-    expect(rec.countdown).toBe(3);
+    expect(rec.countdown).toBe(COUNTDOWN_SECONDS);
     expect(rec.elapsedMs).toBe(0);
   });
 
@@ -329,7 +328,7 @@ describe("countdown and recording", () => {
       expect(s.status).toBe("setup");
       expect(s.blob).toBeNull();
       expect(s.elapsedMs).toBe(0);
-      expect(s.countdown).toBe(3);
+      expect(s.countdown).toBe(COUNTDOWN_SECONDS);
       expect(s.streamsAlive).toBe(true);
       expect(s.error).toBe("");
       expect(s.notice).toBe("");

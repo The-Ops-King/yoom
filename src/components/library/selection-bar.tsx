@@ -41,13 +41,13 @@ export function SelectionBar({
         type="button"
         onClick={onDelete}
         disabled={pending}
-        className="ml-auto rounded-lg border border-red-500/30 px-3 py-1.5 text-sm text-red-400/90 transition-colors hover:bg-red-500/10 disabled:opacity-40"
+        className="ml-auto rounded-lg border border-danger/30 px-3 py-1.5 text-sm text-danger-text/90 transition-colors hover:bg-danger/10 disabled:opacity-40"
       >
         {pending ? "Deleting…" : `Delete ${count}`}
       </button>
       {/* Always in the DOM: a live region only announces mutations a screen
           reader was already observing. */}
-      <p aria-live="polite" className="w-full text-xs text-red-400/90">
+      <p aria-live="polite" className="w-full text-xs text-danger-text/90">
         {failures.length > 0
           ? `Could not delete: ${failures.map((f) => `${f.title} (${f.error})`).join(", ")}`
           : ""}

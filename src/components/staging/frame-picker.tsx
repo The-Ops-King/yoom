@@ -11,6 +11,7 @@ import {
   removeWallpaper,
   type WallpaperMeta,
 } from "@/lib/wallpapers";
+import * as ui from "./ui";
 
 interface FramePickerProps {
   frame: FrameConfig;
@@ -125,7 +126,7 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
   return (
     <div className="space-y-3 rounded-lg border border-border bg-surface p-3">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wider text-muted-dim">
+        <span className={ui.label}>
           Framed capture
         </span>
         <button
@@ -175,7 +176,7 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
           </div>
 
           <div className="space-y-1.5">
-            <span className="text-[11px] text-muted-dim">Wallpapers</span>
+            <span className={ui.label}>Wallpapers</span>
             <div className="grid grid-cols-4 gap-1.5">
               <button
                 type="button"
@@ -212,7 +213,7 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
                 </div>
               ))}
             </div>
-            {error && <p className="text-[11px] text-red-400">{error}</p>}
+            {error && <p className="text-[11px] text-danger-text">{error}</p>}
             <input
               ref={fileRef}
               type="file"
@@ -253,10 +254,8 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
             ))}
           </div>
 
-          <label className="block space-y-1">
-            <span className="text-[11px] text-muted-dim">
-              Padding {Math.round(frame.padding * 100)}%
-            </span>
+          <label className={ui.sliderRow}>
+            <span className={ui.sliderName}>Padding</span>
             <input
               type="range"
               min={0}
@@ -264,14 +263,15 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
               step={0.005}
               value={frame.padding}
               onChange={(e) => onChange({ padding: Number(e.target.value) })}
-              className="w-full accent-[var(--color-accent)]"
+              className={`${ui.slider} accent-[var(--color-accent)]`}
             />
+            <span className={ui.sliderValue}>
+              {Math.round(frame.padding * 100)}%
+            </span>
           </label>
 
-          <label className="block space-y-1">
-            <span className="text-[11px] text-muted-dim">
-              Corner radius {Math.round(frame.radius * 1000) / 10}%
-            </span>
+          <label className={ui.sliderRow}>
+            <span className={ui.sliderName}>Radius</span>
             <input
               type="range"
               min={0}
@@ -279,11 +279,14 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
               step={0.002}
               value={frame.radius}
               onChange={(e) => onChange({ radius: Number(e.target.value) })}
-              className="w-full accent-[var(--color-accent)]"
+              className={`${ui.slider} accent-[var(--color-accent)]`}
             />
+            <span className={ui.sliderValue}>
+              {Math.round(frame.radius * 1000) / 10}%
+            </span>
           </label>
 
-          <label className="flex items-center gap-2 text-[11px] text-muted">
+          <label className={ui.check}>
             <input
               type="checkbox"
               checked={frame.shadow}

@@ -14,7 +14,7 @@ export function StatTiles({ stats }: { stats: VideoStats }) {
           key={tile.label}
           className="rounded-xl border border-border bg-surface px-3 py-3"
         >
-          <dt className="text-[11px] uppercase tracking-wider text-muted-dim">
+          <dt className="text-[11px] font-mono uppercase tracking-[0.14em] text-muted-dim">
             {tile.label}
           </dt>
           <dd className="mt-1 text-xl font-semibold text-foreground">{tile.value}</dd>

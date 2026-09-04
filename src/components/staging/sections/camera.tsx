@@ -14,13 +14,11 @@ import * as ops from "@/lib/editor/edit-ops";
 import type { BubbleShape } from "@/lib/recording/types";
 import { contentRect } from "../content-rect";
 import type { StagingContext } from "../types";
+import * as ui from "../ui";
 
 /** The sync slider's range; narrower than `MAX_CAMERA_OFFSET_MS`, which is the hard clamp. */
 const SYNC_RANGE_MS = Math.min(500, MAX_CAMERA_OFFSET_MS);
 
-const btn =
-  "rounded-md border border-border bg-surface-raised px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground disabled:opacity-30 disabled:hover:text-muted";
-const btnOn = "rounded-md border border-accent bg-accent/15 px-2 py-1 text-[11px] font-medium text-foreground";
 
 const SHAPES: { id: BubbleShape; label: string }[] = [
   { id: "circle", label: "Circle" },
@@ -82,7 +80,7 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
     };
   }, [gesture, ctx]);
 
-  if (!track) return <p className="text-[11px] text-muted-dim">This take has no camera.</p>;
+  if (!track) return <p className={ui.hint}>This take has no camera.</p>;
 
   // The content box's aspect is the source aspect — what `bubbleHeightFor`
   // means by `screenAspect`. Measured off the output size the preview is laid
@@ -172,9 +170,9 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
   const offset = edits.cameraOffsetMs ?? 0;
 
   return (
-    <div className="space-y-3">
-      <div className="space-y-1">
-        <span className="text-[11px] uppercase tracking-wider text-muted-dim">Shape at the playhead</span>
+    <div className={ui.section}>
+      <div className={ui.group}>
+        <span className={ui.label}>Shape at the playhead</span>
         <div className="flex flex-wrap gap-1.5">
           {SHAPES.map((s) => (
             <button
@@ -184,7 +182,7 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
               // A hidden camera has no bubble to reshape; `setShape` refuses
               // anyway, so say so rather than looking broken.
               disabled={sample.mode === "hidden"}
-              className={sample.shape === s.id ? btnOn : btn}
+              className={sample.shape === s.id ? ui.btnActive : ui.btn}
               onClick={() => setShape(s.id)}
             >
               {s.label}
@@ -193,7 +191,7 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
         </div>
       </div>
 
-      <label className="flex items-center gap-2 text-[11px] text-muted">
+      <label className={ui.check}>
         <input
           type="checkbox"
           checked={track.mirror}
@@ -205,13 +203,13 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
         Mirror the camera
       </label>
 
-      <div className="space-y-1">
-        <span className="text-[11px] uppercase tracking-wider text-muted-dim">At the playhead</span>
+      <div className={ui.group}>
+        <span className={ui.label}>At the playhead</span>
         <div className="flex flex-wrap gap-1.5">
           <button
             type="button"
             aria-pressed={sample.mode === "bubble"}
-            className={sample.mode === "bubble" ? btnOn : btn}
+            className={sample.mode === "bubble" ? ui.btnActive : ui.btn}
             onClick={() => setMode("bubble")}
           >
             Bubble
@@ -219,7 +217,7 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
           <button
             type="button"
             aria-pressed={sample.mode === "full"}
-            className={sample.mode === "full" ? btnOn : btn}
+            className={sample.mode === "full" ? ui.btnActive : ui.btn}
             onClick={() => setMode("full")}
           >
             Full screen
@@ -227,24 +225,24 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
           <button
             type="button"
             aria-pressed={sample.mode === "hidden"}
-            className={sample.mode === "hidden" ? btnOn : btn}
+            className={sample.mode === "hidden" ? ui.btnActive : ui.btn}
             onClick={toggleHidden}
           >
             {sample.mode === "hidden" ? "Show camera" : "Hide camera"}
           </button>
         </div>
-        <p className="text-[11px] text-muted-dim">Drag the dashed box on the preview to move or resize it.</p>
+        <p className={ui.hint}>Drag the dashed box on the preview to move or resize it.</p>
       </div>
 
-      <div className="space-y-1">
-        <span className="text-[11px] uppercase tracking-wider text-muted-dim">Framing</span>
+      <div className={ui.group}>
+        <span className={ui.label}>Framing</span>
         {/*
           One axis at a time has slack: the cover-crop only trims the axis the
           camera has too much of. The dead axis stays visible but disabled, so
           the control does not appear and disappear as the bubble is reshaped.
         */}
-        <label htmlFor="camera-pan-x" className="flex items-center gap-2 text-[11px] text-muted">
-          <span className="w-10 shrink-0">Pan ↔</span>
+        <label htmlFor="camera-pan-x" className={ui.sliderRow}>
+          <span className={ui.sliderName}>Pan ↔</span>
           <input
             id="camera-pan-x"
             type="range"
@@ -253,14 +251,14 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
             step={0.01}
             value={sample.pan.x}
             disabled={!canPanX}
-            className="w-full disabled:opacity-30"
+            className={ui.slider}
             onPointerDown={() => beginGesture(true)}
             onKeyDown={() => beginGesture(true)}
             onChange={(e) => setPan("x", Number(e.target.value))}
           />
         </label>
-        <label htmlFor="camera-pan-y" className="flex items-center gap-2 text-[11px] text-muted">
-          <span className="w-10 shrink-0">Pan ↕</span>
+        <label htmlFor="camera-pan-y" className={ui.sliderRow}>
+          <span className={ui.sliderName}>Pan ↕</span>
           <input
             id="camera-pan-y"
             type="range"
@@ -269,24 +267,24 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
             step={0.01}
             value={sample.pan.y}
             disabled={!canPanY}
-            className="w-full disabled:opacity-30"
+            className={ui.slider}
             onPointerDown={() => beginGesture(true)}
             onKeyDown={() => beginGesture(true)}
             onChange={(e) => setPan("y", Number(e.target.value))}
           />
         </label>
-        <p className="text-[11px] text-muted-dim">
+        <p className={ui.hint}>
           {canPanX || canPanY
             ? "Shift-drag the bubble to pan."
             : "This bubble matches the camera's shape, so there is nothing to pan."}
         </p>
       </div>
 
-      <div className="space-y-1">
-        <span className="text-[11px] uppercase tracking-wider text-muted-dim">
+      <div className={ui.group}>
+        <span className={ui.label}>
           Keyframes ({track.keyframes.length})
         </span>
-        <ul className="space-y-1">
+        <ul className={ui.group}>
           {track.keyframes.map((k, i) => (
             <li key={k.t} className="flex items-center justify-between gap-2">
               <button
@@ -304,7 +302,7 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
               </button>
               <button
                 type="button"
-                className={btn}
+                className={ui.btn}
                 aria-label={`Go to ${formatElapsed(k.t * 1000)}`}
                 onClick={() => player.seek(k.t)}
               >
@@ -318,7 +316,7 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
                   ctx.apply((e) => ops.removeCameraKeyframe(e, k.t));
                   ctx.setSelected(null);
                 }}
-                className="text-[11px] text-red-400/80 hover:text-red-300 disabled:opacity-30 disabled:hover:text-red-400/80"
+                className="text-[11px] text-danger-text/80 hover:text-danger-hover disabled:opacity-30 disabled:hover:text-danger-text/80"
               >
                 Remove
               </button>
@@ -327,8 +325,8 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
         </ul>
       </div>
 
-      <div className="space-y-1">
-        <label htmlFor="camera-sync" className="block text-[11px] uppercase tracking-wider text-muted-dim">
+      <div className={ui.group}>
+        <label htmlFor="camera-sync" className={ui.label}>
           Sync {offset > 0 ? `+${offset}` : offset} ms
         </label>
         <input
@@ -347,7 +345,7 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
             ctx.applyLive((ed) => ops.setCameraOffset(ed, ms));
           }}
         />
-        <p className="text-[11px] text-muted-dim">Negative pulls the camera earlier than the screen.</p>
+        <p className={ui.hint}>Negative pulls the camera earlier than the screen.</p>
       </div>
     </div>
   );

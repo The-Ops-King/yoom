@@ -1,11 +1,24 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import { Inter, Inter_Tight, JetBrains_Mono } from "next/font/google";
 import { appUrl } from "@/lib/env";
 import "./globals.css";
 
-const jakarta = Plus_Jakarta_Sans({
+const inter = Inter({
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["300", "400", "500"],
+  variable: "--font-inter",
+});
+
+const interTight = Inter_Tight({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-inter-tight",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-jetbrains-mono",
 });
 
 export const metadata: Metadata = {
@@ -20,8 +33,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
-      <body className={`${jakarta.className} bg-background text-foreground min-h-screen antialiased selection:bg-accent/20 selection:text-foreground`}>
+    <html
+      lang="en"
+      className={`dark ${inter.variable} ${interTight.variable} ${jetbrainsMono.variable}`}
+    >
+      <body className="font-sans bg-background text-foreground min-h-screen antialiased selection:bg-accent/20 selection:text-foreground">
         {children}
       </body>
     </html>

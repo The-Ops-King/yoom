@@ -64,7 +64,7 @@ export function DeviceSelector({
 
   return (
     <div className="space-y-1.5">
-      <label className="text-xs font-medium text-muted-dim uppercase tracking-wider">
+      <label className="text-xs font-medium text-muted-dim font-mono uppercase tracking-[0.14em]">
         {label}
       </label>
       <select

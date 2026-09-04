@@ -38,10 +38,18 @@ export function appUrl(): string {
   return "http://localhost:3000";
 }
 
+/**
+ * Where share links live when nothing says otherwise. Links are handed to
+ * other people, so they must never point at whatever origin happens to be
+ * serving the app (a dev server, a Vercel preview): `jtylerray.com/v/*`
+ * rewrites to the app, and that is the address the world gets.
+ */
+export const DEFAULT_SHARE_BASE_URL = "https://jtylerray.com";
+
 /** Public origin that share links are built from. */
 export function shareBaseUrl(): string {
   const explicit = publicEnv().NEXT_PUBLIC_SHARE_BASE_URL || undefined;
-  return explicit ? stripTrailingSlash(explicit) : appUrl();
+  return explicit ? stripTrailingSlash(explicit) : DEFAULT_SHARE_BASE_URL;
 }
 
 /** Extra origins permitted to call the public view/stream/thumb routes. */
