@@ -12,6 +12,7 @@ import {
   type OverlayType,
 } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
+import { packRows } from "@/lib/editor/lanes";
 import { contentRect } from "../content-rect";
 import type { StagingContext, Tool } from "../types";
 import * as ui from "../ui";
@@ -77,6 +78,9 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
   const { edits, selected, tool } = ctx;
   const index = selected?.kind === "overlay" ? selected.index : -1;
   const overlay = index >= 0 ? edits.overlays[index] : undefined;
+  // Same call the timeline makes, over the same array — so the row this panel
+  // reports always matches the row the overlay actually packs into there.
+  const { rows, count } = packRows(edits.overlays);
   /**
    * `addOverlay` silently refuses past the cap, so arming a tool that cannot
    * place anything would look like the preview had stopped responding. Say it
@@ -176,6 +180,14 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                 onChange={(e) => ctx.apply((ed) => ops.updateOverlay(ed, index, { end: num(e.target.value, overlay.end) }))}
               />
             </label>
+          </div>
+
+          {/* `overlay` is only set once `index` is in range, so `rows[index]` is always defined. */}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] text-muted">Row</span>
+            <span className="font-mono text-[11px] tabular-nums text-foreground">
+              {rows[index] + 1} of {count}
+            </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
