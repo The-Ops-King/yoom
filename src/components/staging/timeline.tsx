@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { OverlayType, VideoEdits } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
+import { packRows } from "@/lib/editor/lanes";
 import { formatElapsed } from "@/components/recorder/preview-stage";
 import type { StagingContext } from "./types";
 
@@ -197,8 +198,14 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
   const camera = edits.camera;
   // The clicks lane exists only for a take the desktop hook actually saw.
   const clicks = edits.clicks ?? [];
+
+  // Zooms and overlays share rows when they do not overlap in time: seven
+  // non-overlapping overlays are one row, not seven lanes. `rows[i]` is the row
+  // for `edits.overlays[i]`, so selection and drag indices are unaffected.
+  const zoomLanes = packRows(edits.zooms);
+  const overlayLanes = packRows(edits.overlays);
   const laneCount =
-    edits.zooms.length + edits.overlays.length + (camera ? 1 : 0) + (clicks.length > 0 ? 1 : 0);
+    zoomLanes.count + overlayLanes.count + (camera ? 1 : 0) + (clicks.length > 0 ? 1 : 0);
 
   return (
     <div className="space-y-1">
@@ -282,43 +289,46 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
             laneCount > 8 ? "max-h-[184px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""
           }`}
         >
-          {edits.zooms.map((z, i) => (
-            <div key={`zoom-lane-${i}`} className={`${laneRow} ${isSel("zoom", i) ? "border-accent" : "border-border"}`}>
-              <span className={laneLabel}>
-                {z.kind === "follow" ? "Follow" : "Zoom"} {i + 1}
-              </span>
-              <div
-                className={`${laneClip} z-30 cursor-grab ${
-                  isSel("zoom", i) ? "border-sky-300 bg-sky-500/50" : "border-sky-500/50 bg-sky-500/25"
-                }`}
-                style={{ left: pct(z.start), width: pct(z.end - z.start) }}
-                onPointerDown={(e) => {
-                  ctx.setSelected({ kind: "zoom", index: i });
-                  ctx.openSection?.("zoom");
-                  begin(e, {
-                    kind: "zoom",
-                    index: i,
-                    edge: "body",
-                    grabT: timeAt(e.clientX),
-                    start: z.start,
-                    end: z.end,
-                    from: edits,
-                  });
-                }}
-              >
-                <div
-                  className={`${handle} left-0`}
-                  onPointerDown={(e) =>
-                    begin(e, { kind: "zoom", index: i, edge: "start", grabT: 0, start: z.start, end: z.end, from: edits })
-                  }
-                />
-                <div
-                  className={`${handle} right-0`}
-                  onPointerDown={(e) =>
-                    begin(e, { kind: "zoom", index: i, edge: "end", grabT: 0, start: z.start, end: z.end, from: edits })
-                  }
-                />
-              </div>
+          {Array.from({ length: zoomLanes.count }, (_, row) => (
+            <div key={`zoom-row-${row}`} className={`${laneRow} border-border`}>
+              <span className={laneLabel}>{row === 0 ? "Zoom" : ""}</span>
+              {edits.zooms.map((z, i) =>
+                zoomLanes.rows[i] !== row ? null : (
+                  <div
+                    key={`zoom-${i}`}
+                    className={`${laneClip} z-30 cursor-grab ${
+                      isSel("zoom", i) ? "border-sky-300 bg-sky-500/50" : "border-sky-500/50 bg-sky-500/25"
+                    }`}
+                    style={{ left: pct(z.start), width: pct(z.end - z.start) }}
+                    onPointerDown={(e) => {
+                      ctx.setSelected({ kind: "zoom", index: i });
+                      ctx.openSection?.("zoom");
+                      begin(e, {
+                        kind: "zoom",
+                        index: i,
+                        edge: "body",
+                        grabT: timeAt(e.clientX),
+                        start: z.start,
+                        end: z.end,
+                        from: edits,
+                      });
+                    }}
+                  >
+                    <div
+                      className={`${handle} left-0`}
+                      onPointerDown={(e) =>
+                        begin(e, { kind: "zoom", index: i, edge: "start", grabT: 0, start: z.start, end: z.end, from: edits })
+                      }
+                    />
+                    <div
+                      className={`${handle} right-0`}
+                      onPointerDown={(e) =>
+                        begin(e, { kind: "zoom", index: i, edge: "end", grabT: 0, start: z.start, end: z.end, from: edits })
+                      }
+                    />
+                  </div>
+                ),
+              )}
             </div>
           ))}
 
@@ -407,42 +417,47 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
             </div>
           )}
 
-          {edits.overlays.map((o, i) => (
-            <div key={`ov-lane-${i}`} className={`${laneRow} ${isSel("overlay", i) ? "border-accent" : "border-border"}`}>
-              <span className={laneLabel}>{overlayLabel(i)}</span>
-              <div
-                title={o.type}
-                className={`${laneClip} z-30 cursor-grab ${
-                  isSel("overlay", i) ? "border-emerald-200 bg-emerald-500/50" : "border-emerald-500/50 bg-emerald-500/25"
-                }`}
-                style={{ left: pct(o.start), width: pct(o.end - o.start) }}
-                onPointerDown={(e) => {
-                  ctx.setSelected({ kind: "overlay", index: i });
-                  ctx.openSection?.("overlays");
-                  begin(e, {
-                    kind: "overlay",
-                    index: i,
-                    edge: "body",
-                    grabT: timeAt(e.clientX),
-                    start: o.start,
-                    end: o.end,
-                    from: edits,
-                  });
-                }}
-              >
-                <div
-                  className={`${handle} left-0`}
-                  onPointerDown={(e) =>
-                    begin(e, { kind: "overlay", index: i, edge: "start", grabT: 0, start: o.start, end: o.end, from: edits })
-                  }
-                />
-                <div
-                  className={`${handle} right-0`}
-                  onPointerDown={(e) =>
-                    begin(e, { kind: "overlay", index: i, edge: "end", grabT: 0, start: o.start, end: o.end, from: edits })
-                  }
-                />
-              </div>
+          {Array.from({ length: overlayLanes.count }, (_, row) => (
+            <div key={`ov-row-${row}`} className={`${laneRow} border-border`}>
+              <span className={laneLabel}>{row === 0 ? "Overlays" : ""}</span>
+              {edits.overlays.map((o, i) =>
+                overlayLanes.rows[i] !== row ? null : (
+                  <div
+                    key={`ov-${i}`}
+                    title={`${overlayLabel(i)} — ${o.type}`}
+                    className={`${laneClip} z-30 cursor-grab ${
+                      isSel("overlay", i) ? "border-emerald-200 bg-emerald-500/50" : "border-emerald-500/50 bg-emerald-500/25"
+                    }`}
+                    style={{ left: pct(o.start), width: pct(o.end - o.start) }}
+                    onPointerDown={(e) => {
+                      ctx.setSelected({ kind: "overlay", index: i });
+                      ctx.openSection?.("overlays");
+                      begin(e, {
+                        kind: "overlay",
+                        index: i,
+                        edge: "body",
+                        grabT: timeAt(e.clientX),
+                        start: o.start,
+                        end: o.end,
+                        from: edits,
+                      });
+                    }}
+                  >
+                    <div
+                      className={`${handle} left-0`}
+                      onPointerDown={(e) =>
+                        begin(e, { kind: "overlay", index: i, edge: "start", grabT: 0, start: o.start, end: o.end, from: edits })
+                      }
+                    />
+                    <div
+                      className={`${handle} right-0`}
+                      onPointerDown={(e) =>
+                        begin(e, { kind: "overlay", index: i, edge: "end", grabT: 0, start: o.start, end: o.end, from: edits })
+                      }
+                    />
+                  </div>
+                ),
+              )}
             </div>
           ))}
         </div>
