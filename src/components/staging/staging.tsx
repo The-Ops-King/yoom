@@ -12,6 +12,7 @@ import { defaultRecordingTitle } from "@/lib/recording/upload";
 import type { BackgroundConfig } from "@/lib/recording/types";
 import { Preview } from "./preview";
 import { Timeline } from "./timeline";
+import { Transport } from "./transport";
 import { Rail, type RailSection } from "./rail";
 import { TopBar } from "./top-bar";
 import type { Details, Selection, StagingContext, StagingProps, Tool } from "./types";
@@ -116,7 +117,7 @@ export function Staging(props: StagingProps) {
     () => draft?.details ?? { title: defaultRecordingTitle(), description: "", slug: "", thumbnailAt: 1 },
   );
 
-  const [section, setSection] = useState<RailSection>("trim");
+  const [section, setSection] = useState<RailSection>("camera");
   const [tool, setTool] = useState<Tool>("select");
   const [selected, setSelected] = useState<Selection>(null);
   const [inPoint, setInPoint] = useState<number | null>(null);
@@ -446,6 +447,7 @@ export function Staging(props: StagingProps) {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-3">
           <Preview ctx={ctx} />
+          <Transport ctx={ctx} />
           <Timeline ctx={ctx} />
         </div>
         <Rail ctx={ctx} section={section} onSection={setSection} />

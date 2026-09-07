@@ -18,6 +18,12 @@ import * as ui from "../ui";
 const KEYS_RECT: Rect = { x: 0.35, y: 0.86, w: 0.3, h: 0.08 };
 /** How long a key-tracking range covers when it is added from here. */
 const KEYS_SPAN_S = 5;
+/** Seconds a marker's one-click cut spans. */
+const MARKER_CUT_S = 2;
+
+function fmt(t: number): string {
+  return `${t.toFixed(1)}s`;
+}
 
 
 const STYLES: { id: CursorStyle; label: string; hint: string }[] = [
@@ -171,6 +177,47 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
           box on the preview to re-place the badge.
         </p>
       </div>
+
+      {edits.markers.length > 0 && (
+        <div className={ui.group}>
+          <span className={ui.label}>Markers ({edits.markers.length})</span>
+          <ul className={ui.group}>
+            {edits.markers.map((m) => (
+              <li key={m.t} className="flex items-center justify-between gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => player.seek(m.t)}
+                  className="flex-1 text-left text-[11px] text-muted hover:text-foreground"
+                >
+                  {m.label ?? fmt(m.t)}
+                </button>
+                <button
+                  type="button"
+                  className={ui.btn}
+                  onClick={() =>
+                    ctx.apply((e) =>
+                      ops.addCut(e, { start: Math.max(0, m.t - MARKER_CUT_S), end: m.t }),
+                    )
+                  }
+                >
+                  Cut 2 s before
+                </button>
+                <button
+                  type="button"
+                  className={ui.btn}
+                  onClick={() =>
+                    ctx.apply((e) =>
+                      ops.addCut(e, { start: m.t, end: Math.min(duration, m.t + MARKER_CUT_S) }),
+                    )
+                  }
+                >
+                  Cut 2 s after
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/*
         Silence from the input hook is normal and carries no error, so the one

@@ -2,7 +2,6 @@
 
 import type { StagingContext } from "./types";
 import * as ui from "./ui";
-import { TrimSection } from "./sections/trim";
 import { CameraSection } from "./sections/camera";
 import { FrameSection } from "./sections/frame";
 import { ZoomSection } from "./sections/zoom";
@@ -11,7 +10,6 @@ import { OverlaysSection } from "./sections/overlays";
 import { DetailsForm } from "./details-form";
 
 export type RailSection =
-  | "trim"
   | "camera"
   | "frame"
   | "zoom"
@@ -20,7 +18,6 @@ export type RailSection =
   | "details";
 
 const SECTIONS: { id: RailSection; label: string }[] = [
-  { id: "trim", label: "Trim & cut" },
   { id: "camera", label: "Camera" },
   { id: "frame", label: "Frame" },
   { id: "zoom", label: "Zoom" },
@@ -69,7 +66,6 @@ export function Rail({
             </button>
             {section === s.id && (
               <div className="border-t border-border p-3">
-                {s.id === "trim" && <TrimSection ctx={ctx} />}
                 {s.id === "camera" && <CameraSection ctx={ctx} />}
                 {s.id === "frame" && <FrameSection ctx={ctx} />}
                 {s.id === "zoom" && <ZoomSection ctx={ctx} />}
