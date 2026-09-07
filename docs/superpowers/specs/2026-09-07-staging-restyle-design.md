@@ -61,11 +61,13 @@ The rail stays on the **right**, where it is today. Everything else follows
 Recordly's shape: a top bar, an icon strip showing one panel at a time, a
 transport row, and a full-width multi-lane timeline.
 
-### Why one panel at a time
+### Why an icon strip
 
-Today's rail is an accordion of eight sections in 320px, several of which can be
-open at once. Showing exactly one panel is the single biggest calm-per-pixel win
-available, and it is independent of which side the rail sits on.
+`rail.tsx` already shows exactly one section at a time (`section === s.id`), so
+exclusivity is not the win. The win is space and scanning: eight always-visible
+header rows plus their `+`/`–` affordances consume vertical room and give every
+section equal weight whether or not you are using it. An icon strip collapses
+those eight rows into one 36px column and lets the open panel have the height.
 
 ---
 
@@ -93,10 +95,14 @@ resolved URL shown in the top bar.
 
 ### Selection drives the rail
 
-Selecting an object in the preview or timeline opens its panel: click the camera
-bubble → Camera; click an overlay → Overlays with that overlay selected. The
-existing `Selection` type (`{kind: "overlay" | "cut" | "keyframe" | "zoom", index}`)
-already carries what this needs; it gains `"camera"` and `"click"` kinds.
+**Already built.** `timeline.tsx` calls `ctx.setSelected(...)` then
+`ctx.openSection?.("zoom" | "overlays")` on pointer-down, and `staging.tsx:395`
+wires `openSection` to `setSection`. Selecting a timeline object already opens
+its section.
+
+What is missing: the same behaviour from the **preview** (clicking the camera
+bubble or an overlay in the canvas), and `"camera"` / `"click"` selection kinds.
+That is an extension of a working mechanism, not new machinery.
 
 ---
 
@@ -104,13 +110,25 @@ already carries what this needs; it gains `"camera"` and `"click"` kinds.
 
 Five lane groups, top to bottom: **Clip, Zoom, Camera, Clicks, Overlays.**
 
-- **Clip** — the take, with cuts drawn as hatched regions. Trim handles at both ends.
-- **Zoom** — `Zoom[]` blocks labelled with their factor. `kind: "follow"` blocks
-  get a distinct marker from `static`.
-- **Camera** — a diamond per `CameraKeyframe`. Dragging moves `t`.
-- **Clicks** — one dot per `ClickMark`. Filled when `on`, hollow when off; clicking
-  toggles. This is the click-highlight selection, and Recordly has no equivalent.
-- **Overlays** — one or more packed rows, below.
+**Most of this already exists.** `timeline.tsx` renders the clip track with trim
+handles and cut regions, a camera-keyframe lane, a clicks lane whose dots toggle
+`ClickMark.on` (with an "All off" control), and it already scrolls past eight
+lanes. The click-highlight selection Recordly lacks is **built and working**.
+
+The one real change is how zooms and overlays get their rows:
+
+| | Today | After |
+|---|---|---|
+| Zooms | one lane per zoom | packed rows |
+| Overlays | one lane per overlay | packed rows |
+| `laneCount` | `zooms.length + overlays.length + …` | `zoomRows + overlayRows + …` |
+
+Seven non-overlapping overlays currently produce seven lanes. Packed, they
+produce one. That is the whole point of the change, and it applies to zooms for
+free since both are `{start, end}` intervals.
+
+Everything else in the lane stack — labels, drag handles, selection borders,
+the scroll threshold — stays as built.
 
 ### Overlay row packing
 
@@ -132,9 +150,10 @@ earlier row.
 Recomputed whenever an overlay is added, removed, moved or resized.
 
 **No cap on rows.** `MAX_OVERLAYS` is 64, so a pathological project could produce
-many rows; past 8 the timeline body scrolls vertically. Nothing is hidden and
-there are no special cases. The selected overlay's row is reported in its panel
-as `Row 2 of 3`.
+many rows; past 8 the lane stack scrolls — which `timeline.tsx` already does at
+`laneCount > 8`, so this needs no new behaviour, just a `laneCount` that counts
+rows instead of items. The selected overlay's row is reported in its panel as
+`Row 2 of 3`.
 
 ---
 
@@ -283,32 +302,41 @@ This is the only data-model change in the project.
 
 ## Phasing
 
-Each phase leaves the editor working.
+Each phase leaves the editor working. Revised down after reading
+`timeline.tsx` — the lane stack, clicks lane and selection-opens-section wiring
+already exist, so what were six phases are four.
 
-1. **Shell** — top bar, icon strip, single-panel rail, transport row. Existing
-   section components render unchanged inside the new frame.
-2. **Control vocabulary** — segmented controls, filled-bar sliders, swatch grids
+1. **Row packing** — `packRows()` plus its tests, wired into the zoom and overlay
+   lanes and `laneCount`. Pure logic, no layout change, immediately visible win.
+2. **Shell** — top bar (undo/redo, title, slug, Discard, Upload), icon strip,
+   single-panel rail, transport row. Existing sections render unchanged inside
+   it. Trim and Upload retire as sections here.
+3. **Control vocabulary** — segmented controls, filled-bar sliders, swatch grids
    in `ui.ts`; panels adopt them. Shadow becomes a slider, with the migration.
-3. **Timeline** — lane rendering, Clip with cuts, Zoom, Camera, Clicks lanes.
-   Trim & cut retires here.
-4. **Overlay row packing** — the greedy assignment, scrolling lane area, row readout.
-5. **Selection wiring** — preview and timeline selection opens the matching panel.
-6. **Sticky defaults** — extend `RecorderSettings`, wire panels, reset semantics.
+   Camera gains its `pan` pad and `cameraOffsetMs` slider.
+4. **Sticky defaults** — extend `RecorderSettings`, wire panels, reset semantics.
+
+Preview-side selection (clicking the bubble in the canvas opens Camera) rides
+along with phase 2.
 
 ---
 
 ## Testing
 
-- **Unit** — row packing is the piece most worth testing directly: minimality,
-  row reuse after a gap, ties where one overlay starts exactly as another ends,
-  and stability of assignment under add/move/resize. `sanitizeFrame`'s shadow
-  migration gets cases for `true`, `false`, in-range, out-of-range and garbage.
-  Sticky-default merge and sanitize follow the existing `settings.test.ts` shape.
-- **Component** — panels render every control from a given `VideoEdits`, and
-  selection opens the right panel.
-- **Manual** — anything touching real media: camera sync offset against a real
-  two-file take, background rendering, and the packed lanes with genuinely
-  overlapping overlays.
+`vitest.config.mts` runs `environment: "node"` over `src/**/*.test.ts` — **`.tsx`
+is not included and there are no component tests in this repo.** Rather than bolt
+jsdom onto the config for this work, testable logic gets extracted into `.ts`
+modules and tested there, and the UI is verified by running it.
+
+- **Unit** — `packRows()` is the piece most worth testing directly: minimality,
+  row reuse after a gap, touching intervals (`a.end === b.start` shares a row),
+  zero-length spans, and order stability under add/move/resize.
+  `sanitizeFrame`'s shadow migration gets cases for `true`, `false`, in-range,
+  out-of-range and garbage. Sticky-default merge and sanitize follow the existing
+  `settings.test.ts` shape.
+- **Manual** — everything visual: the new shell, the panels, and anything
+  touching real media (camera sync offset against a real two-file take,
+  background rendering, packed lanes with genuinely overlapping overlays).
 
 ---
 
