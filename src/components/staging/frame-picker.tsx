@@ -11,6 +11,7 @@ import {
   removeWallpaper,
   type WallpaperMeta,
 } from "@/lib/wallpapers";
+import { Slider } from "./slider";
 import * as ui from "./ui";
 
 interface FramePickerProps {
@@ -149,30 +150,31 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
 
       {frame.enabled && (
         <>
-          <div className="grid grid-cols-4 gap-1.5">
-            {FRAME_PRESETS.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                title={preset.label}
-                aria-label={`Frame background ${preset.label}`}
-                onClick={() =>
-                  onChange({
-                    background: { kind: "image", src: preset.src, presetId: preset.id },
-                  })
-                }
-                style={{ background: preset.swatch }}
-                className={`group relative h-10 overflow-hidden rounded-md border transition-all ${
-                  !selectedWallpaper && selectedPreset === preset.id
-                    ? "border-accent ring-2 ring-accent/40"
-                    : "border-border hover:border-accent/50"
-                }`}
-              >
-                <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/45 px-1 py-0.5 text-[9px] leading-tight text-white opacity-0 transition-opacity group-hover:opacity-100">
-                  {preset.label}
-                </span>
-              </button>
-            ))}
+          <div className={`${ui.swatchGrid} grid-cols-8`}>
+            {FRAME_PRESETS.map((preset) => {
+              const isOn = !selectedWallpaper && selectedPreset === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  title={preset.label}
+                  aria-label={`Frame background ${preset.label}`}
+                  onClick={() =>
+                    onChange({
+                      background: { kind: "image", src: preset.src, presetId: preset.id },
+                    })
+                  }
+                  style={{ background: preset.swatch }}
+                  className={`group relative overflow-hidden transition-colors ${
+                    isOn ? ui.swatchOn : `${ui.swatch} hover:border-accent/50`
+                  }`}
+                >
+                  <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/45 px-0.5 py-0.5 text-[8px] leading-tight text-white opacity-0 transition-opacity group-hover:opacity-100">
+                    {preset.label}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           <div className="space-y-1.5">
@@ -237,70 +239,51 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
-            {COLOR_SWATCHES.slice(0, 5).map((color) => (
-              <button
-                key={color}
-                type="button"
-                aria-label={`Frame colour ${color}`}
-                onClick={() => onChange({ background: { kind: "color", color } })}
-                style={{ background: color }}
-                className={`h-6 w-6 rounded-md border transition-all ${
-                  frame.background.kind === "color" && frame.background.color === color
-                    ? "border-accent ring-2 ring-accent/40"
-                    : "border-border"
-                }`}
-              />
-            ))}
+          <div className={`${ui.swatchGrid} grid-cols-5`}>
+            {COLOR_SWATCHES.slice(0, 5).map((color) => {
+              const isOn = frame.background.kind === "color" && frame.background.color === color;
+              return (
+                <button
+                  key={color}
+                  type="button"
+                  aria-label={`Frame colour ${color}`}
+                  onClick={() => onChange({ background: { kind: "color", color } })}
+                  style={{ background: color }}
+                  className={`transition-colors ${isOn ? ui.swatchOn : `${ui.swatch} hover:border-accent/50`}`}
+                />
+              );
+            })}
           </div>
 
-          <label className={ui.sliderRow}>
-            <span className={ui.sliderName}>Padding</span>
-            <input
-              type="range"
-              min={0}
-              max={0.2}
-              step={0.005}
-              value={frame.padding}
-              onChange={(e) => onChange({ padding: Number(e.target.value) })}
-              className={`${ui.slider} accent-[var(--color-accent)]`}
-            />
-            <span className={ui.sliderValue}>
-              {Math.round(frame.padding * 100)}%
-            </span>
-          </label>
+          <Slider
+            name="Padding"
+            value={frame.padding}
+            min={0}
+            max={0.2}
+            step={0.005}
+            format={(v) => `${Math.round(v * 100)}%`}
+            onChange={(v) => onChange({ padding: v })}
+          />
 
-          <label className={ui.sliderRow}>
-            <span className={ui.sliderName}>Radius</span>
-            <input
-              type="range"
-              min={0}
-              max={0.05}
-              step={0.002}
-              value={frame.radius}
-              onChange={(e) => onChange({ radius: Number(e.target.value) })}
-              className={`${ui.slider} accent-[var(--color-accent)]`}
-            />
-            <span className={ui.sliderValue}>
-              {Math.round(frame.radius * 1000) / 10}%
-            </span>
-          </label>
+          <Slider
+            name="Radius"
+            value={frame.radius}
+            min={0}
+            max={0.05}
+            step={0.002}
+            format={(v) => `${Math.round(v * 1000) / 10}%`}
+            onChange={(v) => onChange({ radius: v })}
+          />
 
-          <label className={ui.sliderRow} aria-label="Shadow strength">
-            <span className={ui.sliderName}>Shadow</span>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={frame.shadow}
-              onChange={(e) => onChange({ shadow: Number(e.target.value) })}
-              className={`${ui.slider} accent-[var(--color-accent)]`}
-            />
-            <span className={ui.sliderValue}>
-              {Math.round(frame.shadow * 100)}%
-            </span>
-          </label>
+          <Slider
+            name="Shadow"
+            value={frame.shadow}
+            min={0}
+            max={1}
+            step={0.01}
+            format={(v) => `${Math.round(v * 100)}%`}
+            onChange={(v) => onChange({ shadow: v })}
+          />
         </>
       )}
     </div>
