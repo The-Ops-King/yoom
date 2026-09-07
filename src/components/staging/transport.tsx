@@ -4,10 +4,6 @@ import * as ops from "@/lib/editor/edit-ops";
 import type { StagingContext } from "./types";
 import * as ui from "./ui";
 
-function fmt(t: number): string {
-  return `${t.toFixed(1)}s`;
-}
-
 /**
  * The transport row: playhead-scoped trim controls on the left, play state and
  * time on the right. Sits between the preview and the timeline rather than in
@@ -35,7 +31,7 @@ export function Transport({ ctx }: { ctx: StagingContext }) {
     <div
       role="toolbar"
       aria-label="Playback transport"
-      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2"
+      className={`flex flex-wrap items-center justify-between gap-3 ${ui.bar}`}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <div className="flex flex-wrap gap-1.5">
@@ -64,12 +60,12 @@ export function Transport({ ctx }: { ctx: StagingContext }) {
         </div>
 
         <p className={ui.hint} aria-live="polite">
-          In {inPoint === null ? "—" : fmt(inPoint)} · Out {outPoint === null ? "—" : fmt(outPoint)}
+          In {inPoint === null ? "—" : ui.fmt(inPoint)} · Out {outPoint === null ? "—" : ui.fmt(outPoint)}
         </p>
 
         <div className="flex flex-wrap items-center gap-2">
           <span className="min-w-0 truncate text-[11px] text-muted">
-            Trim {fmt(trim.start)} → {fmt(trim.end)}
+            Trim {ui.fmt(trim.start)} → {ui.fmt(trim.end)}
           </span>
           <button
             type="button"
@@ -84,7 +80,7 @@ export function Transport({ ctx }: { ctx: StagingContext }) {
       </div>
 
       <div className="flex shrink-0 items-center gap-2 text-[11px] tabular-nums text-muted">
-        <span>{fmt(player.editedTime)}</span>
+        <span>{ui.fmt(player.editedTime)}</span>
         <button
           type="button"
           aria-label={player.playing ? "Pause" : "Play"}
@@ -93,7 +89,7 @@ export function Transport({ ctx }: { ctx: StagingContext }) {
         >
           {player.playing ? "Pause" : "Play"}
         </button>
-        <span>{fmt(player.editedDuration)}</span>
+        <span>{ui.fmt(player.editedDuration)}</span>
       </div>
     </div>
   );

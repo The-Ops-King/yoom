@@ -230,7 +230,7 @@ export function DetailsForm({ ctx }: { ctx: StagingContext }) {
         <button
           type="button"
           onClick={() => setDetails((d) => ({ ...d, thumbnailAt: player.editedTime }))}
-          className="rounded-md border border-border bg-surface-raised px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground"
+          className={ui.btn}
         >
           Use this frame for the thumbnail
         </button>

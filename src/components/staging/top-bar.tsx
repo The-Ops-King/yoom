@@ -41,7 +41,7 @@ export function TopBar({ ctx, shareBase }: { ctx: StagingContext; shareBase: str
   const { disabled, reason } = uploadGate(ctx);
 
   return (
-    <header className="space-y-2 rounded-lg border border-border bg-surface px-3 py-2">
+    <header className={`space-y-2 ${ui.bar}`}>
       <div className="flex items-center gap-3">
         <div className="flex shrink-0 gap-1">
           <button type="button" disabled={!ctx.canUndo} onClick={ctx.undo} className={ui.btn}>
