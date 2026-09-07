@@ -237,7 +237,10 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                       aria-pressed={on}
                       className={on ? ui.swatchOn : ui.swatch}
                       style={{ background: hex }}
-                      onClick={() => ctx.apply((ed) => ops.updateOverlay(ed, index, { color: hex }))}
+                      onClick={() => {
+                        ctx.apply((ed) => ops.updateOverlay(ed, index, { color: hex }));
+                        ctx.setStagingDefaults({ overlayColor: hex });
+                      }}
                     />
                   );
                 })}
@@ -247,7 +250,10 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                   aria-label="Custom colour"
                   value={overlay.color ?? DEFAULT_COLOR}
                   className={`${ui.swatch} cursor-pointer border-0 p-0`}
-                  onChange={(e) => ctx.apply((ed) => ops.updateOverlay(ed, index, { color: e.target.value }))}
+                  onChange={(e) => {
+                    ctx.apply((ed) => ops.updateOverlay(ed, index, { color: e.target.value }));
+                    ctx.setStagingDefaults({ overlayColor: e.target.value });
+                  }}
                 />
               </div>
             </div>
@@ -275,7 +281,10 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                   max={MAX_OVERLAY_THICKNESS}
                   step={0.002}
                   format={thicknessFmt}
-                  onChange={(v) => ctx.apply((ed) => ops.updateOverlay(ed, index, { thickness: v }))}
+                  onChange={(v) => {
+                    ctx.apply((ed) => ops.updateOverlay(ed, index, { thickness: v }));
+                    ctx.setStagingDefaults({ overlayThickness: v });
+                  }}
                 />
               </div>
             )}
@@ -338,7 +347,10 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                       type="button"
                       aria-pressed={on}
                       className={on ? ui.segItemOn : ui.segItem}
-                      onClick={() => ctx.apply((ed) => ops.updateOverlay(ed, index, { style: s.id }))}
+                      onClick={() => {
+                        ctx.apply((ed) => ops.updateOverlay(ed, index, { style: s.id }));
+                        ctx.setStagingDefaults({ arrowStyle: s.id });
+                      }}
                     >
                       {s.label}
                     </button>

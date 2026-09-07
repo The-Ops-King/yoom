@@ -8,8 +8,9 @@ import * as ops from "@/lib/editor/edit-ops";
 import { canRedo, canUndo, createHistory, push, redo, undo, type History } from "@/lib/editor/undo";
 import { useStagingPlayer } from "@/lib/editor/use-staging-player";
 import { DEFAULT_RAMP_S } from "@/lib/editor/zoom";
+import { loadSettings, persistStaging } from "@/lib/recording/settings";
 import { defaultRecordingTitle } from "@/lib/recording/upload";
-import type { BackgroundConfig } from "@/lib/recording/types";
+import type { BackgroundConfig, StagingDefaults } from "@/lib/recording/types";
 import { Preview } from "./preview";
 import { Timeline } from "./timeline";
 import { Transport } from "./transport";
@@ -32,6 +33,8 @@ const SECOND_IN_FRAMES = 30;
 const PERSIST_DEBOUNCE_MS = 300;
 /** Mirrors the (unexported) `CAP` in `@/lib/editor/undo`; keep the two in step. */
 const HISTORY_CAP = 50;
+/** How long an appearance setting must sit still before it is written back. */
+const STAGING_PERSIST_DEBOUNCE_MS = 400;
 
 type Draft = { edits?: unknown; details?: Details };
 
@@ -70,23 +73,26 @@ function persistableEdits(edits: VideoEdits): VideoEdits {
   return { ...edits, frame: { ...frame, background } };
 }
 
-function initialEdits(p: StagingProps, screenAspect: number): VideoEdits {
+function initialEdits(p: StagingProps, screenAspect: number, staging: StagingDefaults): VideoEdits {
   const base = parseEdits({ version: 1, cuts: [], crop: null, zooms: [], overlays: [], markers: p.markers });
   base.cameraOffsetMs = p.cameraOffsetMs;
   base.frame = p.defaults.frame;
-  // `defaultCameraTrack` hardcodes `mirror: true`; the pre-record checkbox wins.
+  // Shape and mirror seed from the last-used staging appearance, not the
+  // pre-record bubble config: nothing lets the user choose either before
+  // recording, so `p.defaults.bubble.shape`/`.mirror` are always the factory
+  // circle/true and would make the sticky setting look like it does nothing.
   if (p.mode === "screen+camera") {
     base.camera = {
-      ...defaultCameraTrack(p.defaults.bubble.shape, p.defaults.bubble.size, screenAspect),
-      mirror: p.defaults.bubble.mirror,
+      ...defaultCameraTrack(staging.cameraShape, p.defaults.bubble.size, screenAspect),
+      mirror: staging.cameraMirror,
     };
   } else if (p.mode === "camera") {
     // Camera-only has no bubble (the rail hides the Camera section), but the
     // track still has to exist to carry `mirror` into the render — otherwise
     // the export falls back to mirroring unconditionally.
     base.camera = {
-      shape: "circle",
-      mirror: p.defaults.bubble.mirror,
+      shape: staging.cameraShape,
+      mirror: staging.cameraMirror,
       keyframes: [{ t: 0, mode: "full", rect: { x: 0, y: 0, w: 1, h: 1 } }],
     } satisfies CameraTrack;
   } else {
@@ -108,8 +114,16 @@ function initialEdits(p: StagingProps, screenAspect: number): VideoEdits {
 export function Staging(props: StagingProps) {
   const [draft] = useState<Draft | null>(() => readDraft(props.durationMs));
 
+  // The sticky appearance defaults (camera shape/mirror, overlay colour and
+  // thickness, arrow style, click colour and ripple duration): read once at
+  // mount, so a fresh take opens on whatever was last used, and written back
+  // (debounced) whenever a panel below changes one.
+  const [stagingDefaults, setStagingDefaultsState] = useState<StagingDefaults>(
+    () => loadSettings().staging,
+  );
+
   const [history, setHistory] = useState<History<VideoEdits>>(() =>
-    createHistory(draft ? parseEdits(draft.edits) : initialEdits(props, 16 / 9)),
+    createHistory(draft ? parseEdits(draft.edits) : initialEdits(props, 16 / 9, stagingDefaults)),
   );
   const edits = history.present;
 
@@ -151,12 +165,31 @@ export function Staging(props: StagingProps) {
       // Only the screen+camera bubble is aspect-dependent. Camera-only's track
       // is a full-frame mirror carrier — rebuilding it would make it a bubble.
       if (props.mode !== "screen+camera" || !cam || cam.keyframes.length !== 1) return h;
-      // Carry `mirror` over: it came from the pre-record checkbox and
+      // Carry `mirror` over: it came from the sticky staging default and
       // `defaultCameraTrack` would reset it to `true`.
       const rebuilt = { ...defaultCameraTrack(cam.shape, defaultBubbleSize, aspect), mirror: cam.mirror };
       return { ...h, present: ops.setCamera(h.present, rebuilt) };
     });
   }
+
+  /**
+   * Merge a patch into the sticky appearance defaults. Panels call this
+   * alongside the `ops.*` call that actually changes the thing on screen —
+   * this only ever updates the LAST-USED value for the *next* new object, and
+   * is never itself content (see the debounced write below).
+   */
+  const setStagingDefaults = useCallback((patch: Partial<StagingDefaults>) => {
+    setStagingDefaultsState((d) => ({ ...d, ...patch }));
+  }, []);
+
+  // Debounced, and never during render: a slider drag fires many changes, so
+  // only the settled value is written to `localStorage`, from an effect.
+  const stagingDefaultsRef = useRef(stagingDefaults);
+  useEffect(() => {
+    stagingDefaultsRef.current = stagingDefaults;
+    const id = setTimeout(() => persistStaging(stagingDefaultsRef.current), STAGING_PERSIST_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [stagingDefaults]);
 
   // Debounced: a drag pushes a new `edits` on every pointer move, and
   // serialising the whole edit list at 60 Hz is pure jank.
@@ -297,9 +330,20 @@ export function Staging(props: StagingProps) {
   const addOverlayAt = useCallback(
     (type: Overlay["type"], rect: Overlay["rect"], extra?: Partial<Overlay>) => {
       const { start, end } = spanForNew();
-      // `extra` first, so it cannot overwrite the identity fields; `addOverlay`
-      // is what re-derives an arrow's rect from the `from`/`to` it carries.
-      const next = ops.addOverlay(edits, { ...extra, type, start, end, rect });
+      // Inherit the sticky overlay appearance; an explicit `extra` from the
+      // caller (an image's `src`, an arrow's `from`/`to`) still wins. Arrow
+      // style only: `render.ts`'s "line" case never reads it, so seeding it
+      // there would persist a value that does nothing.
+      const styled: Partial<Overlay> = {
+        color: stagingDefaults.overlayColor,
+        thickness: stagingDefaults.overlayThickness,
+        ...(type === "arrow" ? { style: stagingDefaults.arrowStyle } : {}),
+        ...extra,
+      };
+      // Identity fields last, so neither the defaults above nor `extra` can
+      // overwrite them; `addOverlay` is what re-derives an arrow's rect from
+      // the `from`/`to` it carries.
+      const next = ops.addOverlay(edits, { ...styled, type, start, end, rect });
       apply(() => next);
       // `addOverlay` refuses past `MAX_OVERLAYS`: only select what it added.
       if (next.overlays.length > edits.overlays.length) {
@@ -307,7 +351,7 @@ export function Staging(props: StagingProps) {
       }
       setTool("select");
     },
-    [apply, edits, spanForNew],
+    [apply, edits, spanForNew, stagingDefaults],
   );
 
   const addZoomAt = useCallback(
@@ -416,6 +460,8 @@ export function Staging(props: StagingProps) {
       canRedo: canRedo(history),
       undo: () => setHistory(undo),
       redo: () => setHistory(redo),
+      stagingDefaults,
+      setStagingDefaults,
     }),
     [
       edits,
@@ -441,6 +487,8 @@ export function Staging(props: StagingProps) {
       finish,
       discard,
       history,
+      stagingDefaults,
+      setStagingDefaults,
     ],
   );
 

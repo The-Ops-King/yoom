@@ -9,6 +9,7 @@ import type {
   FrameConfig,
   KeySample,
   RecordingMode,
+  StagingDefaults,
 } from "@/lib/recording/types";
 import type { RailSection } from "./rail";
 
@@ -192,4 +193,17 @@ export interface StagingContext {
   canRedo: boolean;
   undo(): void;
   redo(): void;
+  /**
+   * The sticky appearance defaults last used in any take. A panel calls
+   * `setStagingDefaults` alongside the `ops.*` call that changes the thing on
+   * screen; `Staging` debounces the actual write to `localStorage`. Wired so
+   * far: camera shape/mirror (seeded on a fresh take) and overlay colour,
+   * thickness, and arrow style (seeded on a newly placed overlay). `clickColor`
+   * and `clickRippleMs` exist on the stored shape but have no renderer
+   * consumer yet — the click ripple's colour and duration are still the
+   * hardcoded constants in `render-input.ts`, so wiring them here would be a
+   * setting that visibly does nothing.
+   */
+  stagingDefaults: StagingDefaults;
+  setStagingDefaults(patch: Partial<StagingDefaults>): void;
 }

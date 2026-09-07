@@ -180,6 +180,9 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
     // is square in pixels, `rounded` follows the camera aspect, and so on).
     const h = Math.min(1, bubbleHeightFor(shape, cur.rect.w, aspect));
     ctx.apply((e) => ops.upsertCameraKeyframe(e, t, { shape, rect: refit(cur.rect, cur.rect.w, h) }));
+    // Only the take's OPENING shape is appearance — a shape set later on the
+    // timeline is a content decision for this take, not a sticky default.
+    if (t === 0) ctx.setStagingDefaults({ cameraShape: shape });
   };
 
   const setMode = (mode: CameraMode) => atPlayhead({ mode });
@@ -233,6 +236,10 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
           onChange={(e) => {
             const mirror = e.target.checked;
             ctx.apply((ed) => (ed.camera ? ops.setCamera(ed, { ...ed.camera, mirror }) : ed));
+            // Mirror is a track-wide property, not a per-keyframe one, so it is
+            // always the sticky default — there is no "later in the timeline"
+            // case to exclude the way there is for shape.
+            ctx.setStagingDefaults({ cameraMirror: mirror });
           }}
         />
         Mirror the camera
