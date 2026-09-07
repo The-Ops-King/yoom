@@ -54,7 +54,7 @@ describe("packRows", () => {
   it("handles zero-length spans", () => {
     expect(packRows([span(3, 3), span(3, 3)])).toEqual({
       rows: [0, 0],
-      count: 0,
+      count: 1,
     });
   });
 
@@ -88,6 +88,22 @@ describe("packRows", () => {
       packRows([span(0, 5), span(7, 3)])
     ).toEqual({
       rows: [0, 0],
+      count: 1,
+    });
+  });
+
+  it("does not let a malformed span poison a row for later spans", () => {
+    // The NaN span occupies no row, so the two well-formed spans — which do not
+    // overlap each other — must still share row 0.
+    expect(packRows([span(0, NaN), span(1, 5), span(6, 9)])).toEqual({
+      rows: [0, 0, 0],
+      count: 1,
+    });
+  });
+
+  it("treats an unbounded span as malformed rather than letting it hold a row", () => {
+    expect(packRows([span(0, Infinity), span(10, 20), span(30, 40)])).toEqual({
+      rows: [0, 0, 0],
       count: 1,
     });
   });

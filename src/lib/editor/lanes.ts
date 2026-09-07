@@ -14,9 +14,11 @@ export type Span = { start: number; end: number };
  * Touching spans share a row: an overlay ending exactly where the next begins
  * never draws over it.
  *
- * Malformed spans (where `!(end > start)`, including NaN, Infinity, or inverted
- * ranges) are assigned to row 0 and excluded from packing, so they never
- * widen the timeline. This prevents silent row leaks from poisoned data.
+ * Zero-length spans (start === end) are valid and pack normally. Malformed spans
+ * — where either endpoint is non-finite (NaN, Infinity, -Infinity) or end < start
+ * — are assigned to row 0 and excluded from packing, so they never widen the
+ * timeline. This prevents silent row leaks from poisoned data. (This rule diverges
+ * from cuts.ts deliberately: we keep zero-length spans, which cuts does not.)
  *
  * The result is indexed to match `spans`, NOT the sorted order, so callers can
  * do `rows[i]` against their own array.
@@ -34,7 +36,11 @@ export function packRows(
 
   for (const { span, index } of order) {
     // Malformed spans get row 0 and are excluded from packing.
-    if (!(span.end > span.start)) {
+    const malformed =
+      !Number.isFinite(span.start) ||
+      !Number.isFinite(span.end) ||
+      span.end < span.start;
+    if (malformed) {
       rows[index] = 0;
       continue;
     }
