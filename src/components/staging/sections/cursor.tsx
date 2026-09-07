@@ -21,11 +21,6 @@ const KEYS_SPAN_S = 5;
 /** Seconds a marker's one-click cut spans. */
 const MARKER_CUT_S = 2;
 
-function fmt(t: number): string {
-  return `${t.toFixed(1)}s`;
-}
-
-
 const STYLES: { id: CursorStyle; label: string; hint: string }[] = [
   { id: "none", label: "None", hint: "Draw nothing over the capture" },
   { id: "real", label: "Real", hint: "Keep the cursor the capture recorded" },
@@ -76,7 +71,7 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
     <div className={ui.section}>
       <div className={ui.group}>
         <span className={ui.label}>Cursor</span>
-        <div role="radiogroup" aria-label="Cursor style" className="flex flex-wrap gap-1.5">
+        <div role="radiogroup" aria-label="Cursor style" className={ui.seg}>
           {STYLES.map((s) => {
             // `smooth` needs a path to draw along; without a track it would
             // silently draw nothing at all, so it is disabled rather than lying.
@@ -90,7 +85,7 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
                 aria-checked={on}
                 disabled={disabled}
                 title={disabled ? "No mouse track for this take" : s.hint}
-                className={on ? ui.btnActive : ui.btn}
+                className={on ? ui.segItemOn : ui.segItem}
                 onClick={() => ctx.apply((e) => ops.setCursor(e, { ...cursor, style: s.id }))}
               >
                 {s.label}
@@ -189,7 +184,7 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
                   onClick={() => player.seek(m.t)}
                   className="flex-1 text-left text-[11px] text-muted hover:text-foreground"
                 >
-                  {m.label ?? fmt(m.t)}
+                  {m.label ?? ui.fmt(m.t)}
                 </button>
                 <button
                   type="button"

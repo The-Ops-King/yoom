@@ -15,8 +15,6 @@ const MIN_PCT = 5;
 // `select-text` because the staging root sets `select-none` and `user-select`
 // inherits: without it the caret cannot select the value to retype it.
 
-const fmt = (t: number) => `${t.toFixed(1)}s`;
-
 /** A half-typed or emptied number field must not push `NaN` into the edits. */
 const num = (v: string, fallback: number) => (Number.isFinite(Number(v)) && v !== "" ? Number(v) : fallback);
 
@@ -184,23 +182,25 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
           <div className={ui.group}>
             <span className="text-[11px] text-muted">Kind</span>
             <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                aria-pressed={!following}
-                className={following ? ui.btn : ui.btnActive}
-                onClick={() => setKind("static")}
-              >
-                Static
-              </button>
-              <button
-                type="button"
-                aria-pressed={following}
-                disabled={!hasCursor && !following}
-                className={following ? ui.btnActive : ui.btn}
-                onClick={() => setKind("follow")}
-              >
-                Follow mouse
-              </button>
+              <div className={ui.seg}>
+                <button
+                  type="button"
+                  aria-pressed={!following}
+                  className={following ? ui.segItem : ui.segItemOn}
+                  onClick={() => setKind("static")}
+                >
+                  Static
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={following}
+                  disabled={!hasCursor && !following}
+                  className={following ? ui.segItemOn : ui.segItem}
+                  onClick={() => setKind("follow")}
+                >
+                  Follow mouse
+                </button>
+              </div>
               {!hasCursor && <span className={ui.hint}>· no mouse track for this take</span>}
             </div>
           </div>
@@ -231,7 +231,7 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
             {edits.zooms.map((z, i) => (
               <li key={`${z.start}-${z.end}`} className="flex items-center justify-between gap-2">
                 <span className={`flex-1 text-[11px] ${i === index ? "text-foreground" : "text-muted"}`}>
-                  {fmt(z.start)} → {fmt(z.end)}
+                  {ui.fmt(z.start)} → {ui.fmt(z.end)}
                   {z.kind === "follow" && <span className="text-muted-dim"> · follows</span>}
                 </span>
                 <button
