@@ -770,7 +770,24 @@ git commit -m "feat(staging): open the matching panel from preview selection"
 
 **Files:**
 - Modify: `src/lib/recording/types.ts:309`, `src/lib/recording/settings.ts:38,124`, `src/lib/editor/render.ts:595-596`
+- Modify: `src/components/staging/frame-picker.tsx:292-293` — **the shadow control lives here, not in `sections/frame.tsx`**
+- Fixtures to update: `src/lib/edits.test.ts:228,399`, `src/lib/recording/settings.test.ts:271`, `src/lib/recording/geometry.test.ts:372`, `src/lib/editor/render.test.ts:48,125,139`
 - Test: `src/lib/recording/settings.test.ts`
+
+**Full site inventory (verified by grep at `cefd487`).** An earlier draft of this
+task named only 6 of the 12 places `shadow` is read or written. The one that
+matters is `frame-picker.tsx:292-293`, where the control is a **checkbox**:
+
+```tsx
+checked={frame.shadow}
+onChange={(e) => onChange({ shadow: e.target.checked })}
+```
+
+Changing the type without converting that control leaves the tree failing
+typecheck, so it belongs in this task, not in Task 9. `npx tsc --noEmit` is what
+proves the migration is complete — with no component tests in this repo it is the
+only check that can, which is why the "exactly 3 pre-existing errors" baseline is
+load-bearing rather than ceremony.
 
 - [ ] **Step 1: Write the failing migration tests**
 
@@ -960,7 +977,7 @@ Do the panels one at a time so each is reviewable. Frame first — it has one of
 each control.
 
 **Files:**
-- Modify: `src/components/staging/sections/frame.tsx`, `src/components/staging/frame-picker.tsx`
+- Modify: `src/components/staging/frame-picker.tsx` (holds the real controls), `src/components/staging/sections/frame.tsx` (thin wrapper — read both before starting; the shadow control was already converted in Task 7)
 
 - [ ] **Step 1: Create the shared `Slider`**
 
