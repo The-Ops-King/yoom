@@ -320,8 +320,13 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
             )}
           </div>
 
-          {/* An arrow's own style; a line shares the representation (see `edits.ts`) so it takes the same picker. */}
-          {(overlay.type === "arrow" || overlay.type === "line") && (
+          {/*
+            Arrows only. A line shares the arrow's from/to representation, but
+            `render.ts`'s "line" case draws a plain moveTo/lineTo and never reads
+            `o.style` — offering the picker there would be a control that
+            visibly does nothing. Widen this when the renderer honours it.
+          */}
+          {overlay.type === "arrow" && (
             <div className={ui.group}>
               <span className="text-[11px] text-muted">Style</span>
               <div className={ui.seg}>
