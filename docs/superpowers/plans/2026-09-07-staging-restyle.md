@@ -513,115 +513,58 @@ git commit -m "feat(staging): add the editor top bar and retire the upload secti
 
 ### Task 5: The transport row
 
+**Corrected after reading the code.** The original draft of this task was wrong
+in three ways and must not be followed:
+
+- There is **no `splitAt` in `edit-ops.ts`** and no "split" concept anywhere in
+  the editor. It was invented. Do not add one.
+- `addCut` takes a `Cut` object: `ops.addCut(e, { start, end })`, not two
+  positional times.
+- `sections/trim.tsx` does more than trim. Besides In/Out and the cut list it
+  carries **marker cuts** — the take's recorded `Marker[]` (`{t, label?}`), each
+  with seek plus one-click "cut the 2s before" / "cut the 2s after"
+  (`MARKER_CUT_S = 2`). Nothing on the timeline replaces that, so it must be
+  rehomed, not deleted.
+
 **Files:**
 - Create: `src/components/staging/transport.tsx`
-- Modify: `src/components/staging/staging.tsx`, `src/components/staging/sections/trim.tsx` (deleted)
+- Modify: `src/components/staging/staging.tsx`, `src/components/staging/rail.tsx`, `src/components/staging/sections/cursor.tsx`
+- Delete: `src/components/staging/sections/trim.tsx`
 
-- [ ] **Step 1: Write the component**
+**What goes where**
 
-```tsx
-// src/components/staging/transport.tsx
-"use client";
+| From `trim.tsx` | Goes to | Why |
+|---|---|---|
+| Set In, Set Out, Cut range, Reset trim | the transport | They act on the playhead |
+| Marker list (seek, cut-before, cut-after) | Cursor & clicks panel | Markers are captured time-point events, exactly like clicks |
+| Cut list (`0:12 -> 0:18` rows) | dropped | Cuts are selectable on the Clip lane and Delete removes them (`staging.tsx:260`) |
 
-import * as ops from "@/lib/editor/edit-ops";
-import type { StagingContext } from "./types";
-import * as ui from "./ui";
+- [ ] **Step 1: Build the transport**
 
-const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+`src/components/staging/transport.tsx`, a client component. It carries, copied
+from the real `trim.tsx`: Set In / Set Out (writing `ctx.setInPoint` /
+`ctx.setOutPoint` from `player.timeRef.current`), Cut range (disabled unless both
+are set, using `ops.addCut(e, {start: Math.min(...), end: Math.max(...)})` exactly
+as `trim.tsx:37` does), and Reset trim
+(`ops.setTrim(e, duration, {start: 0, end: duration})`, disabled unless trimmed).
 
-/**
- * Sits between the preview and the timeline. Carries the two edits that used to
- * be the Trim section's buttons — split at the playhead, cut the in/out range —
- * plus playback.
- */
-export function Transport({ ctx }: { ctx: StagingContext }) {
-  const { player } = ctx;
-  const hasRange = ctx.inPoint !== null && ctx.outPoint !== null && ctx.outPoint > ctx.inPoint;
+Plus playback: `player.editedTime`, a play/pause button calling `player.toggle()`,
+and `player.editedDuration`. There is no `player.duration`.
 
-  return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-1.5">
-      <button
-        type="button"
-        onClick={() => ctx.apply((e) => ops.splitAt(e, player.time))}
-        className={ui.btn}
-      >
-        Split
-      </button>
-      <button
-        type="button"
-        disabled={!hasRange}
-        onClick={() => ctx.apply((e) => ops.addCut(e, ctx.inPoint!, ctx.outPoint!))}
-        className={ui.btn}
-      >
-        Cut range
-      </button>
+- [ ] **Step 2: Mount it between the preview and the timeline** in `staging.tsx`.
 
-      <div className="ml-auto flex items-center gap-3">
-        {/*
-          `editedTime` and `editedDuration`, not `time`/`duration`: the transport
-          reports the timeline the viewer will see, with cuts already removed.
-        */}
-        <span className={`${ui.sliderValue} w-auto`}>{fmt(player.editedTime)}</span>
-        <button
-          type="button"
-          onClick={player.toggle}
-          aria-label={player.playing ? "Pause" : "Play"}
-          className="flex h-7 w-7 items-center justify-center rounded-full bg-accent text-xs text-foreground"
-        >
-          {player.playing ? "❚❚" : "▶"}
-        </button>
-        <span className={`${ui.sliderValue} w-auto`}>{fmt(player.editedDuration)}</span>
-      </div>
-    </div>
-  );
-}
-```
+- [ ] **Step 3: Move the markers block** into `sections/cursor.tsx`, preserving
+      `MARKER_CUT_S` and all three actions verbatim.
 
-**Names to note:** `StagingPlayer` has `time`, `timeRef`, `editedTime`,
-`editedDuration`, `playing`, `play()`, `pause()`, `toggle()`, `seek()`,
-`seekEdited()`, `step()`, `size` and `cameraSize`. There is **no** `duration` on
-the player — source duration is `ctx.duration`.
+- [ ] **Step 4: Delete `sections/trim.tsx`**, remove `"trim"` from `RailSection`
+      and `SECTIONS` and its import/branch in `rail.tsx`. **`staging.tsx`'s
+      `useState<RailSection>("trim")` must change** — `"trim"` no longer exists.
+      Use `"camera"`.
 
-Copy the split and cut handlers out of `sections/trim.tsx` before deleting it —
-that file holds the working versions, including the `MARKER_CUT_SPAN` behaviour
-noted at its line 7. Use whatever `edit-ops` functions it actually calls rather
-than the `ops.splitAt` / `ops.addCut` names guessed above.
+- [ ] **Step 5: Verify** `npm test`, `npm run lint`, `npx tsc --noEmit` (exactly
+      3 known pre-existing errors), `npm run build`.
 
-- [ ] **Step 2: Mount it between preview and timeline**
-
-```tsx
-<Preview ctx={ctx} />
-<Transport ctx={ctx} />
-<Timeline ctx={ctx} />
-```
-
-- [ ] **Step 3: Move the cut list, then delete the trim section**
-
-The Trim section also lists existing cuts (`sections/trim.tsx:66-90`). Those are
-now visible as regions on the Clip lane, so the list is redundant — but confirm
-each cut is selectable and removable from the timeline before deleting. If
-removal is missing there, add a delete affordance on the selected cut region
-first.
-
-```bash
-git rm src/components/staging/sections/trim.tsx
-```
-
-Remove its import, its `SECTIONS` entry, and the `"trim"` member of `RailSection`.
-
-- [ ] **Step 4: Verify**
-
-Run: `npm run dev`. Expected: split and cut work from the transport; cuts appear
-on the Clip lane and can be selected and removed there; play/pause works.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add -A src/components/staging
-git commit -m "feat(staging): add the transport row and retire the trim section"
-```
-
----
+- [ ] **Step 6: Commit** as `feat(staging): add the transport row and retire the trim section`.
 
 ### Task 6: The icon strip
 
