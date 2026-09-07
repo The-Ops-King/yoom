@@ -175,7 +175,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
 
   const laneClip = "absolute inset-y-0 rounded-sm border";
   const handle = "absolute inset-y-0 w-1.5 cursor-ew-resize";
-  /** One lane per item, kept short so a dozen of them still fit under the track. */
+  /** A row, shared by every item packed into it, kept short so several still fit under the track. */
   const laneRow = "relative h-[18px] shrink-0 rounded-sm border bg-surface";
   const laneLabel =
     "pointer-events-none absolute left-0.5 top-1/2 z-20 -translate-y-1/2 rounded-sm bg-surface/85 px-1 text-[9px] leading-none text-muted-dim";
@@ -274,15 +274,18 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
         </div>
 
         {/*
-          One lane per zoom and per overlay so each can be grabbed on its own,
-          plus the single camera-keyframe lane. Past eight lanes the stack
-          scrolls rather than pushing the rest of the screen down.
+          Zooms and overlays are packed into the fewest rows that keep them
+          from overlapping, plus the single camera-keyframe lane — a row can
+          hold several items, so the count tracks maximum concurrency, not
+          item count, and each item is still individually grabbable via its
+          own clip. Past eight rows the stack scrolls rather than pushing the
+          rest of the screen down.
 
           The scrollbar is given no layout width (and no reserved gutter — that
           would narrow the rows permanently): every clip's percentage is
           resolved against the same width as `trackRef`, so a classic scrollbar
           eating ~15px would slide the whole stack out from under the playhead.
-          The ninth lane deliberately peeks instead, as the scroll affordance.
+          The ninth row deliberately peeks instead, as the scroll affordance.
         */}
         <div
           className={`mt-1 space-y-1 ${
