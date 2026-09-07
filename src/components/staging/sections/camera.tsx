@@ -6,6 +6,7 @@ import {
   MAX_CAMERA_OFFSET_MS,
   type CameraKeyframe,
   type CameraMode,
+  type Point,
   type Rect,
   type VideoEdits,
 } from "@/lib/edits";
@@ -17,9 +18,6 @@ import { contentRect } from "../content-rect";
 import { Slider } from "../slider";
 import type { StagingContext } from "../types";
 import * as ui from "../ui";
-
-/** The sync slider's range; narrower than `MAX_CAMERA_OFFSET_MS`, which is the hard clamp. */
-const SYNC_RANGE_MS = Math.min(500, MAX_CAMERA_OFFSET_MS);
 
 const SHAPE_LABEL: Record<BubbleShape, string> = {
   circle: "Circle",
@@ -59,6 +57,12 @@ function refit(rect: Rect, w: number, h: number): Rect {
     h,
   };
 }
+
+const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+
+/** Arrow-key pan step; Shift takes the larger one. Mirrors the pad's 0..1 axes. */
+const PAN_STEP = 0.02;
+const PAN_STEP_SHIFT = 0.1;
 
 export function CameraSection({ ctx }: { ctx: StagingContext }) {
   const { edits, player } = ctx;
@@ -125,10 +129,35 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
   const canPanY = pannable && camAspect < bubbleAspect - SLACK_EPSILON;
 
   /** Write the pan at the gesture's keyframe, rebuilding from its pre-gesture edits. */
-  const setPan = (axis: "x" | "y", value: number) => {
+  const setPan = (pan: Point) => {
     const g = beginGesture(true);
-    const pan = { ...sample.pan, [axis]: value };
     ctx.applyLive(() => ops.upsertCameraKeyframe(g.from, g.t, { pan }));
+  };
+
+  /** Drag or arrow-key the pan pad's dot to `pan`, clamped to 0..1 per axis. */
+  const setPanFromEvent = (e: { clientX: number; clientY: number; currentTarget: HTMLElement }) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setPan({
+      x: clamp01((e.clientX - rect.left) / rect.width),
+      y: clamp01((e.clientY - rect.top) / rect.height),
+    });
+  };
+
+  const nudgePan = (dx: number, dy: number) => {
+    setPan({ x: clamp01(sample.pan.x + dx), y: clamp01(sample.pan.y + dy) });
+  };
+
+  const onPanKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!canPanX && !canPanY) return;
+    const step = e.shiftKey ? PAN_STEP_SHIFT : PAN_STEP;
+    switch (e.key) {
+      case "ArrowLeft": nudgePan(-step, 0); break;
+      case "ArrowRight": nudgePan(step, 0); break;
+      case "ArrowUp": nudgePan(0, -step); break;
+      case "ArrowDown": nudgePan(0, step); break;
+      default: return;
+    }
+    e.preventDefault();
   };
 
   /**
@@ -228,35 +257,40 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
       </div>
 
       <div className={ui.group}>
-        <span className={ui.label}>Framing</span>
+        <span className={ui.label}>Crop pan</span>
         {/*
-          One axis at a time has slack: the cover-crop only trims the axis the
-          camera has too much of. The dead axis stays visible but disabled, so
-          the control does not appear and disappear as the bubble is reshaped.
+          The cover-crop only has slack on the axis the camera's aspect
+          overshoots the bubble's; when neither does, dragging the dot would
+          not move anything, so the pad goes inert (and out of tab order)
+          rather than pretending to work.
         */}
-        <Slider
-          name="Pan ↔"
-          value={sample.pan.x}
-          min={0}
-          max={1}
-          step={0.01}
-          format={(v) => v.toFixed(2)}
-          disabled={!canPanX}
-          onChange={(v) => setPan("x", v)}
-        />
-        <Slider
-          name="Pan ↕"
-          value={sample.pan.y}
-          min={0}
-          max={1}
-          step={0.01}
-          format={(v) => v.toFixed(2)}
-          disabled={!canPanY}
-          onChange={(v) => setPan("y", v)}
-        />
+        <div
+          role="application"
+          aria-label="Camera crop pan"
+          aria-disabled={!canPanX && !canPanY}
+          tabIndex={canPanX || canPanY ? 0 : -1}
+          onPointerDown={(e) => {
+            if (!canPanX && !canPanY) return;
+            e.currentTarget.setPointerCapture(e.pointerId);
+            setPanFromEvent(e);
+          }}
+          onPointerMove={(e) => {
+            if (e.buttons && (canPanX || canPanY)) setPanFromEvent(e);
+          }}
+          onKeyDown={onPanKeyDown}
+          className={`relative aspect-[1.6] w-full rounded-md border border-border-subtle bg-surface-raised outline-none focus-visible:ring-1 focus-visible:ring-accent/50 ${
+            canPanX || canPanY ? "cursor-crosshair" : "cursor-not-allowed opacity-40"
+          }`}
+        >
+          <span
+            aria-hidden
+            className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-text"
+            style={{ left: `${sample.pan.x * 100}%`, top: `${sample.pan.y * 100}%` }}
+          />
+        </div>
         <p className={ui.hint}>
           {canPanX || canPanY
-            ? "Shift-drag the bubble to pan."
+            ? "Drag the dot, or focus it and use the arrow keys, to choose what the crop shows."
             : "This bubble matches the camera's shape, so there is nothing to pan."}
         </p>
       </div>
@@ -307,21 +341,14 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
       </div>
 
       <div className={ui.group}>
-        <label htmlFor="camera-sync" className={ui.label}>
-          Sync {offset > 0 ? `+${offset}` : offset} ms
-        </label>
-        <input
-          id="camera-sync"
-          type="range"
-          min={-SYNC_RANGE_MS}
-          max={SYNC_RANGE_MS}
-          step={10}
+        <Slider
+          name="Sync"
           value={offset}
-          className="w-full"
-          onPointerDown={() => beginGesture(false)}
-          onKeyDown={() => beginGesture(false)}
-          onChange={(e) => {
-            const ms = Number(e.target.value);
+          min={-MAX_CAMERA_OFFSET_MS}
+          max={MAX_CAMERA_OFFSET_MS}
+          step={10}
+          format={(v) => `${v > 0 ? "+" : ""}${v}ms`}
+          onChange={(ms) => {
             beginGesture(false);
             ctx.applyLive((ed) => ops.setCameraOffset(ed, ms));
           }}
