@@ -22,7 +22,7 @@ const SECTIONS: { id: RailSection; label: string }[] = [
   { id: "frame", label: "Frame" },
   { id: "zoom", label: "Zoom" },
   { id: "overlays", label: "Overlays" },
-  { id: "cursor", label: "Cursor & input" },
+  { id: "cursor", label: "Cursor, input & markers" },
   { id: "details", label: "Details" },
 ];
 

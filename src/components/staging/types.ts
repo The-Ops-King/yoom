@@ -136,9 +136,10 @@ export interface StagingContext {
    */
   cursorAt?: CursorAt;
   /**
-   * The take's raw input tracks (see `StagingProps`). The Cursor & input
-   * section reads their lengths to explain a take that captured neither, and
-   * the Clicks lane is drawn from `edits.clicks`, not from `clicks`.
+   * The take's raw input tracks (see `StagingProps`). The Cursor, input &
+   * markers section reads their lengths to explain a take that captured
+   * neither, and the Clicks lane is drawn from `edits.clicks`, not from
+   * `clicks`.
    */
   clicks: ClickSample[];
   keys: KeySample[];

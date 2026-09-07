@@ -15,8 +15,13 @@ function fmt(t: number): string {
  * one rail section — formerly `sections/trim.tsx`. That file's other two
  * pieces moved elsewhere instead of coming along: the cut list is dropped
  * (cuts are already selectable, and removable with Delete/Backspace, on the
- * timeline's clip track) and the marker list moved into the Cursor & input
- * panel, next to the other captured-event lists it owns.
+ * timeline's clip track) and the marker list moved into the Cursor, input &
+ * markers panel, next to the other captured-event lists it owns.
+ *
+ * Degrades by wrapping, not shrinking: the outer row is `flex-wrap`, so under
+ * width pressure the playback readout drops to its own line first, then the
+ * trim/reset pair wraps under the in/out controls — nothing here truncates or
+ * disappears the way the top bar's title does.
  */
 export function Transport({ ctx }: { ctx: StagingContext }) {
   const { edits, duration, player, inPoint, outPoint } = ctx;
@@ -25,7 +30,13 @@ export function Transport({ ctx }: { ctx: StagingContext }) {
   const bothSet = inPoint !== null && outPoint !== null;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2">
+    // Not a `<header>` — that's the top bar's role for the page as a whole.
+    // This is a mid-page control group, so it announces itself as one.
+    <div
+      role="toolbar"
+      aria-label="Playback transport"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2"
+    >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <div className="flex flex-wrap gap-1.5">
           <button type="button" className={ui.btn} onClick={() => ctx.setInPoint(player.timeRef.current)}>
@@ -38,6 +49,7 @@ export function Transport({ ctx }: { ctx: StagingContext }) {
             type="button"
             className={ui.btn}
             disabled={!bothSet}
+            title={bothSet ? undefined : "Set both In and Out first"}
             onClick={() => {
               if (inPoint === null || outPoint === null) return;
               ctx.apply((e) =>
@@ -51,18 +63,19 @@ export function Transport({ ctx }: { ctx: StagingContext }) {
           </button>
         </div>
 
-        <p className={ui.hint}>
+        <p className={ui.hint} aria-live="polite">
           In {inPoint === null ? "—" : fmt(inPoint)} · Out {outPoint === null ? "—" : fmt(outPoint)}
         </p>
 
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-muted">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="min-w-0 truncate text-[11px] text-muted">
             Trim {fmt(trim.start)} → {fmt(trim.end)}
           </span>
           <button
             type="button"
             className={ui.btn}
             disabled={!trimmed}
+            title={trimmed ? undefined : "Nothing is trimmed yet"}
             onClick={() => ctx.apply((e) => ops.setTrim(e, duration, { start: 0, end: duration }))}
           >
             Reset trim
