@@ -107,4 +107,23 @@ describe("packRows", () => {
       count: 1,
     });
   });
+
+  it("still reports a row when every span is malformed", () => {
+    expect(packRows([span(0, NaN), span(5, 1)])).toEqual({ rows: [0, 0], count: 1 });
+  });
+
+  it("keeps every row index within [0, count) over a mixed array", () => {
+    const { rows, count } = packRows([
+      span(0, NaN), // malformed -> row 0
+      span(0, 5),
+      span(2, 7),
+      span(3, 4),
+      span(9, 10),
+      span(7, 3), // malformed -> row 0
+    ]);
+    for (const row of rows) {
+      expect(row).toBeGreaterThanOrEqual(0);
+      expect(row).toBeLessThan(count);
+    }
+  });
 });

@@ -20,6 +20,11 @@ export type Span = { start: number; end: number };
  * timeline. This prevents silent row leaks from poisoned data. (This rule diverges
  * from cuts.ts deliberately: we keep zero-length spans, which cuts does not.)
  *
+ * Invariant: every value in `rows` is a valid index into `[0, count)`. A
+ * malformed span still lands in row 0, so if the input is nonempty and every
+ * span in it is malformed, `count` is 1 (not 0) to keep row 0 addressable —
+ * a caller rendering `count` row wrappers must always have somewhere to put it.
+ *
  * The result is indexed to match `spans`, NOT the sorted order, so callers can
  * do `rows[i]` against their own array.
  */
@@ -33,6 +38,7 @@ export function packRows(
   const rows = new Array<number>(spans.length);
   /** The end time of the last span placed in each row. */
   const rowEnds: number[] = [];
+  let sawMalformed = false;
 
   for (const { span, index } of order) {
     // Malformed spans get row 0 and are excluded from packing.
@@ -42,6 +48,7 @@ export function packRows(
       span.end < span.start;
     if (malformed) {
       rows[index] = 0;
+      sawMalformed = true;
       continue;
     }
 
@@ -55,5 +62,6 @@ export function packRows(
     rows[index] = row;
   }
 
-  return { rows, count: rowEnds.length };
+  const count = Math.max(rowEnds.length, sawMalformed ? 1 : 0);
+  return { rows, count };
 }
