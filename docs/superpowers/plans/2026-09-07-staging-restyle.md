@@ -149,7 +149,7 @@ export type Span = { start: number; end: number };
  * The result is indexed to match `spans`, NOT the sorted order, so callers can
  * do `rows[i]` against their own array.
  */
-export function packRows(spans: readonly Span[]): number[] {
+export function packRows(spans: readonly Span[]): { rows: number[]; count: number } {
   const order = spans
     .map((span, index) => ({ span, index }))
     .sort((a, b) => a.span.start - b.span.start || a.index - b.index);
@@ -172,10 +172,10 @@ export function packRows(spans: readonly Span[]): number[] {
   return rows;
 }
 
-/** How many rows `packRows` produced. */
-export function rowCount(rows: readonly number[]): number {
-  return rows.length === 0 ? 0 : Math.max(...rows) + 1;
-}
+// NOTE: revised during Task 1 review — `packRows` returns `{rows, count}` in one
+// pass rather than a separate `rowCount()` helper, and skips malformed spans
+// (NaN or inverted) so they cannot widen the timeline. See lanes.ts for the
+// authoritative signature.
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -205,7 +205,7 @@ git commit -m "feat(editor): pack time spans into minimum rows"
 At the top of `timeline.tsx`, alongside the existing imports:
 
 ```ts
-import { packRows, rowCount } from "@/lib/editor/lanes";
+import { packRows } from "@/lib/editor/lanes";
 ```
 
 Replace the `laneCount` block at `:199-201`:
@@ -218,10 +218,10 @@ Replace the `laneCount` block at `:199-201`:
   // Zooms and overlays share rows when they do not overlap in time: seven
   // non-overlapping overlays are one row, not seven lanes. `rows[i]` is the row
   // for `edits.overlays[i]`, so selection and drag indices are unaffected.
-  const zoomRows = packRows(edits.zooms);
-  const overlayRows = packRows(edits.overlays);
+  const zoomLanes = packRows(edits.zooms);
+  const overlayLanes = packRows(edits.overlays);
   const laneCount =
-    rowCount(zoomRows) + rowCount(overlayRows) + (camera ? 1 : 0) + (clicks.length > 0 ? 1 : 0);
+    zoomLanes.count + overlayLanes.count + (camera ? 1 : 0) + (clicks.length > 0 ? 1 : 0);
 ```
 
 - [ ] **Step 2: Render zoom rows instead of zoom lanes**
@@ -232,11 +232,11 @@ markup, handlers and class names are unchanged from the current code — only th
 nesting and the label change.
 
 ```tsx
-{Array.from({ length: rowCount(zoomRows) }, (_, row) => (
+{Array.from({ length: zoomLanes.count }, (_, row) => (
   <div key={`zoom-row-${row}`} className={`${laneRow} border-border`}>
     <span className={laneLabel}>{row === 0 ? "Zoom" : ""}</span>
     {edits.zooms.map((z, i) =>
-      zoomRows[i] !== row ? null : (
+      zoomLanes.rows[i] !== row ? null : (
         <div
           key={`zoom-${i}`}
           className={`${laneClip} z-30 cursor-grab ${
@@ -265,11 +265,11 @@ can hold several zooms and the row cannot be "the selected one". The clip's own
 Replace `{edits.overlays.map((o, i) => (` … `))}`:
 
 ```tsx
-{Array.from({ length: rowCount(overlayRows) }, (_, row) => (
+{Array.from({ length: overlayLanes.count }, (_, row) => (
   <div key={`ov-row-${row}`} className={`${laneRow} border-border`}>
     <span className={laneLabel}>{row === 0 ? "Overlays" : ""}</span>
     {edits.overlays.map((o, i) =>
-      overlayRows[i] !== row ? null : (
+      overlayLanes.rows[i] !== row ? null : (
         <div
           key={`ov-${i}`}
           title={`${overlayLabel(i)} — ${o.type}`}
@@ -327,13 +327,13 @@ git commit -m "feat(staging): pack zoom and overlay lanes into rows"
 Import the helper:
 
 ```ts
-import { packRows, rowCount } from "@/lib/editor/lanes";
+import { packRows } from "@/lib/editor/lanes";
 ```
 
 Inside `OverlaysSection`, after the existing `edits` is in scope:
 
 ```tsx
-const rows = packRows(edits.overlays);
+const { rows, count } = packRows(edits.overlays);
 const sel = ctx.selected?.kind === "overlay" ? ctx.selected.index : null;
 ```
 
@@ -344,7 +344,7 @@ Render, beneath the selected overlay's controls:
   <div className={ui.check}>
     <span>Row</span>
     <span className="ml-auto font-mono tabular-nums text-foreground">
-      {rows[sel] + 1} of {rowCount(rows)}
+      {rows[sel] + 1} of {count}
     </span>
   </div>
 )}
@@ -1482,7 +1482,10 @@ git commit -m "feat(settings): add factory reset for remembered appearance"
 
 - [ ] `npm test` — full suite passes
 - [ ] `npm run lint` — clean
-- [ ] `npx tsc --noEmit` — no type errors (catches any missed `shadow` boolean)
+- [ ] `npx tsc --noEmit` — **exactly 3 errors, the known pre-existing ones** in
+      `src/lib/db.test.ts:349` and `src/lib/upload-client.test.ts:42` (x2). These
+      predate this work (verified at `f50f4b0`). Any fourth error is yours —
+      in particular a missed `shadow` boolean.
 - [ ] Record a screen+camera take end to end: edit camera keyframes, place three
       overlapping overlays and confirm three packed rows, set a shadow, upload,
       and open the resulting `jtylerray.com/v/<slug>` to confirm the render
