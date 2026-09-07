@@ -14,10 +14,16 @@ export type Span = { start: number; end: number };
  * Touching spans share a row: an overlay ending exactly where the next begins
  * never draws over it.
  *
+ * Malformed spans (where `!(end > start)`, including NaN, Infinity, or inverted
+ * ranges) are assigned to row 0 and excluded from packing, so they never
+ * widen the timeline. This prevents silent row leaks from poisoned data.
+ *
  * The result is indexed to match `spans`, NOT the sorted order, so callers can
  * do `rows[i]` against their own array.
  */
-export function packRows(spans: readonly Span[]): number[] {
+export function packRows(
+  spans: readonly Span[]
+): { rows: number[]; count: number } {
   const order = spans
     .map((span, index) => ({ span, index }))
     .sort((a, b) => a.span.start - b.span.start || a.index - b.index);
@@ -27,6 +33,12 @@ export function packRows(spans: readonly Span[]): number[] {
   const rowEnds: number[] = [];
 
   for (const { span, index } of order) {
+    // Malformed spans get row 0 and are excluded from packing.
+    if (!(span.end > span.start)) {
+      rows[index] = 0;
+      continue;
+    }
+
     let row = rowEnds.findIndex((end) => end <= span.start);
     if (row === -1) {
       row = rowEnds.length;
@@ -37,10 +49,5 @@ export function packRows(spans: readonly Span[]): number[] {
     rows[index] = row;
   }
 
-  return rows;
-}
-
-/** How many rows `packRows` produced. */
-export function rowCount(rows: readonly number[]): number {
-  return rows.length === 0 ? 0 : Math.max(...rows) + 1;
+  return { rows, count: rowEnds.length };
 }
