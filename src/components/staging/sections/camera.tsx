@@ -11,20 +11,28 @@ import {
 } from "@/lib/edits";
 import { bubbleHeightFor, cameraAt } from "@/lib/editor/camera-track";
 import * as ops from "@/lib/editor/edit-ops";
+import { SHAPES } from "@/lib/recording/settings";
 import type { BubbleShape } from "@/lib/recording/types";
 import { contentRect } from "../content-rect";
+import { Slider } from "../slider";
 import type { StagingContext } from "../types";
 import * as ui from "../ui";
 
 /** The sync slider's range; narrower than `MAX_CAMERA_OFFSET_MS`, which is the hard clamp. */
 const SYNC_RANGE_MS = Math.min(500, MAX_CAMERA_OFFSET_MS);
 
+const SHAPE_LABEL: Record<BubbleShape, string> = {
+  circle: "Circle",
+  rounded: "Rounded",
+  square: "Square",
+  portrait: "Portrait",
+  full: "Full",
+};
 
-const SHAPES: { id: BubbleShape; label: string }[] = [
-  { id: "circle", label: "Circle" },
-  { id: "rounded", label: "Rounded" },
-  { id: "square", label: "Square" },
-  { id: "portrait", label: "Portrait" },
+const MODES: { id: CameraMode; label: string }[] = [
+  { id: "bubble", label: "Bubble" },
+  { id: "full", label: "Full screen" },
+  { id: "hidden", label: "Hidden" },
 ];
 
 const MODE_LABEL: Record<CameraMode, string> = {
@@ -32,8 +40,6 @@ const MODE_LABEL: Record<CameraMode, string> = {
   full: "full screen",
   hidden: "hidden",
 };
-
-const fmt = (t: number) => `${t.toFixed(1)}s`;
 
 /**
  * How far the bubble's aspect must differ from the camera's before that axis
@@ -173,19 +179,19 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
     <div className={ui.section}>
       <div className={ui.group}>
         <span className={ui.label}>Shape at the playhead</span>
-        <div className="flex flex-wrap gap-1.5">
-          {SHAPES.map((s) => (
+        <div className={ui.seg} role="group" aria-label="Bubble shape">
+          {SHAPES.map((shape) => (
             <button
-              key={s.id}
+              key={shape}
               type="button"
-              aria-pressed={sample.shape === s.id}
+              aria-pressed={sample.shape === shape}
               // A hidden camera has no bubble to reshape; `setShape` refuses
               // anyway, so say so rather than looking broken.
               disabled={sample.mode === "hidden"}
-              className={sample.shape === s.id ? ui.btnActive : ui.btn}
-              onClick={() => setShape(s.id)}
+              className={`${sample.shape === shape ? ui.segItemOn : ui.segItem} disabled:opacity-30`}
+              onClick={() => setShape(shape)}
             >
-              {s.label}
+              {SHAPE_LABEL[shape]}
             </button>
           ))}
         </div>
@@ -205,31 +211,18 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
 
       <div className={ui.group}>
         <span className={ui.label}>At the playhead</span>
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            aria-pressed={sample.mode === "bubble"}
-            className={sample.mode === "bubble" ? ui.btnActive : ui.btn}
-            onClick={() => setMode("bubble")}
-          >
-            Bubble
-          </button>
-          <button
-            type="button"
-            aria-pressed={sample.mode === "full"}
-            className={sample.mode === "full" ? ui.btnActive : ui.btn}
-            onClick={() => setMode("full")}
-          >
-            Full screen
-          </button>
-          <button
-            type="button"
-            aria-pressed={sample.mode === "hidden"}
-            className={sample.mode === "hidden" ? ui.btnActive : ui.btn}
-            onClick={toggleHidden}
-          >
-            {sample.mode === "hidden" ? "Show camera" : "Hide camera"}
-          </button>
+        <div className={ui.seg} role="group" aria-label="Camera mode">
+          {MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              aria-pressed={sample.mode === m.id}
+              className={sample.mode === m.id ? ui.segItemOn : ui.segItem}
+              onClick={() => (m.id === "hidden" ? toggleHidden() : setMode(m.id))}
+            >
+              {m.label}
+            </button>
+          ))}
         </div>
         <p className={ui.hint}>Drag the dashed box on the preview to move or resize it.</p>
       </div>
@@ -241,38 +234,26 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
           camera has too much of. The dead axis stays visible but disabled, so
           the control does not appear and disappear as the bubble is reshaped.
         */}
-        <label htmlFor="camera-pan-x" className={ui.sliderRow}>
-          <span className={ui.sliderName}>Pan ↔</span>
-          <input
-            id="camera-pan-x"
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={sample.pan.x}
-            disabled={!canPanX}
-            className={ui.slider}
-            onPointerDown={() => beginGesture(true)}
-            onKeyDown={() => beginGesture(true)}
-            onChange={(e) => setPan("x", Number(e.target.value))}
-          />
-        </label>
-        <label htmlFor="camera-pan-y" className={ui.sliderRow}>
-          <span className={ui.sliderName}>Pan ↕</span>
-          <input
-            id="camera-pan-y"
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={sample.pan.y}
-            disabled={!canPanY}
-            className={ui.slider}
-            onPointerDown={() => beginGesture(true)}
-            onKeyDown={() => beginGesture(true)}
-            onChange={(e) => setPan("y", Number(e.target.value))}
-          />
-        </label>
+        <Slider
+          name="Pan ↔"
+          value={sample.pan.x}
+          min={0}
+          max={1}
+          step={0.01}
+          format={(v) => v.toFixed(2)}
+          disabled={!canPanX}
+          onChange={(v) => setPan("x", v)}
+        />
+        <Slider
+          name="Pan ↕"
+          value={sample.pan.y}
+          min={0}
+          max={1}
+          step={0.01}
+          format={(v) => v.toFixed(2)}
+          disabled={!canPanY}
+          onChange={(v) => setPan("y", v)}
+        />
         <p className={ui.hint}>
           {canPanX || canPanY
             ? "Shift-drag the bubble to pan."
@@ -297,7 +278,7 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
                   ctx.selected?.kind === "keyframe" && ctx.selected.index === i ? "text-foreground" : "text-muted"
                 }`}
               >
-                {fmt(k.t)} · {MODE_LABEL[k.mode]}
+                {ui.fmt(k.t)} · {MODE_LABEL[k.mode]}
                 {k.mode === "bubble" && k.shape ? ` · ${k.shape}` : ""}
               </button>
               <button
