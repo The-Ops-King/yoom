@@ -268,7 +268,7 @@ describe("sanitizeFrame on the parseEdits path", () => {
       enabled: true,
       padding: 0.03,
       radius: 0.01,
-      shadow: true,
+      shadow: 0.5,
       background: { kind: "image", src: "blob:http://x/mno", wallpaperId: "wp-7" },
     });
     expect(frame.background).toEqual({ kind: "image", wallpaperId: "wp-7" });
@@ -279,5 +279,24 @@ describe("sanitizeFrame on the parseEdits path", () => {
       background: { kind: "image", src: "/backgrounds/g01.svg", wallpaperId: 42 },
     });
     expect(frame.background).toEqual({ kind: "image", src: "/backgrounds/g01.svg" });
+  });
+});
+
+describe("sanitizeFrame shadow migration", () => {
+  it("maps a legacy true to today's rendered weight", () => {
+    expect(sanitizeFrame({ shadow: true }).shadow).toBe(0.5);
+  });
+  it("maps a legacy false to no shadow", () => {
+    expect(sanitizeFrame({ shadow: false }).shadow).toBe(0);
+  });
+  it("keeps an in-range number", () => {
+    expect(sanitizeFrame({ shadow: 0.15 }).shadow).toBe(0.15);
+  });
+  it("clamps out of range", () => {
+    expect(sanitizeFrame({ shadow: 4 }).shadow).toBe(1);
+    expect(sanitizeFrame({ shadow: -1 }).shadow).toBe(0);
+  });
+  it("falls back for garbage", () => {
+    expect(sanitizeFrame({ shadow: "heavy" }).shadow).toBe(DEFAULT_FRAME.shadow);
   });
 });

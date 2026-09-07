@@ -592,8 +592,11 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
     // The frame (shadow + rounded clip) hugs the PICTURE, not the content box —
     // otherwise a zoom's shadow outlines a full-width screen that is mostly
     // wallpaper, and the letterbox reads as black bars inside the frame.
-    if (frame.shadow) {
-      ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = W * 0.02; ctx.shadowOffsetY = W * 0.008;
+    if (frame.shadow > 0) {
+      // `s = 1` at twice today's (legacy `true`) weight, so 0.5 — the boolean's
+      // migrated value — reproduces the old fixed-alpha/blur/offset exactly.
+      const s = frame.shadow * 2;
+      ctx.save(); ctx.shadowColor = `rgba(0,0,0,${0.45 * s})`; ctx.shadowBlur = W * 0.02 * s; ctx.shadowOffsetY = W * 0.008 * s;
       ctx.fillStyle = "#000"; ctx.fill(framePath(pic.x, pic.y, pic.w, pic.h, radius)); ctx.restore();
     }
     ctx.save(); ctx.clip(framePath(pic.x, pic.y, pic.w, pic.h, radius));

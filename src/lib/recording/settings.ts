@@ -35,7 +35,7 @@ export const DEFAULT_FRAME: FrameConfig = {
   enabled: true,
   padding: 0.02,
   radius: 0.012,
-  shadow: true,
+  shadow: 0.5,
   background: { kind: "image", src: "/backgrounds/mint.svg", presetId: "mint" },
 };
 
@@ -114,6 +114,24 @@ function sanitizeBackground(
   return out;
 }
 
+/**
+ * `shadow` was a boolean until this settings shape; it became a 0..1 strength
+ * without a `SETTINGS_KEY` bump because bumping the key would discard every
+ * other stored preference (mode, bubble position, background, …) just to fix
+ * one field. So the boolean form is read forever and never written again: a
+ * stored `true` maps to 0.5 (the strength that drew the same pixels the old
+ * `true` branch did), `false` maps to 0, and a `SETTINGS_KEY` bump is not
+ * revisited for this alone.
+ */
+function shadowStrength(value: unknown, fallback: number): number {
+  if (value === true) return 0.5;
+  if (value === false) return 0;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.min(1, Math.max(0, value));
+  }
+  return fallback;
+}
+
 /** Clamp an untrusted frame config. Blob URLs are dropped (they do not survive a reload or an upload). */
 export function sanitizeFrame(raw: unknown, fallback: FrameConfig = DEFAULT_FRAME): FrameConfig {
   const frameRaw = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -121,7 +139,7 @@ export function sanitizeFrame(raw: unknown, fallback: FrameConfig = DEFAULT_FRAM
     enabled: bool(frameRaw.enabled, fallback.enabled),
     padding: num(frameRaw.padding, fallback.padding, 0, 0.2),
     radius: num(frameRaw.radius, fallback.radius, 0, 0.1),
-    shadow: bool(frameRaw.shadow, fallback.shadow),
+    shadow: shadowStrength(frameRaw.shadow, fallback.shadow),
     background: sanitizeBackground(frameRaw.background, fallback.background),
   };
 }

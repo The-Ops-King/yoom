@@ -369,7 +369,7 @@ describe("displayPosToCanvasPos", () => {
     enabled: false,
     padding: 0,
     radius: 0,
-    shadow: false,
+    shadow: 0,
     background: { kind: "none" },
   };
   const framed: FrameConfig = { ...noFrame, enabled: true, padding: 0.1 };

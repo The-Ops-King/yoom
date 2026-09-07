@@ -45,7 +45,7 @@ const base = parseEdits({ version: 1, cuts: [], crop: null, zooms: [], overlays:
 describe("outputSize", () => {
   it("matches the source with framing off and pads with it on", () => {
     expect(outputSize(1920, 1080, base)).toEqual({ width: 1920, height: 1080 });
-    const framed = { ...base, frame: { enabled: true, padding: 0.05, radius: 0.01, shadow: false, background: { kind: "color" as const, color: "#000" } } };
+    const framed = { ...base, frame: { enabled: true, padding: 0.05, radius: 0.01, shadow: 0, background: { kind: "color" as const, color: "#000" } } };
     expect(outputSize(1920, 1080, framed)).toEqual({ width: 2112, height: 1272 });
   });
 });
@@ -122,7 +122,7 @@ describe("drawFrame", () => {
   });
   it("shows the frame background, not black, in a framed letterbox", () => {
     const framed = { ...base, camera: null,
-      frame: { enabled: true, padding: 0.05, radius: 0.01, shadow: false, background: { kind: "color" as const, color: "#0f0" } },
+      frame: { enabled: true, padding: 0.05, radius: 0.01, shadow: 0, background: { kind: "color" as const, color: "#0f0" } },
       zooms: [{ start: 0, end: 10, rect: { x: 0, y: 0, w: 0.5, h: 1 }, ramp: 0 }] };
     const ctx = fakeCtx();
     drawFrame(ctx, inputs(framed), 5, 2112, 1272);
@@ -136,7 +136,7 @@ describe("drawFrame", () => {
     // A 0.4-wide view: geometry no other test builds, so the module-level
     // frame-path cache cannot hand back a path recorded before this test.
     const framed = { ...base, camera: null,
-      frame: { enabled: true, padding: 0.05, radius: 0.01, shadow: true, background: { kind: "color" as const, color: "#0f0" } },
+      frame: { enabled: true, padding: 0.05, radius: 0.01, shadow: 0.5, background: { kind: "color" as const, color: "#0f0" } },
       zooms: [{ start: 0, end: 10, rect: { x: 0, y: 0, w: 0.4, h: 1 }, ramp: 0 }] };
     boxes.length = 0;
     drawFrame(fakeCtx(), inputs(framed), 5, 2112, 1272);

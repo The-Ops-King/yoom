@@ -306,7 +306,8 @@ export interface FrameConfig {
   padding: number;
   /** Corner radius as a fraction of the source width, 0..0.1. */
   radius: number;
-  shadow: boolean;
+  /** Shadow strength, 0..1. 0 is none; 0.5 is what `shadow: true` used to draw. */
+  shadow: number;
   /** `blur` is meaningless here; the picker only offers none/color/image/video. */
   background: BackgroundConfig;
 }

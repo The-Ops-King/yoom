@@ -225,7 +225,7 @@ describe("parseEdits staging fields", () => {
     const parsed = parseEdits({
       ...base,
       trim: { start: 1, end: 9 },
-      frame: { enabled: true, padding: 0.1, radius: 0.02, shadow: false, background: { kind: "color", color: "#fff" } },
+      frame: { enabled: true, padding: 0.1, radius: 0.02, shadow: 0, background: { kind: "color", color: "#fff" } },
       camera: {
         shape: "circle",
         mirror: true,
@@ -241,6 +241,14 @@ describe("parseEdits staging fields", () => {
     expect(parsed.camera?.keyframes).toHaveLength(2);
     expect(parsed.camera?.keyframes[1].mode).toBe("full");
     expect(parsed.cameraOffsetMs).toBe(120);
+  });
+
+  it("migrates a legacy boolean shadow to the equivalent strength on load", () => {
+    const parsed = parseEdits({
+      ...base,
+      frame: { enabled: true, padding: 0.1, radius: 0.02, shadow: true, background: { kind: "color", color: "#fff" } },
+    });
+    expect(parsed.frame?.shadow).toBe(0.5);
   });
 
   it("forces the first keyframe to t=0, sorts, and clamps rects", () => {
@@ -396,7 +404,7 @@ describe("parseEdits staging fields", () => {
         enabled: true,
         padding: 0.1,
         radius: 0.02,
-        shadow: true,
+        shadow: 0.5,
         background: { kind: "image", src: "blob:http://x/1" },
       },
     });

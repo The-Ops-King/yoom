@@ -286,14 +286,20 @@ export function FramePicker({ frame, onChange }: FramePickerProps) {
             </span>
           </label>
 
-          <label className={ui.check}>
+          <label className={ui.sliderRow} aria-label="Shadow strength">
+            <span className={ui.sliderName}>Shadow</span>
             <input
-              type="checkbox"
-              checked={frame.shadow}
-              onChange={(e) => onChange({ shadow: e.target.checked })}
-              className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={frame.shadow}
+              onChange={(e) => onChange({ shadow: Number(e.target.value) })}
+              className={`${ui.slider} accent-[var(--color-accent)]`}
             />
-            Drop shadow
+            <span className={ui.sliderValue}>
+              {Math.round(frame.shadow * 100)}%
+            </span>
           </label>
         </>
       )}
