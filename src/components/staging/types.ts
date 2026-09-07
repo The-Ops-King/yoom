@@ -105,8 +105,13 @@ export type Tool =
  * The one selected editable thing, shared by the timeline, the preview and
  * the rail so Delete/Backspace has a single meaning. `t` is the camera
  * keyframe's source time (keyframes are addressed by time, not index).
+ * `"camera"` selects the bubble as a whole (its track has no keyframe
+ * concept independent of `"keyframe"` above); its `index` is always `0` —
+ * there is one camera track.
  */
-export type Selection = { kind: "overlay" | "cut" | "keyframe" | "zoom"; index: number; t?: number } | null;
+export type Selection =
+  | { kind: "overlay" | "cut" | "keyframe" | "zoom" | "camera"; index: number; t?: number }
+  | null;
 
 /**
  * The whole staging screen's state, passed down as one `ctx` prop rather

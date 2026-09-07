@@ -241,6 +241,8 @@ export function CameraLayer({ ctx }: { ctx: StagingContext }) {
     // slack the gesture would write a keyframe (and an undo entry) for a pan
     // that cannot move; it stays a plain move instead.
     const panning = kind === "move" && e.shiftKey && !!slack && (slack.x > 0 || slack.y > 0);
+    ctx.setSelected({ kind: "camera", index: 0 });
+    ctx.openSection?.("camera");
     setDrag({
       kind: panning ? "pan" : kind,
       t,

@@ -2,6 +2,7 @@
 
 import type { StagingContext } from "./types";
 import * as ui from "./ui";
+import { IconStrip } from "./icon-strip";
 import { CameraSection } from "./sections/camera";
 import { FrameSection } from "./sections/frame";
 import { ZoomSection } from "./sections/zoom";
@@ -17,14 +18,14 @@ export type RailSection =
   | "cursor"
   | "details";
 
-const SECTIONS: { id: RailSection; label: string }[] = [
-  { id: "camera", label: "Camera" },
-  { id: "frame", label: "Frame" },
-  { id: "zoom", label: "Zoom" },
-  { id: "overlays", label: "Overlays" },
-  { id: "cursor", label: "Cursor, input & markers" },
-  { id: "details", label: "Details" },
-];
+const LABEL: Record<RailSection, string> = {
+  camera: "Camera",
+  frame: "Frame",
+  zoom: "Zoom",
+  overlays: "Overlays",
+  cursor: "Cursor, input & markers",
+  details: "Details",
+};
 
 export function Rail({
   ctx,
@@ -35,47 +36,30 @@ export function Rail({
   section: RailSection;
   onSection: (s: RailSection) => void;
 }) {
-  const visible = SECTIONS.filter(
-    (s) => s.id !== "camera" || ctx.mode === "screen+camera",
-  );
+  const hasCamera = ctx.mode === "screen+camera";
+  // The Camera panel only exists on a screen+camera take. `section` can still
+  // be "camera" on any other mode (it is `Staging`'s initial state
+  // regardless of mode), so resolve that here rather than rendering an empty
+  // panel — Frame is the icon strip's first entry on a camera-less take.
+  const active: RailSection = section === "camera" && !hasCamera ? "frame" : section;
 
   return (
-    // The rail carries its own scroll so a tall section (Frame, Camera) never
-    // grows the page: the preview and timeline stay put and only the section
-    // list moves. Undo/redo/discard now live in the top bar. Below `lg` the
+    // The rail carries its own scroll so a tall panel (Frame, Camera) never
+    // grows the page: the preview and timeline stay put and only the open
+    // panel scrolls. Undo/redo/discard live in the top bar. Below `lg` the
     // rail sits under the preview and scrolls with the page as normal.
-    <aside className="flex flex-col gap-2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)]">
-      <div className="flex flex-col gap-2 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
-        {visible.map((s) => (
-          <section
-            key={s.id}
-            className="shrink-0 rounded-lg border border-border bg-surface"
-          >
-            <button
-              type="button"
-              onClick={() => onSection(s.id)}
-              aria-expanded={section === s.id}
-              className={`flex w-full items-center justify-between px-3 py-2 ${ui.label} ${
-                section === s.id ? "text-muted" : ""
-              }`}
-            >
-              {s.label}
-              <span aria-hidden className="text-sm leading-none">
-                {section === s.id ? "–" : "+"}
-              </span>
-            </button>
-            {section === s.id && (
-              <div className="border-t border-border p-3">
-                {s.id === "camera" && <CameraSection ctx={ctx} />}
-                {s.id === "frame" && <FrameSection ctx={ctx} />}
-                {s.id === "zoom" && <ZoomSection ctx={ctx} />}
-                {s.id === "overlays" && <OverlaysSection ctx={ctx} />}
-                {s.id === "cursor" && <CursorSection ctx={ctx} />}
-                {s.id === "details" && <DetailsForm ctx={ctx} />}
-              </div>
-            )}
-          </section>
-        ))}
+    <aside className="flex gap-2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)]">
+      <IconStrip ctx={ctx} section={active} onSection={onSection} />
+      <div className="flex min-w-0 flex-1 flex-col rounded-lg border border-border bg-surface lg:min-h-0">
+        <h2 className={`shrink-0 border-b border-border px-3 py-2 ${ui.label}`}>{LABEL[active]}</h2>
+        <div className="p-3 lg:min-h-0 lg:overflow-y-auto">
+          {active === "camera" && <CameraSection ctx={ctx} />}
+          {active === "frame" && <FrameSection ctx={ctx} />}
+          {active === "zoom" && <ZoomSection ctx={ctx} />}
+          {active === "overlays" && <OverlaysSection ctx={ctx} />}
+          {active === "cursor" && <CursorSection ctx={ctx} />}
+          {active === "details" && <DetailsForm ctx={ctx} />}
+        </div>
       </div>
     </aside>
   );

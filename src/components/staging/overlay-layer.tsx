@@ -281,6 +281,7 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
     e.stopPropagation();
     player.pause();
     ctx.setSelected({ kind: "overlay", index });
+    ctx.openSection?.("overlays");
     setGrab({ index, mode, ox: p.x, oy: p.y, rect: o.rect, view, from: edits });
   };
 

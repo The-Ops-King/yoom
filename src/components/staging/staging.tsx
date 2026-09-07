@@ -257,6 +257,11 @@ export function Staging(props: StagingProps) {
       }
       if ((e.key === "Delete" || e.key === "Backspace") && selected) {
         e.preventDefault();
+        // The camera bubble is the take's one always-present track, not a
+        // placed thing with a removable instance — unlike an overlay, cut,
+        // zoom or keyframe, there is no `ops.removeCamera`. Make Delete a
+        // deliberate no-op here rather than silently clearing the selection.
+        if (selected.kind === "camera") return;
         if (selected.kind === "overlay") apply((ed) => ops.removeOverlay(ed, selected.index));
         if (selected.kind === "cut") apply((ed) => ops.removeCut(ed, selected.index));
         if (selected.kind === "zoom") apply((ed) => ops.removeZoom(ed, selected.index));
@@ -444,7 +449,7 @@ export function Staging(props: StagingProps) {
   return (
     <div className="w-full max-w-[1280px] select-none space-y-3">
       <TopBar ctx={ctx} shareBase={props.shareBase} />
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_362px]">
         <div className="min-w-0 space-y-3">
           <Preview ctx={ctx} />
           <Transport ctx={ctx} />
