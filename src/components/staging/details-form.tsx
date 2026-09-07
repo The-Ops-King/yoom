@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatElapsed } from "@/components/recorder/preview-stage";
-import { MAX_DESCRIPTION, MAX_TITLE } from "@/lib/limits";
+import { MAX_DESCRIPTION } from "@/lib/limits";
 import { normalizeSlug, SLUG_RE } from "@/lib/slug";
 import type { Details, StagingContext } from "./types";
 import * as ui from "./ui";
@@ -14,7 +14,7 @@ const FORMAT_HINT = "3–40 lowercase letters, numbers or hyphens.";
 
 // `select-text`: the staging chrome sets `select-none`, and `user-select`
 // inherits into form controls — typing still works, but the caret cannot
-// select anything, which makes editing a title feel broken.
+// select anything, which makes editing a field feel broken.
 
 
 type SlugStatus = "auto" | "checking" | "unchecked" | "available" | "taken" | "invalid" | "error";
@@ -59,11 +59,14 @@ function hintFor(status: SlugStatus, slug: string): { text: string; tone: string
 }
 
 /**
- * Title, description, share link and thumbnail frame. The slug is normalised
- * into `details.slug` as it is typed and checked against `/api/slug` 400 ms
- * after the last keystroke; the verdict lands in `details.slugOk`, which the
- * top bar reads to gate its Upload button. `slugOk` is false while a check is
- * in flight, so upload stays disabled until the answer is in.
+ * Description, share link, thumbnail frame, and the take's own summary
+ * (length, output size, link) — everything about the recording except its
+ * title, which lives in the top bar now: editing it here too let two inputs
+ * silently fight over the same field. The slug is normalised into
+ * `details.slug` as it is typed and checked against `/api/slug` 400 ms after
+ * the last keystroke; the verdict lands in `details.slugOk`, which the top
+ * bar reads to gate its Upload button. `slugOk` is false while a check is in
+ * flight, so upload stays disabled until the answer is in.
  */
 export function DetailsForm({ ctx }: { ctx: StagingContext }) {
   const { details, setDetails, player } = ctx;
@@ -179,20 +182,6 @@ export function DetailsForm({ ctx }: { ctx: StagingContext }) {
           <dd className="truncate text-muted">{details.slug === "" ? "auto" : details.slug}</dd>
         </div>
       </dl>
-
-      <div className={ui.group}>
-        <label className={ui.label} htmlFor="staging-title">
-          Title
-        </label>
-        <input
-          id="staging-title"
-          value={details.title}
-          maxLength={MAX_TITLE}
-          placeholder="Untitled recording"
-          onChange={(e) => setDetails((d) => ({ ...d, title: e.target.value }))}
-          className={ui.input}
-        />
-      </div>
 
       <div className={ui.group}>
         <label className={ui.label} htmlFor="staging-description">

@@ -63,7 +63,7 @@ export interface StagingProps {
 /**
  * The upload metadata the rail collects; handed to `onFinish` untouched.
  * `slugOk` is the details form's verdict on the slug (false while its
- * availability check is in flight), read by the upload section to gate the
+ * availability check is in flight), read by the top bar to gate its Upload
  * button; an empty slug means "auto" and is always ok.
  */
 export type Details = {
