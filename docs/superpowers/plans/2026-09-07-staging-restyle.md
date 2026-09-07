@@ -29,6 +29,13 @@ handles and cut regions, the camera-keyframe lane, the clicks lane with
 per-click `on` toggles, the `laneCount > 8` scroll behaviour, and
 `ctx.openSection?.(...)` wiring so selecting a timeline object opens its section.
 
+**Review policy.** Every task gets a spec-compliance review. Only two also get a
+separate code-quality review: **Task 7** (the `shadow` model change — the one
+change that can alter how already-saved recordings render) and **Task 12**
+(sticky defaults — it writes persisted user state). Everything else is UI work
+where a single review is enough; findings that are genuinely about quality can be
+raised by the spec reviewer in the same pass.
+
 **Commit style:** conventional commits, present tense, scoped — e.g.
 `feat(staging): pack zoom and overlay lanes into rows`. Match the existing log.
 
@@ -566,7 +573,16 @@ and `player.editedDuration`. There is no `player.duration`.
 
 - [ ] **Step 6: Commit** as `feat(staging): add the transport row and retire the trim section`.
 
-### Task 6: The icon strip
+### Task 6: The icon strip, and preview-side selection
+
+**Verified against HEAD before dispatch — these are current, do not re-derive:**
+- `RailSection` is now exactly `"camera" | "frame" | "zoom" | "overlays" | "cursor" | "details"` — six members. `"trim"` and `"upload"` are already gone.
+- `staging.tsx` already initialises to `"camera"`.
+- The rail's Undo/Redo/Discard row is already gone (it lives in `top-bar.tsx`).
+- The cursor section's label is now `"Cursor, input & markers"` — carry that wording into the icon's `title`/`aria-label`.
+- `Selection` is `{kind: "overlay" | "cut" | "keyframe" | "zoom"; index: number; t?: number} | null` at `types.ts:109` — it does NOT yet have `"camera"`.
+- `overlay-layer.tsx:283` already calls `setSelected({kind: "overlay", index})` but does NOT call `openSection`.
+- `camera-layer.tsx` has drag handling but no `setSelected` at all.
 
 **Files:**
 - Create: `src/components/staging/icon-strip.tsx`
@@ -708,7 +724,7 @@ git commit -m "feat(staging): replace the accordion rail with an icon strip"
 
 ---
 
-### Task 6b: Preview-side selection opens the panel
+#### Part 2 — preview-side selection (same task, same commit series)
 
 The timeline already does this; the preview does not. `overlay-layer.tsx:283`
 selects an overlay but never opens the section, and the camera bubble is not a
@@ -913,291 +929,62 @@ existing recordings render unchanged."
 
 ---
 
-### Task 8: Add the shared control classes
+### Task 8: The control vocabulary, and every panel adopting it
+
+Tasks 8-11 of an earlier draft are merged here: they were one job — give the rail
+a single control vocabulary and apply it — split four ways for no benefit.
 
 **Files:**
 - Modify: `src/components/staging/ui.ts`
+- Create: `src/components/staging/slider.tsx`
+- Modify: `src/components/staging/frame-picker.tsx`, `sections/frame.tsx`,
+  `sections/camera.tsx`, `sections/overlays.tsx`, `sections/zoom.tsx`,
+  `sections/cursor.tsx`, `details-form.tsx`
+- Modify: `src/components/staging/transport.tsx`, `top-bar.tsx` (shared bar shell only)
 
-- [ ] **Step 1: Add the new vocabulary**
+- [ ] **Step 1: Extend `ui.ts`** with the segmented control (`seg`, `segItem`,
+      `segItemOn`), the filled-bar slider classes (`sliderFill`, `sliderFillBar`,
+      `sliderFillName`, `sliderFillValue`, `sliderInput`), and the swatch grid
+      (`swatchGrid`, `swatch`, `swatchOn`). Match the file's existing comment
+      voice — each export says what it is for, not what it does.
 
-Append to `ui.ts`, matching the file's existing comment style:
+      Also consolidate two things deferred from earlier tasks:
+      - **`fmt`** — four byte-identical copies of `` `${t.toFixed(1)}s` `` now
+        live in `transport.tsx`, `sections/cursor.tsx`, `sections/zoom.tsx` and
+        `sections/camera.tsx`. Export one and delete the copies.
+      - **`bar`** — the bar shell `rounded-lg border border-border bg-surface
+        px-3 py-2` is hand-copied in `top-bar.tsx` and `transport.tsx`. Export it
+        and use it in both.
 
-```ts
-/**
- * Segmented control — mutually exclusive choices in a shared trough. Use for
- * anything with 2–5 options that would otherwise be a row of `btn`s: camera
- * mode and shape, background kind, arrow style.
- */
-export const seg = "flex gap-0.5 rounded-lg bg-surface-raised p-0.5";
-export const segItem =
-  "flex-1 rounded-md px-2 py-1 text-center text-[11px] text-muted transition-colors hover:text-foreground";
-export const segItemOn =
-  "flex-1 rounded-md bg-accent px-2 py-1 text-center text-[11px] font-semibold text-foreground";
+- [ ] **Step 2: Create `src/components/staging/slider.tsx`** — the shared
+      filled-bar `<Slider>`. A native `<input type="range">` sits transparent
+      over the row so the control stays keyboard-operable and announced, while
+      the accent fill shows the value. Markup, so it lives here rather than in
+      `ui.ts`, which holds only class strings.
 
-/**
- * Filled-bar slider. The row IS the track: the accent fill shows the value, the
- * name sits left and the value right. Replaces `sliderRow`'s separate
- * name/track/value columns, which wasted a third of a 320px rail on a thin line.
- *
- * Render an `<input type="range">` with `sliderInput` absolutely positioned over
- * `sliderFill` so the control stays keyboard-accessible and native.
- */
-export const sliderFill =
-  "relative flex h-7 items-center overflow-hidden rounded-lg border border-border-subtle bg-surface-raised px-2.5";
-export const sliderFillBar = "absolute inset-y-0 left-0 bg-accent/20 border-r border-accent/50";
-export const sliderFillName = "relative text-[11px] text-muted";
-export const sliderFillValue =
-  "relative ml-auto font-mono text-[11px] tabular-nums text-foreground";
-export const sliderInput =
-  "absolute inset-0 h-full w-full cursor-ew-resize opacity-0";
+- [ ] **Step 3: Adopt it, one panel per commit.** Frame (via `frame-picker.tsx`,
+      which holds the real controls), then Camera, Overlays, Zoom, Cursor,
+      Details. Replace `sliderRow`/`sliderName`/`slider`/`sliderValue` triples
+      with `<Slider>`, and mutually-exclusive button rows with the segmented
+      control. **Behaviour must not change** — this is a restyle.
 
-/** Swatch grid — backgrounds and colours. `cols` is set by the caller. */
-export const swatchGrid = "grid gap-1";
-export const swatch = "aspect-square rounded-md border border-border-subtle";
-export const swatchOn = "aspect-square rounded-md outline outline-2 outline-accent-text outline-offset-1";
-```
+- [ ] **Step 4: Camera gains its two missing controls.** Not styling, so treat it
+      as its own commit: the `pan` crop pad (a 2-axis value, so a draggable pad
+      rather than two sliders) writing through
+      `ops.upsertCameraKeyframe(e, t, { pan })`, and the `cameraOffsetMs` sync
+      slider bounded by `MAX_CAMERA_OFFSET_MS` from `edits.ts`.
 
-- [ ] **Step 2: Verify nothing broke**
+- [ ] **Step 5: Overlays gains the full tool grid** — all fifteen `OverlayType`
+      values in a 5x3 grid, with the existing `MAX_OVERLAYS` cap guard and its
+      "that is all 64 overlays" message preserved.
 
-Run: `npm run lint && npm test`
-Expected: PASS. This step only adds exports.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add src/components/staging/ui.ts
-git commit -m "feat(staging): add segmented, filled-slider and swatch classes"
-```
-
----
-
-### Task 9: Adopt the vocabulary in the Frame panel
-
-Do the panels one at a time so each is reviewable. Frame first — it has one of
-each control.
-
-**Files:**
-- Modify: `src/components/staging/frame-picker.tsx` (holds the real controls), `src/components/staging/sections/frame.tsx` (thin wrapper — read both before starting; the shadow control was already converted in Task 7)
-
-- [ ] **Step 1: Create the shared `Slider`**
-
-Create `src/components/staging/slider.tsx`. Every panel from here on uses it.
-
-```tsx
-function Slider({ name, value, min, max, step, format, onChange }: {
-  name: string; value: number; min: number; max: number; step: number;
-  format: (v: number) => string; onChange: (v: number) => void;
-}) {
-  const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
-  return (
-    <label className={ui.sliderFill}>
-      <span aria-hidden className={ui.sliderFillBar} style={{ width: `${pct}%` }} />
-      <span className={ui.sliderFillName}>{name}</span>
-      <span className={ui.sliderFillValue}>{format(value)}</span>
-      <input
-        type="range" min={min} max={max} step={step} value={value}
-        aria-label={name}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className={ui.sliderInput}
-      />
-    </label>
-  );
-}
-```
-
-The native `<input type="range">` sits transparent over the whole row, so the
-control stays keyboard-operable and screen-reader-announced while looking like a
-filled bar. Prefix the file with `"use client";` and
-`import * as ui from "./ui";`.
-
-- [ ] **Step 2: Use it for padding, radius and the new shadow**
-
-```tsx
-<Slider name="Padding" value={frame.padding} min={0} max={0.2} step={0.005}
-        format={(v) => `${Math.round(v * 100)}%`}
-        onChange={(v) => setFrame({ ...frame, padding: v })} />
-<Slider name="Radius" value={frame.radius} min={0} max={0.1} step={0.002}
-        format={(v) => `${(v * 100).toFixed(1)}%`}
-        onChange={(v) => setFrame({ ...frame, radius: v })} />
-<Slider name="Shadow" value={frame.shadow} min={0} max={1} step={0.01}
-        format={(v) => `${Math.round(v * 100)}%`}
-        onChange={(v) => setFrame({ ...frame, shadow: v })} />
-```
-
-Use the existing setter in `frame.tsx` rather than a new `setFrame` — read
-`:20-26` for how it applies and calls `persistFrame`.
-
-- [ ] **Step 3: Convert the background-kind buttons to a segmented control**
-
-```tsx
-<div className={ui.seg} role="group" aria-label="Background kind">
-  {(["none", "color", "image", "video"] as const).map((k) => (
-    <button key={k} type="button" aria-pressed={frame.background.kind === k}
-            onClick={() => setKind(k)}
-            className={frame.background.kind === k ? ui.segItemOn : ui.segItem}>
-      {k === "none" ? "None" : k[0].toUpperCase() + k.slice(1)}
-    </button>
-  ))}
-</div>
-```
-
-- [ ] **Step 4: Convert the preset grid to swatches**
-
-`frame-picker.tsx:153` already maps `FRAME_PRESETS` to buttons. Change the
-container to `${ui.swatchGrid} grid-cols-8` and each button to `ui.swatch` /
-`ui.swatchOn`, keeping the existing `title`, `aria-label` and click handler.
-
-- [ ] **Step 5: Verify**
-
-Run: `npm run dev`. Expected: shadow slides from none to heavy with the preview
-updating live; all 16 presets fit 8-wide without scrolling; padding and radius
-show real percentages. Keyboard: tab to a slider, arrow keys change it.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add -A src/components/staging
-git commit -m "feat(staging): restyle the frame panel with the new controls"
-```
-
----
-
-### Task 10: Camera panel — `pan` and `cameraOffsetMs`
-
-**Files:**
-- Modify: `src/components/staging/sections/camera.tsx`
-
-- [ ] **Step 1: Convert mode and shape to segmented controls**
-
-Five shapes come from `SHAPES` in `@/lib/recording/settings`: `circle`,
-`rounded`, `square`, `portrait`, `full`. Mode is `bubble | full | hidden` from
-`CameraMode`. Use `ui.seg` for both, replacing the current button rows at
-`:181`.
-
-- [ ] **Step 2: Add the crop-pan pad**
-
-`CameraKeyframe.pan` is a `Point` (0..1 per axis), absent meaning `{x: .5, y: .5}`.
-Two sliders would misrepresent a 2-axis value, so use a pad:
-
-```tsx
-function PanPad({ pan, onChange }: { pan: { x: number; y: number }; onChange: (p: { x: number; y: number }) => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const set = (e: React.PointerEvent) => {
-    const r = ref.current?.getBoundingClientRect();
-    if (!r) return;
-    onChange({
-      x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
-      y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
-    });
-  };
-  return (
-    <div
-      ref={ref}
-      role="application"
-      aria-label="Camera crop pan"
-      onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); set(e); }}
-      onPointerMove={(e) => { if (e.buttons) set(e); }}
-      className="relative aspect-[1.6] w-full cursor-crosshair rounded-md border border-border-subtle bg-surface-raised"
-    >
-      <span
-        aria-hidden
-        className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-text"
-        style={{ left: `${pan.x * 100}%`, top: `${pan.y * 100}%` }}
-      />
-    </div>
-  );
-}
-```
-
-Write through `ops.upsertCameraKeyframe(e, t, { pan })`, the same call
-`setShape` already uses at `camera.tsx:147`.
-
-- [ ] **Step 3: Add the sync-offset slider**
-
-`cameraOffsetMs` lives on `VideoEdits`, clamped to `±MAX_CAMERA_OFFSET_MS` in
-`edits.ts:562`. Import that constant rather than hardcoding a range.
-
-```tsx
-<Slider name="Camera sync" value={edits.cameraOffsetMs ?? 0}
-        min={-MAX_CAMERA_OFFSET_MS} max={MAX_CAMERA_OFFSET_MS} step={10}
-        format={(v) => `${v > 0 ? "+" : ""}${Math.round(v)}ms`}
-        onChange={(v) => ctx.apply((e) => ({ ...e, cameraOffsetMs: v }))} />
-```
-
-- [ ] **Step 4: Verify**
-
-Run: `npm run dev` with a screen+camera take. Expected: five shapes selectable;
-dragging the pan pad moves which part of the camera feed shows; the sync slider
-shifts the camera track against the screen track.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/components/staging/sections/camera.tsx src/components/staging/slider.tsx
-git commit -m "feat(staging): expose camera crop pan and sync offset"
-```
-
----
-
-### Task 11: Overlays, Zoom, Cursor and Details panels
-
-**Files:**
-- Modify: `sections/overlays.tsx`, `sections/zoom.tsx`, `sections/cursor.tsx`, `details-form.tsx`
-
-- [ ] **Step 1: Overlays — tool grid**
-
-Replace the current type buttons with a 5-column grid over all fifteen
-`OverlayType` values, in this order so related tools sit together:
-
-```ts
-const TOOLS: { type: OverlayType; glyph: string; label: string }[] = [
-  { type: "text", glyph: "T", label: "Text" },
-  { type: "arrow", glyph: "➤", label: "Arrow" },
-  { type: "line", glyph: "╱", label: "Line" },
-  { type: "rect", glyph: "▭", label: "Rectangle" },
-  { type: "ellipse", glyph: "◯", label: "Ellipse" },
-  { type: "highlight", glyph: "▬", label: "Highlight" },
-  { type: "underline", glyph: "▁", label: "Underline" },
-  { type: "step", glyph: "①", label: "Step badge" },
-  { type: "emoji", glyph: "☺", label: "Emoji" },
-  { type: "draw", glyph: "✎", label: "Draw" },
-  { type: "blur", glyph: "▨", label: "Blur" },
-  { type: "blackout", glyph: "■", label: "Blackout" },
-  { type: "image", glyph: "▤", label: "Image" },
-  { type: "keys", glyph: "⌘", label: "Keys" },
-  { type: "click", glyph: "●", label: "Click" },
-];
-```
-
-Keep the existing `full` cap guard (`:85`) and the "That is all 64 overlays"
-message (`:146`) — disable the grid rather than removing it.
-
-Add the `7 / 64` counter beside the section label using `MAX_OVERLAYS`.
-
-- [ ] **Step 2: Zoom, Cursor, Details — swap classes only**
-
-These need no structural change. Replace `ui.sliderRow`/`ui.sliderName`/
-`ui.slider`/`ui.sliderValue` triples with the `Slider` component, and any
-mutually-exclusive button row with `ui.seg`. Do not change behaviour.
-
-- [ ] **Step 3: Verify**
-
-Run: `npm run dev && npm run lint && npm test`
-Expected: every overlay type placeable; cap message still appears at 64; zoom
-and cursor controls behave as before.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add -A src/components/staging
-git commit -m "feat(staging): restyle the remaining panels"
-```
-
----
+- [ ] **Step 6: Verify** `npm test`, `npm run lint`, `npx tsc --noEmit` (exactly
+      3 known pre-existing errors), `npm run build`. Commit per panel so the
+      review can read them separately.
 
 # Phase 4 — Sticky defaults
 
-### Task 12: Extend `RecorderSettings` with staging defaults
+### Task 9: Extend `RecorderSettings` with staging defaults
 
 **Files:**
 - Modify: `src/lib/recording/types.ts`, `src/lib/recording/settings.ts`
@@ -1331,7 +1118,7 @@ git commit -m "feat(recording): persist staging appearance defaults"
 
 ---
 
-### Task 13: Wire panels to read and write the defaults
+### Task 10: Wire panels to read and write the defaults
 
 **Files:**
 - Modify: `sections/camera.tsx`, `sections/overlays.tsx`, `sections/cursor.tsx`, `staging.tsx`
@@ -1401,7 +1188,7 @@ git commit -m "feat(staging): remember appearance between takes"
 
 ---
 
-### Task 14: Factory reset
+### Task 11: Factory reset
 
 **Files:**
 - Modify: `src/components/settings/alert-toggles.tsx` or its parent settings page
