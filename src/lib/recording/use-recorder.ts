@@ -301,6 +301,11 @@ export function useRecorder(): UseRecorderResult {
       systemOn: state.systemOn,
       bubble: state.bubble,
       frame: state.frame,
+      // `staging` is not tracked in RecorderState (that's a sibling task's
+      // job); read back whatever is currently stored so this save — which
+      // fully overwrites the settings blob — never clobbers a staging
+      // preference the editor persisted separately via `persistStaging`.
+      staging: loadSettings().staging,
     });
   }, [
     state.mode,

@@ -1,4 +1,6 @@
+import { MAX_OVERLAY_THICKNESS } from "@/lib/edits";
 import type {
+  ArrowStyle,
   BackgroundConfig,
   BackgroundKind,
   BubbleConfig,
@@ -7,6 +9,7 @@ import type {
   FrameConfig,
   RecorderSettings,
   RecordingMode,
+  StagingDefaults,
   SurfacePref,
 } from "./types";
 
@@ -39,6 +42,16 @@ export const DEFAULT_FRAME: FrameConfig = {
   background: { kind: "image", src: "/backgrounds/mint.svg", presetId: "mint" },
 };
 
+export const DEFAULT_STAGING: StagingDefaults = {
+  cameraShape: "circle",
+  cameraMirror: true,
+  overlayColor: "#c9973f",
+  overlayThickness: 0.04,
+  arrowStyle: "standard",
+  clickColor: "#c9973f",
+  clickRippleMs: 500,
+};
+
 export const DEFAULT_SETTINGS: RecorderSettings = {
   mode: "screen+camera",
   surfacePref: "monitor",
@@ -50,6 +63,7 @@ export const DEFAULT_SETTINGS: RecorderSettings = {
   systemOn: true,
   bubble: DEFAULT_BUBBLE,
   frame: DEFAULT_FRAME,
+  staging: DEFAULT_STAGING,
 };
 
 /**
@@ -63,6 +77,14 @@ const SURFACES: SurfacePref[] = ["monitor", "window", "browser"];
 export const SHAPES: BubbleShape[] = ["circle", "rounded", "square", "portrait", "full"];
 const SIZES: BubbleSize[] = ["small", "medium", "large"];
 const KINDS: BackgroundKind[] = ["none", "blur", "color", "image", "video"];
+// Not imported from edits.ts: that module is not exported, and edits.ts
+// already imports from this file, so importing back would cycle. Kept in
+// sync with edits.ts's own (private) ARROW_STYLES by hand.
+const ARROW_STYLES: ArrowStyle[] = ["standard", "double", "curved", "fancy"];
+
+/** Sane bounds for the click-ripple duration: instant to noticeably long, never gone or frozen on screen. */
+const MIN_CLICK_RIPPLE_MS = 100;
+const MAX_CLICK_RIPPLE_MS = 2000;
 
 export function pick<T extends string>(value: unknown, allowed: T[], fallback: T): T {
   return typeof value === "string" && (allowed as string[]).includes(value)
@@ -156,6 +178,47 @@ export function persistFrame(frame: FrameConfig): void {
   saveSettings({ ...current, frame: sanitizeFrame(frame, current.frame) });
 }
 
+/** Clamp an untrusted staging-defaults block. Appearance only — see `StagingDefaults`. */
+export function sanitizeStaging(
+  raw: unknown,
+  fallback: StagingDefaults = DEFAULT_STAGING,
+): StagingDefaults {
+  const stagingRaw = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return {
+    cameraShape: pick(stagingRaw.cameraShape, SHAPES, fallback.cameraShape),
+    cameraMirror: bool(stagingRaw.cameraMirror, fallback.cameraMirror),
+    overlayColor: str(stagingRaw.overlayColor, fallback.overlayColor),
+    overlayThickness: num(
+      stagingRaw.overlayThickness,
+      fallback.overlayThickness,
+      0,
+      MAX_OVERLAY_THICKNESS,
+    ),
+    arrowStyle: pick(stagingRaw.arrowStyle, ARROW_STYLES, fallback.arrowStyle),
+    clickColor: str(stagingRaw.clickColor, fallback.clickColor),
+    clickRippleMs: num(
+      stagingRaw.clickRippleMs,
+      fallback.clickRippleMs,
+      MIN_CLICK_RIPPLE_MS,
+      MAX_CLICK_RIPPLE_MS,
+    ),
+  };
+}
+
+/**
+ * Merge staging appearance defaults into the stored recorder settings, leaving
+ * every other preference alone — same contract as `persistFrame`. A sibling
+ * task wires the staging panels (camera shape/mirror, overlay colour and
+ * thickness, arrow style, click colour and ripple duration) to call this;
+ * nothing content-shaped (cuts, placed zooms/overlays, click on/off toggles,
+ * camera keyframes after t=0, title, description, slug) belongs here.
+ */
+export function persistStaging(staging: StagingDefaults): void {
+  if (typeof window === "undefined") return;
+  const current = loadSettings();
+  saveSettings({ ...current, staging: sanitizeStaging(staging, current.staging) });
+}
+
 function sanitize(raw: unknown): RecorderSettings {
   if (!raw || typeof raw !== "object") return DEFAULT_SETTINGS;
   const r = raw as Record<string, unknown>;
@@ -182,6 +245,13 @@ function sanitize(raw: unknown): RecorderSettings {
       visible: bool(bubbleRaw.visible, DEFAULT_BUBBLE.visible),
     },
     frame: sanitizeFrame(r.frame),
+    // No SETTINGS_KEY bump for this new block, for the same reason `shadow`
+    // above wasn't given one: every existing stored object simply lacks a
+    // `staging` key, `sanitizeStaging(undefined)` falls back to
+    // DEFAULT_STAGING cleanly, and bumping the key would throw away mode,
+    // bubble, and frame preferences that already work today just to add one
+    // block that needs no reset at all.
+    staging: sanitizeStaging(r.staging),
   };
 }
 

@@ -337,6 +337,33 @@ export interface FrameLayout {
 
 // ---------- settings ----------
 
+/**
+ * Mirrors `ArrowStyle` from `src/lib/edits.ts`. Not imported from there: this
+ * file is the base of the recording-types graph (nothing else here imports
+ * anything), while `edits.ts` already imports from both this file and from
+ * `./settings`, which itself imports this file. Importing `ArrowStyle` from
+ * `edits.ts` would therefore close a cycle (types.ts -> edits.ts -> types.ts).
+ * Keep this union in sync with `edits.ts`'s `ArrowStyle` by hand; a cleaner
+ * fix — making this file the canonical definition and having `edits.ts`
+ * import it — touches `edits.ts`, which is out of scope for this change.
+ */
+export type ArrowStyle = "standard" | "double" | "curved" | "fancy";
+
+/**
+ * Appearance the editor remembers between takes. Content never lives here —
+ * cuts, placed zooms, placed overlays, click on/off toggles, camera keyframes
+ * after t=0, title, description and slug are per-recording.
+ */
+export interface StagingDefaults {
+  cameraShape: BubbleShape;
+  cameraMirror: boolean;
+  overlayColor: string;
+  overlayThickness: number;
+  arrowStyle: ArrowStyle;
+  clickColor: string;
+  clickRippleMs: number;
+}
+
 export interface RecorderSettings {
   mode: RecordingMode;
   surfacePref: SurfacePref;
@@ -346,4 +373,5 @@ export interface RecorderSettings {
   systemOn: boolean;
   bubble: BubbleConfig;
   frame: FrameConfig;
+  staging: StagingDefaults;
 }

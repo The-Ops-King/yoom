@@ -1,5 +1,5 @@
 import type { Marker } from "@/lib/edits";
-import { DEFAULT_SETTINGS } from "./settings";
+import { DEFAULT_SETTINGS, DEFAULT_STAGING } from "./settings";
 import type {
   BubbleConfig,
   FrameConfig,
@@ -456,6 +456,10 @@ export function recorderReducer(
           systemOn: state.systemOn,
           bubble: state.bubble,
           frame: state.frame,
+          // RecorderState doesn't track `staging` (a sibling task's job), and
+          // `initialRecorderState` never reads it back out — any valid value
+          // satisfies the type without affecting behavior here.
+          staging: DEFAULT_STAGING,
         }),
       };
 

@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MAX_OVERLAY_THICKNESS } from "@/lib/edits";
 import {
   DEFAULT_FRAME,
   DEFAULT_SETTINGS,
+  DEFAULT_STAGING,
   SETTINGS_KEY,
   loadSettings,
   persistFrame,
+  persistStaging,
   sanitizeFrame,
   saveSettings,
 } from "./settings";
@@ -298,5 +301,48 @@ describe("sanitizeFrame shadow migration", () => {
   });
   it("falls back for garbage", () => {
     expect(sanitizeFrame({ shadow: "heavy" }).shadow).toBe(DEFAULT_FRAME.shadow);
+  });
+});
+
+describe("staging defaults", () => {
+  it("falls back to DEFAULT_STAGING when nothing is stored", () => {
+    expect(loadSettings().staging).toEqual(DEFAULT_STAGING);
+  });
+
+  it("round-trips a changed overlay colour", () => {
+    persistStaging({ ...DEFAULT_STAGING, overlayColor: "#b8543d" });
+    expect(loadSettings().staging.overlayColor).toBe("#b8543d");
+  });
+
+  it("leaves other preferences alone", () => {
+    saveSettings({ ...DEFAULT_SETTINGS, micOn: false });
+    persistStaging({ ...DEFAULT_STAGING, clickColor: "#c9973f" });
+    const after = loadSettings();
+    expect(after.micOn).toBe(false);
+    expect(after.staging.clickColor).toBe("#c9973f");
+  });
+
+  it("clamps a stored thickness out of range", () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ staging: { overlayThickness: 99 } }));
+    expect(loadSettings().staging.overlayThickness).toBe(MAX_OVERLAY_THICKNESS);
+  });
+
+  it("ignores a garbage staging block", () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ staging: "nope" }));
+    expect(loadSettings().staging).toEqual(DEFAULT_STAGING);
+  });
+
+  it("loads an old stored object with no staging key at all, defaulted", () => {
+    // Every existing user's first load after this ships: a v3 object written
+    // before this change carries no `staging` key whatsoever.
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ mode: "camera", micOn: false, bubble: { shape: "square" } }),
+    );
+    expect(() => loadSettings()).not.toThrow();
+    const s = loadSettings();
+    expect(s.staging).toEqual(DEFAULT_STAGING);
+    expect(s.mode).toBe("camera");
+    expect(s.micOn).toBe(false);
   });
 });
