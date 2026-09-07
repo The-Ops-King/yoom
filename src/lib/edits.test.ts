@@ -4,6 +4,7 @@ import {
   EMPTY_EDITS,
   hasDrawableEdits,
   isEmptyEdits,
+  MAX_CLICK_RIPPLE_MS,
   MAX_CLICKS,
   MAX_DRAW_POINTS,
   MAX_MARKERS,
@@ -12,6 +13,7 @@ import {
   MAX_OVERLAY_THICKNESS,
   MAX_TEXT,
   MAX_TEXT_SIZE,
+  MIN_CLICK_RIPPLE_MS,
   MIN_TEXT_SIZE,
   parseEdits,
   pointsRect,
@@ -608,6 +610,33 @@ describe("parseEdits cursor and motionBlur", () => {
     expect(parseEdits({ ...base, motionBlur: true }).motionBlur).toBe(true);
     expect(parseEdits({ ...base, motionBlur: "yes" }).motionBlur).toBeUndefined();
     expect(parseEdits(base).motionBlur).toBeUndefined();
+  });
+
+  it("round-trips a cursor with no clickColor/clickRippleMs unchanged", () => {
+    expect(parseEdits({ ...base, cursor: { style: "smooth", size: 1.5 } }).cursor).toEqual({
+      style: "smooth",
+      size: 1.5,
+    });
+  });
+
+  it("keeps a well-formed clickColor and clamps clickRippleMs into range", () => {
+    expect(
+      parseEdits({ ...base, cursor: { style: "real", size: 1, clickColor: "#ff0000", clickRippleMs: 800 } })
+        .cursor,
+    ).toEqual({ style: "real", size: 1, clickColor: "#ff0000", clickRippleMs: 800 });
+
+    expect(
+      parseEdits({ ...base, cursor: { style: "real", size: 1, clickRippleMs: 50 } }).cursor?.clickRippleMs,
+    ).toBe(MIN_CLICK_RIPPLE_MS);
+    expect(
+      parseEdits({ ...base, cursor: { style: "real", size: 1, clickRippleMs: 9999 } }).cursor?.clickRippleMs,
+    ).toBe(MAX_CLICK_RIPPLE_MS);
+  });
+
+  it("drops a non-string clickColor rather than keeping it", () => {
+    const cursor = parseEdits({ ...base, cursor: { style: "real", size: 1, clickColor: 12345 } }).cursor;
+    expect(cursor?.clickColor).toBeUndefined();
+    expect(cursor).toEqual({ style: "real", size: 1 });
   });
 });
 

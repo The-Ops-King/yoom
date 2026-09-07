@@ -18,7 +18,12 @@ import { DEFAULT_CURSOR, type ClickMark, type Overlay, type Point, type Rect } f
 import type { KeyMod, KeySample } from "@/lib/recording/types";
 import type { RenderInputs } from "./render";
 
-/** How long a click's ripple expands for, in seconds. Matches the `click` overlay. */
+/**
+ * How long a click's ripple expands for by default, in seconds, when a take's
+ * `cursor.clickRippleMs` is absent. Unrelated to the `click` OverlayType (a
+ * placed overlay drawn by `render.ts`), which times itself off its own
+ * `start`/`end` and never reads this.
+ */
 export const CLICK_RIPPLE_S = 0.5;
 
 /** How long a key press stays on the badge before it is gone entirely. */
@@ -72,13 +77,21 @@ function lowerBound(items: readonly { t: number }[], at: number): number {
 
 /**
  * The clicks whose ripple is on screen at `t`: switched on, and started within
- * the last `CLICK_RIPPLE_S`. `clicks` is sorted by `t` (`edit-ops.setClicks`
- * guarantees it), so this is a binary search plus a short walk.
+ * the last `rippleS` (defaults to `CLICK_RIPPLE_S`, seconds). `clicks` is
+ * sorted by `t` (`edit-ops.setClicks` guarantees it), so this is a binary
+ * search plus a short walk. The caller must pass the SAME duration to the
+ * draw's expansion curve — this is what decides which ripples are on screen
+ * at all, so a mismatch would let one flicker out mid-draw or hold past when
+ * it was selected.
  */
-export function activeClicks(clicks: readonly ClickMark[] | undefined, t: number): ClickMark[] {
+export function activeClicks(
+  clicks: readonly ClickMark[] | undefined,
+  t: number,
+  rippleS: number = CLICK_RIPPLE_S,
+): ClickMark[] {
   if (!clicks || clicks.length === 0) return [];
   const out: ClickMark[] = [];
-  for (let i = lowerBound(clicks, t - CLICK_RIPPLE_S); i < clicks.length; i++) {
+  for (let i = lowerBound(clicks, t - rippleS); i < clicks.length; i++) {
     const c = clicks[i];
     if (c.t > t) break;
     if (c.on) out.push(c);
@@ -431,13 +444,22 @@ export function drawInputLayer(
 
   ctx.save();
 
-  // Click ripples — the same expanding ring the `click` overlay draws.
-  for (const c of activeClicks(inputs.edits.clicks, t)) {
-    const p = Math.min(1, Math.max(0, (t - c.t) / CLICK_RIPPLE_S));
+  // The take's cursor config, once — the click ripple's colour/duration and
+  // the synthetic cursor below both read it. Absent fields fall back to
+  // exactly what a take with no `cursor` at all has always drawn.
+  const cursor = inputs.edits.cursor ?? DEFAULT_CURSOR;
+  const rippleS = cursor.clickRippleMs != null ? cursor.clickRippleMs / 1000 : CLICK_RIPPLE_S;
+  const rippleColor = cursor.clickColor ?? "#f5c542";
+
+  // Click ripples — the same expanding ring shape the `click` overlay draws,
+  // but timed and coloured by this take's cursor config rather than that
+  // overlay's own `start`/`end`/`color`.
+  for (const c of activeClicks(inputs.edits.clicks, t, rippleS)) {
+    const p = Math.min(1, Math.max(0, (t - c.t) / rippleS));
     const at = map(c);
     ctx.save();
     ctx.globalAlpha = 1 - p;
-    ctx.strokeStyle = "#f5c542";
+    ctx.strokeStyle = rippleColor;
     ctx.lineWidth = Math.max(2, W * 0.003);
     ctx.beginPath();
     ctx.arc(at.x, at.y, (W * 0.01 + p * W * 0.03) * zoom, 0, Math.PI * 2);
@@ -458,7 +480,6 @@ export function drawInputLayer(
 
   // The synthetic cursor. `real` keeps whatever the capture recorded and
   // `none` draws nothing, so only `smooth` has anything to add here.
-  const cursor = inputs.edits.cursor ?? DEFAULT_CURSOR;
   if (cursor.style === "smooth" && inputs.smoothCursorAt) {
     const p = inputs.smoothCursorAt(t);
     // `1 / view.h`, exactly what an emoji or a step badge grows by.

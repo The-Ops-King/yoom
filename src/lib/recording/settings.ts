@@ -82,9 +82,14 @@ const KINDS: BackgroundKind[] = ["none", "blur", "color", "image", "video"];
 // sync with edits.ts's own (private) ARROW_STYLES by hand.
 const ARROW_STYLES: ArrowStyle[] = ["standard", "double", "curved", "fancy"];
 
-/** Sane bounds for the click-ripple duration: instant to noticeably long, never gone or frozen on screen. */
-const MIN_CLICK_RIPPLE_MS = 100;
-const MAX_CLICK_RIPPLE_MS = 2000;
+/**
+ * Sane bounds for the click-ripple duration: instant to noticeably long,
+ * never gone or frozen on screen. Exported so `edits.ts`'s
+ * `CursorConfig.clickRippleMs` clamps to exactly this range too — one
+ * definition, not two numbers that could drift apart.
+ */
+export const MIN_CLICK_RIPPLE_MS = 100;
+export const MAX_CLICK_RIPPLE_MS = 2000;
 
 export function pick<T extends string>(value: unknown, allowed: T[], fallback: T): T {
   return typeof value === "string" && (allowed as string[]).includes(value)

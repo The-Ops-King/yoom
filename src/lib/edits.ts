@@ -8,7 +8,17 @@
  * normalised to the video frame (0..1) so they survive any display size.
  */
 
-import { pick, sanitizeFrame, SHAPES } from "@/lib/recording/settings";
+import {
+  MAX_CLICK_RIPPLE_MS,
+  MIN_CLICK_RIPPLE_MS,
+  pick,
+  sanitizeFrame,
+  SHAPES,
+} from "@/lib/recording/settings";
+
+// Re-exported so `edit-ops.ts` and the staging panels can clamp to exactly
+// the bounds `sanitizeStaging` uses, without a second copy of the numbers.
+export { MAX_CLICK_RIPPLE_MS, MIN_CLICK_RIPPLE_MS };
 import type { BubbleShape, FrameConfig } from "@/lib/recording/types";
 
 export type Rect = { x: number; y: number; w: number; h: number };
@@ -162,7 +172,14 @@ export type ClickMark = { t: number; x: number; y: number; on: boolean };
  * there is deliberately no ripple field here.
  */
 export type CursorStyle = "none" | "real" | "smooth";
-export type CursorConfig = { style: CursorStyle; size: number };
+export type CursorConfig = {
+  style: CursorStyle;
+  size: number;
+  /** Click-ripple ring colour. Absent means the built-in amber. */
+  clickColor?: string;
+  /** How long a ripple expands for, in ms. Absent means `CLICK_RIPPLE_S`. */
+  clickRippleMs?: number;
+};
 
 export type VideoEdits = {
   version: 1;
@@ -421,10 +438,16 @@ function parseClick(value: unknown): ClickMark | null {
 function parseCursor(value: unknown): CursorConfig | undefined {
   if (!isRecord(value)) return undefined;
   const size = num(value.size);
-  return {
+  const cursor: CursorConfig = {
     style: pick(value.style, CURSOR_STYLES, DEFAULT_CURSOR.style),
     size: size === null ? DEFAULT_CURSOR.size : clamp(size, MIN_CURSOR_SIZE, MAX_CURSOR_SIZE),
   };
+  if (typeof value.clickColor === "string") cursor.clickColor = value.clickColor;
+  const clickRippleMs = num(value.clickRippleMs);
+  if (clickRippleMs !== null) {
+    cursor.clickRippleMs = clamp(clickRippleMs, MIN_CLICK_RIPPLE_MS, MAX_CLICK_RIPPLE_MS);
+  }
+  return cursor;
 }
 
 function parseMarker(value: unknown): Marker | null {

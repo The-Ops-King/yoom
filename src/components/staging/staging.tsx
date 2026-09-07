@@ -108,7 +108,10 @@ function initialEdits(p: StagingProps, screenAspect: number, staging: StagingDef
   // `real`: the capture always contains the OS pointer (neither Electron nor
   // Chrome honours a `cursor: "never"` constraint any more), so the synthetic
   // arrow would be a SECOND cursor and has to be asked for. Motion blur is on.
-  return ops.setMotionBlur(ops.setCursor(seeded, DEFAULT_CURSOR), true);
+  // Click colour/duration seed from the last-used staging appearance, same
+  // reasoning as the camera shape/mirror above.
+  const cursor = { ...DEFAULT_CURSOR, clickColor: staging.clickColor, clickRippleMs: staging.clickRippleMs };
+  return ops.setMotionBlur(ops.setCursor(seeded, cursor), true);
 }
 
 export function Staging(props: StagingProps) {

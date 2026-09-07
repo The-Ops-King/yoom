@@ -45,6 +45,28 @@ describe("activeClicks", () => {
   it("returns every overlapping ripple", () => {
     expect(activeClicks([click(1), click(1.2), click(1.4)], 1.45)).toHaveLength(3);
   });
+
+  it("keeps a click active past CLICK_RIPPLE_S when given a longer duration", () => {
+    const longer = CLICK_RIPPLE_S * 2;
+    // Past the DEFAULT window, but still inside the longer one passed in.
+    expect(activeClicks(clicks, 1 + CLICK_RIPPLE_S + 0.01, longer)).toEqual([click(1)]);
+    expect(activeClicks(clicks, 1 + longer, longer)).toEqual([click(1)]);
+    expect(activeClicks(clicks, 1 + longer + 0.01, longer)).toEqual([]);
+  });
+
+  it("drops a click earlier than CLICK_RIPPLE_S when given a shorter duration", () => {
+    const shorter = CLICK_RIPPLE_S / 2;
+    expect(activeClicks(clicks, 1 + shorter, shorter)).toEqual([click(1)]);
+    expect(activeClicks(clicks, 1 + shorter + 0.01, shorter)).toEqual([]);
+    // The same instant is still active under the default (unshortened) window.
+    expect(activeClicks(clicks, 1 + shorter + 0.01)).toEqual([click(1)]);
+  });
+
+  it("behaves exactly as before when no duration is passed", () => {
+    for (const t of [0.9, 1, 1 + CLICK_RIPPLE_S, 1 + CLICK_RIPPLE_S + 0.01, 3.1]) {
+      expect(activeClicks(clicks, t)).toEqual(activeClicks(clicks, t, CLICK_RIPPLE_S));
+    }
+  });
 });
 
 describe("keyLabel", () => {

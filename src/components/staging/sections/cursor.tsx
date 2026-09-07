@@ -3,7 +3,9 @@
 import { useRef } from "react";
 import {
   DEFAULT_CURSOR,
+  MAX_CLICK_RIPPLE_MS,
   MAX_CURSOR_SIZE,
+  MIN_CLICK_RIPPLE_MS,
   MIN_CURSOR_SIZE,
   type CursorStyle,
   type Rect,
@@ -11,6 +13,7 @@ import {
 } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
 import { isDesktop } from "@/lib/recording/desktop-bridge";
+import { Slider } from "../slider";
 import type { StagingContext } from "../types";
 import * as ui from "../ui";
 
@@ -20,6 +23,14 @@ const KEYS_RECT: Rect = { x: 0.35, y: 0.86, w: 0.3, h: 0.08 };
 const KEYS_SPAN_S = 5;
 /** Seconds a marker's one-click cut spans. */
 const MARKER_CUT_S = 2;
+
+/** `render-input.ts`'s fallback, so the swatch opens on the colour actually drawn. */
+const DEFAULT_CLICK_COLOR = "#f5c542";
+/** Preset swatches offered before the free-pick cell; the first matches `DEFAULT_CLICK_COLOR`. */
+const CLICK_SWATCH_PALETTE = ["#f5c542", "#ef4444", "#f97316", "#22c55e", "#3b82f6", "#a855f7", "#111827"];
+/** `render-input.ts`'s fallback (`CLICK_RIPPLE_S` in ms), so the slider opens on the duration actually drawn. */
+const DEFAULT_CLICK_RIPPLE_MS = 500;
+const rippleMsFmt = (v: number) => `${Math.round(v)} ms`;
 
 const STYLES: { id: CursorStyle; label: string; hint: string }[] = [
   { id: "none", label: "None", hint: "Draw nothing over the capture" },
@@ -40,6 +51,8 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
   const clicks = edits.clicks ?? [];
   /** Pre-gesture edits for the size slider, so a drag is one undo step. */
   const sizeFrom = useRef<VideoEdits | null>(null);
+  /** Same gesture batching, for the ripple-duration slider. */
+  const rippleFrom = useRef<VideoEdits | null>(null);
 
   const hasCursorTrack = ctx.cursor.length > 0;
   const hasInput = ctx.clicks.length > 0 || ctx.keys.length > 0;
@@ -52,6 +65,21 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
     const from = sizeFrom.current;
     sizeFrom.current = null;
     if (from) ctx.commit(from);
+  };
+
+  const setRipple = (clickRippleMs: number) => {
+    rippleFrom.current ??= edits;
+    ctx.applyLive((e) => ops.setCursor(e, { ...cursor, clickRippleMs }));
+  };
+  const commitRipple = () => {
+    const from = rippleFrom.current;
+    rippleFrom.current = null;
+    if (!from) return;
+    ctx.commit(from);
+    // `cursor` has already re-rendered with the settled drag value by the
+    // time the gesture ends — the same reasoning `setSize` skips for size,
+    // except size is not a sticky default and click duration is.
+    ctx.setStagingDefaults({ clickRippleMs: cursor.clickRippleMs ?? DEFAULT_CLICK_RIPPLE_MS });
   };
 
   /** A key-tracking range at the playhead, bottom-centre, selected on arrival. */
@@ -154,6 +182,58 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
             ? "Each click is a dot on the Clicks lane — click one to mute it, click it again to bring it back. Filled is on, hollow is off."
             : "This take captured no clicks."}
         </p>
+
+        <div className={ui.group}>
+          <span className="text-[11px] text-muted">Colour</span>
+          <div className={`${ui.swatchGrid} grid-cols-8`}>
+            {CLICK_SWATCH_PALETTE.map((hex) => {
+              const on = (cursor.clickColor ?? DEFAULT_CLICK_COLOR) === hex;
+              return (
+                <button
+                  key={hex}
+                  type="button"
+                  title={hex}
+                  aria-label={`Colour ${hex}`}
+                  aria-pressed={on}
+                  className={on ? ui.swatchOn : ui.swatch}
+                  style={{ background: hex }}
+                  onClick={() => {
+                    ctx.apply((e) => ops.setCursor(e, { ...cursor, clickColor: hex }));
+                    ctx.setStagingDefaults({ clickColor: hex });
+                  }}
+                />
+              );
+            })}
+            <input
+              type="color"
+              title="Custom colour"
+              aria-label="Custom colour"
+              value={cursor.clickColor ?? DEFAULT_CLICK_COLOR}
+              className={`${ui.swatch} cursor-pointer border-0 p-0`}
+              onChange={(e) => {
+                ctx.apply((ed) => ops.setCursor(ed, { ...cursor, clickColor: e.target.value }));
+                ctx.setStagingDefaults({ clickColor: e.target.value });
+              }}
+            />
+          </div>
+        </div>
+
+        <div
+          className="w-full"
+          onPointerUp={commitRipple}
+          onBlur={commitRipple}
+          onKeyUp={commitRipple}
+        >
+          <Slider
+            name="Duration"
+            value={cursor.clickRippleMs ?? DEFAULT_CLICK_RIPPLE_MS}
+            min={MIN_CLICK_RIPPLE_MS}
+            max={MAX_CLICK_RIPPLE_MS}
+            step={50}
+            format={rippleMsFmt}
+            onChange={setRipple}
+          />
+        </div>
       </div>
 
       <div className={ui.group}>

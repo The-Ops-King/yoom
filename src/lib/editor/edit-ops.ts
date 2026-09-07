@@ -2,10 +2,12 @@ import {
   DEFAULT_CURSOR,
   MAX_CAMERA_OFFSET_MS,
   MAX_CLICKS,
+  MAX_CLICK_RIPPLE_MS,
   MAX_CURSOR_SIZE,
   MAX_CUTS,
   MAX_DRAW_POINTS,
   MAX_OVERLAYS,
+  MIN_CLICK_RIPPLE_MS,
   MIN_CURSOR_SIZE,
   arrowRect,
   clampRect,
@@ -289,8 +291,10 @@ export function setAllClicks(e: VideoEdits, on: boolean): VideoEdits {
 
 /**
  * Set how the cursor is drawn: an unrecognised `style` falls back to the
- * default and `size` is clamped into `MIN_CURSOR_SIZE..MAX_CURSOR_SIZE`.
- * Returns `e` unchanged (same reference) when nothing moves.
+ * default, `size` is clamped into `MIN_CURSOR_SIZE..MAX_CURSOR_SIZE`, a
+ * non-string `clickColor` is dropped, and `clickRippleMs` is clamped into
+ * `MIN_CLICK_RIPPLE_MS..MAX_CLICK_RIPPLE_MS`. Returns `e` unchanged (same
+ * reference) when nothing moves.
  */
 export function setCursor(e: VideoEdits, cursor: CursorConfig): VideoEdits {
   const styles: CursorStyle[] = ["none", "real", "smooth"];
@@ -303,7 +307,22 @@ export function setCursor(e: VideoEdits, cursor: CursorConfig): VideoEdits {
       ? Math.min(MAX_CURSOR_SIZE, Math.max(MIN_CURSOR_SIZE, cursor.size))
       : DEFAULT_CURSOR.size,
   };
-  if (e.cursor && e.cursor.style === next.style && e.cursor.size === next.size) return e;
+  if (typeof cursor.clickColor === "string") next.clickColor = cursor.clickColor;
+  if (Number.isFinite(cursor.clickRippleMs)) {
+    next.clickRippleMs = Math.min(
+      MAX_CLICK_RIPPLE_MS,
+      Math.max(MIN_CLICK_RIPPLE_MS, cursor.clickRippleMs as number),
+    );
+  }
+  if (
+    e.cursor &&
+    e.cursor.style === next.style &&
+    e.cursor.size === next.size &&
+    e.cursor.clickColor === next.clickColor &&
+    e.cursor.clickRippleMs === next.clickRippleMs
+  ) {
+    return e;
+  }
   return { ...e, cursor: next };
 }
 
