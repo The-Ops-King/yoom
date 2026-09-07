@@ -14,23 +14,35 @@ import {
 import * as ops from "@/lib/editor/edit-ops";
 import { packRows } from "@/lib/editor/lanes";
 import { contentRect } from "../content-rect";
+import { Slider } from "../slider";
 import type { StagingContext, Tool } from "../types";
 import * as ui from "../ui";
 
-/** The drawable overlay tools, in rail order. `image` is not one: it is placed from the file picker. */
-const TOOLS: { id: Tool; label: string }[] = [
-  { id: "blur", label: "Blur" },
-  { id: "blackout", label: "Blackout" },
-  { id: "ellipse", label: "Ellipse" },
-  { id: "rect", label: "Rectangle" },
-  { id: "step", label: "Step" },
-  { id: "arrow", label: "Arrow" },
-  { id: "line", label: "Line" },
-  { id: "highlight", label: "Highlight" },
-  { id: "underline", label: "Underline" },
-  { id: "text", label: "Text" },
-  { id: "emoji", label: "Emoji" },
-  { id: "draw", label: "Draw" },
+/**
+ * The tool grid, in the 5-column layout order the panel renders (related
+ * tools grouped together: mark-up, shapes, drawing, redaction). `image` is
+ * NOT a `Tool` — see the `<label>` below the grid, which places it straight
+ * off the file picker the same way `pickImage` always has.
+ *
+ * `keys` and `click` are the other two `OverlayType`s and deliberately have
+ * no button here: per `Tool` in `../types`, both come from the take's
+ * recorded input tracks, not a drag on the canvas, so there is no tool to
+ * arm for them without inventing a placement gesture the rest of the
+ * machinery (`ctx.addOverlayAt`, `ctx.setTool`) does not support.
+ */
+const TOOL_GRID: { id: Tool; label: string; glyph: string }[] = [
+  { id: "text", label: "Text", glyph: "T" },
+  { id: "arrow", label: "Arrow", glyph: "→" },
+  { id: "line", label: "Line", glyph: "╱" },
+  { id: "rect", label: "Rectangle", glyph: "▭" },
+  { id: "ellipse", label: "Ellipse", glyph: "◯" },
+  { id: "highlight", label: "Highlight", glyph: "▤" },
+  { id: "underline", label: "Underline", glyph: "▁" },
+  { id: "step", label: "Step", glyph: "①" },
+  { id: "emoji", label: "Emoji", glyph: "🙂" },
+  { id: "draw", label: "Draw", glyph: "✎" },
+  { id: "blur", label: "Blur", glyph: "▒" },
+  { id: "blackout", label: "Blackout", glyph: "■" },
 ];
 
 /** The four arrow shapes, in picker order. */
@@ -48,6 +60,8 @@ const EMOJI_PALETTE = ["👉", "👆", "👇", "👈", "✅", "❌", "⭐", "�
 const DEFAULT_COLOR = "#f5c542";
 /** The plate colour the bg picker opens on once it is switched on. */
 const DEFAULT_BG = "#000000";
+/** Preset swatches offered before the free-pick cell; the first matches `DEFAULT_COLOR`. */
+const SWATCH_PALETTE = ["#f5c542", "#ef4444", "#f97316", "#22c55e", "#3b82f6", "#a855f7", "#111827"];
 /** Types whose colour is drawn: blur resamples the pixels, an image and an emoji bring their own. */
 const COLOURED: OverlayType[] = [
   "blackout", "ellipse", "rect", "step", "arrow", "line", "highlight", "underline", "text", "draw", "click",
@@ -67,6 +81,9 @@ const HINTS: Partial<Record<Tool, string>> = {
   text: "Click to drop a caption, or drag the box it wraps inside. Esc cancels.",
   emoji: "Click to place it, or drag to size it. Esc cancels.",
 };
+
+/** `thickness` is normalised to the frame height; shown as a share of it. */
+const thicknessFmt = (v: number) => `${(v * 100).toFixed(1)}%`;
 
 // `select-text` because the staging root sets `select-none` and `user-select`
 // inherits: without it the caret cannot select the value to retype it.
@@ -123,26 +140,38 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
 
   return (
     <div className={ui.section}>
-      <div className="flex flex-wrap gap-1.5">
-        {TOOLS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            aria-pressed={tool === t.id}
-            disabled={full && tool !== t.id}
-            className={tool === t.id ? ui.btnActive : ui.btn}
-            onClick={() => ctx.setTool(tool === t.id ? "select" : t.id)}
+      <div className={ui.group}>
+        <div className="flex items-center justify-between">
+          <span className={ui.label}>Overlays</span>
+          <span className="text-[11px] font-mono tabular-nums text-muted-dim">
+            {edits.overlays.length} / {MAX_OVERLAYS}
+          </span>
+        </div>
+        <div className="grid grid-cols-5 gap-1.5">
+          {TOOL_GRID.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              title={t.label}
+              aria-label={t.label}
+              aria-pressed={tool === t.id}
+              disabled={full && tool !== t.id}
+              className={`${tool === t.id ? ui.btnActive : ui.btn} aspect-square flex items-center justify-center text-sm`}
+              onClick={() => ctx.setTool(tool === t.id ? "select" : t.id)}
+            >
+              {t.glyph}
+            </button>
+          ))}
+          <label
+            title="Image"
+            aria-label="Image"
+            aria-disabled={full}
+            className={`${ui.btn} aspect-square flex items-center justify-center text-sm ${full ? "cursor-not-allowed opacity-30" : "cursor-pointer"}`}
           >
-            {t.label}
-          </button>
-        ))}
-        <label
-          aria-disabled={full}
-          className={`${ui.btn} ${full ? "cursor-not-allowed opacity-30" : "cursor-pointer"}`}
-        >
-          Add image
-          <input type="file" accept="image/*" className="sr-only" disabled={full} onChange={pickImage} />
-        </label>
+            🖼
+            <input type="file" accept="image/*" className="sr-only" disabled={full} onChange={pickImage} />
+          </label>
+        </div>
       </div>
 
       <p className={ui.hint}>
@@ -192,19 +221,39 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
             </div>
           </dl>
 
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Blur has no colour (it resamples the pixels underneath it) and an image brings its own. */}
-            {COLOURED.includes(overlay.type) && (
-              <label className="flex items-center gap-1.5 text-[11px] text-muted">
-                Colour
+          {/* Blur has no colour (it resamples the pixels underneath it) and an image brings its own. */}
+          {COLOURED.includes(overlay.type) && (
+            <div className={ui.group}>
+              <span className="text-[11px] text-muted">Colour</span>
+              <div className={`${ui.swatchGrid} grid-cols-8`}>
+                {SWATCH_PALETTE.map((hex) => {
+                  const on = (overlay.color ?? DEFAULT_COLOR) === hex;
+                  return (
+                    <button
+                      key={hex}
+                      type="button"
+                      title={hex}
+                      aria-label={`Colour ${hex}`}
+                      aria-pressed={on}
+                      className={on ? ui.swatchOn : ui.swatch}
+                      style={{ background: hex }}
+                      onClick={() => ctx.apply((ed) => ops.updateOverlay(ed, index, { color: hex }))}
+                    />
+                  );
+                })}
                 <input
                   type="color"
+                  title="Custom colour"
+                  aria-label="Custom colour"
                   value={overlay.color ?? DEFAULT_COLOR}
-                  className="h-6 w-8 rounded border border-border bg-transparent"
+                  className={`${ui.swatch} cursor-pointer border-0 p-0`}
                   onChange={(e) => ctx.apply((ed) => ops.updateOverlay(ed, index, { color: e.target.value }))}
                 />
-              </label>
-            )}
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3">
             {overlay.type === "rect" && (
               <label className="flex items-center gap-1.5 text-[11px] text-muted">
                 <input
@@ -218,24 +267,17 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
             )}
             {/* A filled rect has no stroke to size, and an outlined one no fill to fade. */}
             {STROKED.includes(overlay.type) && !(overlay.type === "rect" && overlay.fill) && (
-              <label className="flex items-center gap-1.5 text-[11px] text-muted">
-                Thickness
-                <input
-                  type="range"
-                  min={0.002}
-                  max={MAX_OVERLAY_THICKNESS / 2}
-                  step={0.002}
+              <div className="w-36">
+                <Slider
+                  name="Thickness"
                   value={overlay.thickness ?? DEFAULT_OVERLAY_THICKNESS}
-                  className="w-24"
-                  onChange={(e) =>
-                    ctx.apply((ed) =>
-                      ops.updateOverlay(ed, index, {
-                        thickness: num(e.target.value, overlay.thickness ?? DEFAULT_OVERLAY_THICKNESS),
-                      }),
-                    )
-                  }
+                  min={0.002}
+                  max={MAX_OVERLAY_THICKNESS}
+                  step={0.002}
+                  format={thicknessFmt}
+                  onChange={(v) => ctx.apply((ed) => ops.updateOverlay(ed, index, { thickness: v }))}
                 />
-              </label>
+              </div>
             )}
             {overlay.type === "step" && (
               <label className="flex items-center gap-1.5 text-[11px] text-muted">
@@ -278,10 +320,11 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
             )}
           </div>
 
-          {overlay.type === "arrow" && (
+          {/* An arrow's own style; a line shares the representation (see `edits.ts`) so it takes the same picker. */}
+          {(overlay.type === "arrow" || overlay.type === "line") && (
             <div className={ui.group}>
               <span className="text-[11px] text-muted">Style</span>
-              <div className="flex flex-wrap gap-1.5">
+              <div className={ui.seg}>
                 {ARROW_STYLES.map((s) => {
                   const on = (overlay.style ?? "standard") === s.id;
                   return (
@@ -289,7 +332,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                       key={s.id}
                       type="button"
                       aria-pressed={on}
-                      className={on ? ui.btnActive : ui.btn}
+                      className={on ? ui.segItemOn : ui.segItem}
                       onClick={() => ctx.apply((ed) => ops.updateOverlay(ed, index, { style: s.id }))}
                     >
                       {s.label}
