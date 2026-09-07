@@ -51,6 +51,13 @@ export interface StagingProps {
   error: string;
   onFinish: (input: FinishInput) => void;
   onDiscard: () => void;
+  /**
+   * Public share origin, resolved on the server (see `shareBaseUrl()` in
+   * `@/lib/env`). Threaded down from `src/app/page.tsx` because this tree is
+   * a Client Component, where calling it directly would fall back to
+   * localhost — see `video-card.tsx`'s `shareBase` prop for the same pattern.
+   */
+  shareBase: string;
 }
 
 /**

@@ -62,11 +62,12 @@ function hintFor(status: SlugStatus, slug: string): { text: string; tone: string
  * Title, description, share link and thumbnail frame. The slug is normalised
  * into `details.slug` as it is typed and checked against `/api/slug` 400 ms
  * after the last keystroke; the verdict lands in `details.slugOk`, which the
- * upload section reads to gate its button. `slugOk` is false while a check is
+ * top bar reads to gate its Upload button. `slugOk` is false while a check is
  * in flight, so upload stays disabled until the answer is in.
  */
 export function DetailsForm({ ctx }: { ctx: StagingContext }) {
   const { details, setDetails, player } = ctx;
+  const { width, height } = player.size;
   const [draft, setDraft] = useState(details.slug);
   const [status, setStatus] = useState<SlugStatus>(() => initialStatus(details));
   // Frozen at mount, so the effect below runs once and never on a keystroke.
@@ -162,6 +163,23 @@ export function DetailsForm({ ctx }: { ctx: StagingContext }) {
 
   return (
     <div className={ui.section}>
+      <dl className="space-y-1 text-[11px]">
+        <div className="flex items-center justify-between gap-2">
+          <dt className="text-muted-dim">Length</dt>
+          <dd className="text-muted">{formatElapsed(player.editedDuration * 1000)}</dd>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <dt className="text-muted-dim">Size</dt>
+          <dd className="text-muted">
+            {width} × {height}
+          </dd>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <dt className="text-muted-dim">Link</dt>
+          <dd className="truncate text-muted">{details.slug === "" ? "auto" : details.slug}</dd>
+        </div>
+      </dl>
+
       <div className={ui.group}>
         <label className={ui.label} htmlFor="staging-title">
           Title

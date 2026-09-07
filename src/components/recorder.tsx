@@ -22,7 +22,7 @@ const Staging = dynamic(() => import("./staging/staging").then((m) => m.Staging)
   ssr: false,
 });
 
-export function Recorder() {
+export function Recorder({ shareBase }: { shareBase: string }) {
   const {
     state,
     capabilities,
@@ -230,6 +230,7 @@ export function Recorder() {
           error={state.error}
           onFinish={actions.finish}
           onDiscard={actions.discard}
+          shareBase={shareBase}
         />
       ) : (
         <div

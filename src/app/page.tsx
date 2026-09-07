@@ -1,4 +1,5 @@
 import { isOwner } from "@/lib/auth";
+import { shareBaseUrl } from "@/lib/env";
 import { PasswordGate } from "@/components/password-gate";
 import { Recorder } from "@/components/recorder";
 
@@ -7,5 +8,5 @@ export default async function Home() {
     return <PasswordGate />;
   }
 
-  return <Recorder />;
+  return <Recorder shareBase={shareBaseUrl()} />;
 }

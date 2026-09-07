@@ -13,6 +13,7 @@ import type { BackgroundConfig } from "@/lib/recording/types";
 import { Preview } from "./preview";
 import { Timeline } from "./timeline";
 import { Rail, type RailSection } from "./rail";
+import { TopBar } from "./top-bar";
 import type { Details, Selection, StagingContext, StagingProps, Tool } from "./types";
 
 export type { StagingProps } from "./types";
@@ -440,12 +441,15 @@ export function Staging(props: StagingProps) {
   // No `overflow-hidden` on the grid: Preview and Timeline each clip their own
   // content, and a clipping ancestor would kill the rail's `sticky`.
   return (
-    <div className="grid w-full max-w-[1280px] select-none gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <div className="min-w-0 space-y-3">
-        <Preview ctx={ctx} />
-        <Timeline ctx={ctx} />
+    <div className="w-full max-w-[1280px] select-none space-y-3">
+      <TopBar ctx={ctx} shareBase={props.shareBase} />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 space-y-3">
+          <Preview ctx={ctx} />
+          <Timeline ctx={ctx} />
+        </div>
+        <Rail ctx={ctx} section={section} onSection={setSection} />
       </div>
-      <Rail ctx={ctx} section={section} onSection={setSection} />
     </div>
   );
 }
