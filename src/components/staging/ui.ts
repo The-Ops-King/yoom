@@ -57,7 +57,7 @@ export const sliderValue =
  */
 export const seg = "flex gap-0.5 rounded-lg bg-surface-raised p-0.5";
 export const segItem =
-  "flex-1 rounded-md px-2 py-1 text-center text-[11px] text-muted transition-colors hover:text-foreground";
+  "flex-1 rounded-md px-2 py-1 text-center text-[11px] text-muted transition-colors hover:text-foreground disabled:opacity-30 disabled:hover:text-muted";
 /**
  * Selected segment. `text-white`, not `text-foreground`: `#f5f3ee` on
  * `--color-accent` `#3f7d5c` measures ~4.39:1, under WCAG AA's 4.5:1 for
@@ -65,7 +65,7 @@ export const segItem =
  * in this project — do not reintroduce it.
  */
 export const segItemOn =
-  "flex-1 rounded-md bg-accent px-2 py-1 text-center text-[11px] font-semibold text-white";
+  "flex-1 rounded-md bg-accent px-2 py-1 text-center text-[11px] font-semibold text-white disabled:opacity-30";
 
 /**
  * Filled-bar slider: the row IS the track, accent fill shows the value, name
@@ -74,7 +74,7 @@ export const segItemOn =
  * See `slider.tsx` for the `<Slider>` component built from these.
  */
 export const sliderFill =
-  "relative flex h-7 items-center overflow-hidden rounded-lg border border-border-subtle bg-surface-raised px-2.5";
+  "relative flex h-7 items-center overflow-hidden rounded-lg border border-border-subtle bg-surface-raised px-2.5 data-[disabled]:opacity-40";
 export const sliderFillBar = "absolute inset-y-0 left-0 bg-accent/20 border-r border-accent/50";
 export const sliderFillName = "relative text-[11px] text-muted";
 export const sliderFillValue = "relative ml-auto font-mono text-[11px] tabular-nums text-foreground";

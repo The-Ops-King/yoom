@@ -44,3 +44,6 @@ next-env.d.ts
 
 # Brainstorming visual companion scratch
 .superpowers/
+
+# Agent worktrees
+.claude/worktrees/
