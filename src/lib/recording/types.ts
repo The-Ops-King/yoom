@@ -1,3 +1,7 @@
+import type { ArrowStyle } from "@/lib/edits";
+
+export type { ArrowStyle };
+
 /** Every shared type for the recording stack. No runtime code lives here. */
 
 export type RecordingMode = "screen" | "camera" | "screen+camera";
@@ -337,17 +341,9 @@ export interface FrameLayout {
 
 // ---------- settings ----------
 
-/**
- * Mirrors `ArrowStyle` from `src/lib/edits.ts`. Not imported from there: this
- * file is the base of the recording-types graph (nothing else here imports
- * anything), while `edits.ts` already imports from both this file and from
- * `./settings`, which itself imports this file. Importing `ArrowStyle` from
- * `edits.ts` would therefore close a cycle (types.ts -> edits.ts -> types.ts).
- * Keep this union in sync with `edits.ts`'s `ArrowStyle` by hand; a cleaner
- * fix — making this file the canonical definition and having `edits.ts`
- * import it — touches `edits.ts`, which is out of scope for this change.
- */
-export type ArrowStyle = "standard" | "double" | "curved" | "fancy";
+// `ArrowStyle` is re-exported from `edits.ts` at the top of this file — a
+// type-only import, erased at compile time under `isolatedModules`, so it
+// cannot create a runtime cycle.
 
 /**
  * Appearance the editor remembers between takes. Content never lives here —
