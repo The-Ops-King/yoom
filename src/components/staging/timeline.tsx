@@ -296,6 +296,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
                 zoomLanes.rows[i] !== row ? null : (
                   <div
                     key={`zoom-${i}`}
+                    title={z.kind === "follow" ? `Follow ${i + 1}` : `Zoom ${i + 1}`}
                     className={`${laneClip} z-30 cursor-grab ${
                       isSel("zoom", i) ? "border-sky-300 bg-sky-500/50" : "border-sky-500/50 bg-sky-500/25"
                     }`}
