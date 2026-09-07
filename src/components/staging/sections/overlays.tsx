@@ -80,7 +80,7 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
   const overlay = index >= 0 ? edits.overlays[index] : undefined;
   // Same call the timeline makes, over the same array — so the row this panel
   // reports always matches the row the overlay actually packs into there.
-  const { rows, count } = packRows(edits.overlays);
+  const overlayLanes = packRows(edits.overlays);
   /**
    * `addOverlay` silently refuses past the cap, so arming a tool that cannot
    * place anything would look like the preview had stopped responding. Say it
@@ -182,13 +182,15 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
             </label>
           </div>
 
-          {/* `overlay` is only set once `index` is in range, so `rows[index]` is always defined. */}
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] text-muted">Row</span>
-            <span className="font-mono text-[11px] tabular-nums text-foreground">
-              {rows[index] + 1} of {count}
-            </span>
-          </div>
+          {/* `overlay` is only set once `index` is in range, so `overlayLanes.rows[index]` is always defined. */}
+          <dl className="space-y-1 text-[11px]">
+            <div className="flex items-center justify-between gap-2">
+              <dt className="text-muted-dim">Row</dt>
+              <dd className="text-muted">
+                {overlayLanes.rows[index] + 1} of {overlayLanes.count}
+              </dd>
+            </div>
+          </dl>
 
           <div className="flex flex-wrap items-center gap-3">
             {/* Blur has no colour (it resamples the pixels underneath it) and an image brings its own. */}
