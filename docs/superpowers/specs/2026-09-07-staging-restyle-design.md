@@ -235,7 +235,11 @@ Appearance settles once and persists. Content does not.
 - Camera: `shape`, `mirror`, the `t = 0` keyframe's `rect` and `pan`
 - Overlay defaults: colour, `thickness`, `ArrowStyle`
 - Click highlight: colour, size, ripple duration
-- Zoom defaults: `ramp`, `kind`
+
+**Zoom is deliberately NOT sticky.** An earlier draft listed `ramp` and `kind`
+here. `kind: "follow"` is only available when the take carries a desktop cursor
+track, so persisting it would carry a setting into recordings that cannot honour
+it — that makes it content, not appearance. It was also never asked for.
 
 **Per-recording** — never sticky: cuts, placed zooms, placed overlays, individual
 `ClickMark.on` toggles, camera keyframes after `t = 0`, title, description, slug.
