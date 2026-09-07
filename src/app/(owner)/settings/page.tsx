@@ -3,6 +3,7 @@ import { isOwner } from "@/lib/auth";
 import { getSettings } from "@/lib/db";
 import { PasswordGate } from "@/components/password-gate";
 import { AlertToggles } from "@/components/settings/alert-toggles";
+import { FactoryReset } from "@/components/settings/factory-reset";
 
 export const metadata: Metadata = { title: "Settings · Yoom" };
 
@@ -22,6 +23,7 @@ export default async function SettingsPage() {
         </p>
       </div>
       <AlertToggles settings={settings} />
+      <FactoryReset />
     </main>
   );
 }
