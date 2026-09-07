@@ -199,9 +199,10 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
   // The clicks lane exists only for a take the desktop hook actually saw.
   const clicks = edits.clicks ?? [];
 
-  // Zooms and overlays share rows when they do not overlap in time: seven
+  // Zooms and overlays each share rows when they do not overlap in time: seven
   // non-overlapping overlays are one row, not seven lanes. `rows[i]` is the row
-  // for `edits.overlays[i]`, so selection and drag indices are unaffected.
+  // for `edits.zooms[i]` / `edits.overlays[i]`, so selection and drag indices
+  // are unaffected.
   const zoomLanes = packRows(edits.zooms);
   const overlayLanes = packRows(edits.overlays);
   const laneCount =
@@ -292,6 +293,12 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
             laneCount > 8 ? "max-h-[184px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""
           }`}
         >
+          {/*
+            The row wrapper is always plain `border-border`: it is shared by
+            however many items packed into it, so it cannot itself be "the
+            selected one" the way the single-item camera-keyframe row can.
+            Each clip carries its own `isSel` border instead.
+          */}
           {Array.from({ length: zoomLanes.count }, (_, row) => (
             <div key={`zoom-row-${row}`} className={`${laneRow} border-border`}>
               <span className={laneLabel}>{row === 0 ? "Zoom" : ""}</span>
