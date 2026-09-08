@@ -12,6 +12,7 @@ import {
   type VideoEdits,
 } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
+import { loadSettings } from "@/lib/recording/settings";
 import { isDesktop } from "@/lib/recording/desktop-bridge";
 import { Slider } from "../slider";
 import type { StagingContext } from "../types";
@@ -98,7 +99,9 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
   return (
     <div className={ui.section}>
       <div className={ui.group}>
-        <span className={ui.label}>Cursor</span>
+        <div className={ui.sectionHeader}>
+          <span className={ui.sectionHeaderTitle}>Cursor</span>
+        </div>
         <div role="radiogroup" aria-label="Cursor style" className={ui.seg}>
           {STYLES.map((s) => {
             // `smooth` needs a path to draw along; without a track it would
@@ -156,9 +159,25 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
       </label>
 
       <div className={ui.group}>
-        <span className={ui.label}>
-          Click ripples {clicks.length > 0 && `(${clicks.filter((c) => c.on).length}/${clicks.length})`}
-        </span>
+        <div className={ui.sectionHeader}>
+          <span className={ui.sectionHeaderTitle}>
+            Click ripples {clicks.length > 0 && `(${clicks.filter((c) => c.on).length}/${clicks.length})`}
+          </span>
+          <button
+            type="button"
+            className={ui.sectionHeaderAction}
+            onClick={() => {
+              // Back to YOUR saved appearance, not the factory amber — the
+              // owner settings page holds the factory reset.
+              const d = loadSettings().staging;
+              ctx.apply((e) =>
+                ops.setCursor(e, { ...cursor, clickColor: d.clickColor, clickRippleMs: d.clickRippleMs }),
+              );
+            }}
+          >
+            Reset
+          </button>
+        </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
@@ -237,7 +256,9 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
       </div>
 
       <div className={ui.group}>
-        <span className={ui.label}>Key tracking</span>
+        <div className={ui.sectionHeader}>
+          <span className={ui.sectionHeaderTitle}>Key tracking</span>
+        </div>
         <button
           type="button"
           className={ui.btn}
@@ -255,7 +276,9 @@ export function CursorSection({ ctx }: { ctx: StagingContext }) {
 
       {edits.markers.length > 0 && (
         <div className={ui.group}>
-          <span className={ui.label}>Markers ({edits.markers.length})</span>
+          <div className={ui.sectionHeader}>
+            <span className={ui.sectionHeaderTitle}>Markers ({edits.markers.length})</span>
+          </div>
           <ul className={ui.group}>
             {edits.markers.map((m) => (
               <li key={m.t} className="flex items-center justify-between gap-1.5">
