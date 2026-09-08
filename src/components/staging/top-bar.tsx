@@ -41,9 +41,9 @@ export function TopBar({ ctx, shareBase }: { ctx: StagingContext; shareBase: str
   const { disabled, reason } = uploadGate(ctx);
 
   return (
-    <header className={`space-y-2 ${ui.bar}`}>
-      <div className="flex items-center gap-3">
-        <div className="flex shrink-0 gap-1">
+    <header className={`space-y-3 ${ui.bar}`}>
+      <div className="flex items-center gap-4">
+        <div className="flex shrink-0 gap-1.5">
           <button type="button" disabled={!ctx.canUndo} onClick={ctx.undo} className={ui.btn}>
             Undo
           </button>
@@ -58,7 +58,7 @@ export function TopBar({ ctx, shareBase }: { ctx: StagingContext; shareBase: str
           onChange={(e) => setDetails((d) => ({ ...d, title: e.target.value }))}
           placeholder="Untitled recording"
           aria-label="Recording title"
-          className="min-w-0 flex-1 select-text border-b border-dashed border-border bg-transparent pb-0.5 text-sm font-semibold text-foreground outline-none placeholder:text-muted-dim focus:border-accent/50"
+          className="min-w-0 flex-1 select-text border-b border-dashed border-border bg-transparent pb-1 text-sm font-semibold text-foreground outline-none placeholder:text-muted-dim focus:border-accent/50"
         />
 
         <span className={`${ui.hint} min-w-0 max-w-[280px] truncate`}>
@@ -83,7 +83,7 @@ export function TopBar({ ctx, shareBase }: { ctx: StagingContext; shareBase: str
         {reason}
       </p>
       {ctx.error && (
-        <p role="alert" className="text-[11px] text-danger-text/90">
+        <p role="alert" className="text-[12px] text-danger-text/90">
           {ctx.error}
         </p>
       )}

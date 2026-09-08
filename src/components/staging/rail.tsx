@@ -51,8 +51,10 @@ export function Rail({
     <aside className="flex gap-2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)]">
       <IconStrip ctx={ctx} section={active} onSection={onSection} />
       <div className="flex min-w-0 flex-1 flex-col rounded-lg border border-border bg-surface lg:min-h-0">
-        <h2 className={`shrink-0 border-b border-border px-3 py-2 ${ui.label}`}>{LABEL[active]}</h2>
-        <div className="p-3 lg:min-h-0 lg:overflow-y-auto">
+        <h2 className={`shrink-0 border-b border-border px-4 py-3 ${ui.sectionHeaderTitle}`}>
+          {LABEL[active]}
+        </h2>
+        <div className="p-4 lg:min-h-0 lg:overflow-y-auto">
           {active === "camera" && <CameraSection ctx={ctx} />}
           {active === "frame" && <FrameSection ctx={ctx} />}
           {active === "zoom" && <ZoomSection ctx={ctx} />}

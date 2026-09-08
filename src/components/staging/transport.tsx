@@ -31,10 +31,10 @@ export function Transport({ ctx }: { ctx: StagingContext }) {
     <div
       role="toolbar"
       aria-label="Playback transport"
-      className={`flex flex-wrap items-center justify-between gap-3 ${ui.bar}`}
+      className={`flex flex-wrap items-center justify-between gap-4 ${ui.bar}`}
     >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex flex-wrap gap-2">
           <button type="button" className={ui.btn} onClick={() => ctx.setInPoint(player.timeRef.current)}>
             Set in (I)
           </button>
@@ -63,8 +63,8 @@ export function Transport({ ctx }: { ctx: StagingContext }) {
           In {inPoint === null ? "—" : ui.fmt(inPoint)} · Out {outPoint === null ? "—" : ui.fmt(outPoint)}
         </p>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="min-w-0 truncate text-[11px] text-muted">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <span className="min-w-0 truncate text-[12px] text-muted">
             Trim {ui.fmt(trim.start)} → {ui.fmt(trim.end)}
           </span>
           <button
@@ -79,7 +79,7 @@ export function Transport({ ctx }: { ctx: StagingContext }) {
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-2 text-[11px] tabular-nums text-muted">
+      <div className="flex shrink-0 items-center gap-3 text-[12px] tabular-nums text-muted">
         <span>{ui.fmt(player.editedTime)}</span>
         <button
           type="button"
