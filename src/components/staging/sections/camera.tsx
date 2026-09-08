@@ -12,6 +12,7 @@ import {
 } from "@/lib/edits";
 import { bubbleHeightFor, cameraAt } from "@/lib/editor/camera-track";
 import * as ops from "@/lib/editor/edit-ops";
+import { loadSettings } from "@/lib/recording/settings";
 import type { BubbleShape } from "@/lib/recording/types";
 import { contentRect } from "../content-rect";
 import { Slider } from "../slider";
@@ -172,6 +173,17 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
   const setMode = (mode: CameraMode) => atPlayhead({ mode });
 
   /**
+   * Mirror is a track-wide property, not a per-keyframe one, so it is always
+   * the sticky default — there is no "later in the timeline" case to exclude
+   * the way there is for shape. Shared by the checkbox and its Reset so the
+   * two can never drift apart.
+   */
+  const setMirror = (mirror: boolean) => {
+    ctx.apply((ed) => (ed.camera ? ops.setCamera(ed, { ...ed.camera, mirror }) : ed));
+    ctx.setStagingDefaults({ cameraMirror: mirror });
+  };
+
+  /**
    * Un-hiding restores whatever the camera was doing before it was hidden —
    * the last non-hidden keyframe at or before the playhead, else a bubble.
    */
@@ -194,7 +206,17 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
   return (
     <div className={ui.section}>
       <div className={ui.group}>
-        <span className={ui.label}>Shape at the playhead</span>
+        <div className={ui.sectionHeader}>
+          <span className={ui.sectionHeaderTitle}>Shape at the playhead</span>
+          <button
+            type="button"
+            className={ui.sectionHeaderAction}
+            disabled={sample.mode === "hidden"}
+            onClick={() => setShape(loadSettings().staging.cameraShape)}
+          >
+            Reset
+          </button>
+        </div>
         <div className={ui.seg} role="group" aria-label="Bubble shape">
           {BUBBLE_SHAPES.map((shape) => (
             <button
@@ -213,24 +235,28 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
         </div>
       </div>
 
-      <label className={ui.check}>
-        <input
-          type="checkbox"
-          checked={track.mirror}
-          onChange={(e) => {
-            const mirror = e.target.checked;
-            ctx.apply((ed) => (ed.camera ? ops.setCamera(ed, { ...ed.camera, mirror }) : ed));
-            // Mirror is a track-wide property, not a per-keyframe one, so it is
-            // always the sticky default — there is no "later in the timeline"
-            // case to exclude the way there is for shape.
-            ctx.setStagingDefaults({ cameraMirror: mirror });
-          }}
-        />
-        Mirror the camera
-      </label>
+      <div className={ui.sectionHeader}>
+        <label className={ui.check}>
+          <input
+            type="checkbox"
+            checked={track.mirror}
+            onChange={(e) => setMirror(e.target.checked)}
+          />
+          Mirror the camera
+        </label>
+        <button
+          type="button"
+          className={ui.sectionHeaderAction}
+          onClick={() => setMirror(loadSettings().staging.cameraMirror)}
+        >
+          Reset
+        </button>
+      </div>
 
       <div className={ui.group}>
-        <span className={ui.label}>At the playhead</span>
+        <div className={ui.sectionHeader}>
+          <span className={ui.sectionHeaderTitle}>At the playhead</span>
+        </div>
         <div className={ui.seg} role="group" aria-label="Camera mode">
           {MODES.map((m) => (
             <button
@@ -248,7 +274,9 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
       </div>
 
       <div className={ui.group}>
-        <span className={ui.label}>Crop pan</span>
+        <div className={ui.sectionHeader}>
+          <span className={ui.sectionHeaderTitle}>Crop pan</span>
+        </div>
         {/*
           The cover-crop only has slack on the axis the camera's aspect
           overshoots the bubble's. The bubble always fills the full height of
@@ -289,9 +317,9 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
       </div>
 
       <div className={ui.group}>
-        <span className={ui.label}>
-          Keyframes ({track.keyframes.length})
-        </span>
+        <div className={ui.sectionHeader}>
+          <span className={ui.sectionHeaderTitle}>Keyframes ({track.keyframes.length})</span>
+        </div>
         <ul className={ui.group}>
           {track.keyframes.map((k, i) => (
             <li key={k.t} className="flex items-center justify-between gap-2">

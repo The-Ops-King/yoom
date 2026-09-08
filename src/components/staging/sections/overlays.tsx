@@ -13,6 +13,7 @@ import {
 } from "@/lib/edits";
 import * as ops from "@/lib/editor/edit-ops";
 import { packRows } from "@/lib/editor/lanes";
+import { loadSettings } from "@/lib/recording/settings";
 import { contentRect } from "../content-rect";
 import { Slider } from "../slider";
 import type { StagingContext, Tool } from "../types";
@@ -141,8 +142,8 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
   return (
     <div className={ui.section}>
       <div className={ui.group}>
-        <div className="flex items-center justify-between">
-          <span className={ui.label}>Overlays</span>
+        <div className={ui.sectionHeader}>
+          <span className={ui.sectionHeaderTitle}>Overlays</span>
           <span className="text-[11px] font-mono tabular-nums text-muted-dim">
             {edits.overlays.length} / {MAX_OVERLAYS}
           </span>
@@ -182,7 +183,9 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
 
       {overlay ? (
         <div className="space-y-2 border-t border-border pt-2">
-          <span className={ui.label}>{overlay.type}</span>
+          <div className={ui.sectionHeader}>
+            <span className={ui.sectionHeaderTitle}>{overlay.type}</span>
+          </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-1 text-[11px] text-muted">
@@ -224,7 +227,20 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
           {/* Blur has no colour (it resamples the pixels underneath it) and an image brings its own. */}
           {COLOURED.includes(overlay.type) && (
             <div className={ui.group}>
-              <span className="text-[11px] text-muted">Colour</span>
+              <div className={ui.sectionHeader}>
+                <span className={ui.sectionHeaderTitle}>Colour</span>
+                <button
+                  type="button"
+                  className={ui.sectionHeaderAction}
+                  onClick={() => {
+                    const color = loadSettings().staging.overlayColor;
+                    ctx.apply((ed) => ops.updateOverlay(ed, index, { color }));
+                    ctx.setStagingDefaults({ overlayColor: color });
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
               <div className={`${ui.swatchGrid} grid-cols-8`}>
                 {SWATCH_PALETTE.map((hex) => {
                   const on = (overlay.color ?? DEFAULT_COLOR) === hex;
@@ -259,20 +275,23 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-3">
-            {overlay.type === "rect" && (
-              <label className="flex items-center gap-1.5 text-[11px] text-muted">
-                <input
-                  type="checkbox"
-                  className="accent-accent"
-                  checked={overlay.fill === true}
-                  onChange={(e) => ctx.apply((ed) => ops.updateOverlay(ed, index, { fill: e.target.checked }))}
-                />
-                Fill
-              </label>
-            )}
-            {/* A filled rect has no stroke to size, and an outlined one no fill to fade. */}
-            {STROKED.includes(overlay.type) && !(overlay.type === "rect" && overlay.fill) && (
+          {/* A filled rect has no stroke to size, and an outlined one no fill to fade. */}
+          {STROKED.includes(overlay.type) && !(overlay.type === "rect" && overlay.fill) && (
+            <div className={ui.group}>
+              <div className={ui.sectionHeader}>
+                <span className={ui.sectionHeaderTitle}>Thickness</span>
+                <button
+                  type="button"
+                  className={ui.sectionHeaderAction}
+                  onClick={() => {
+                    const thickness = loadSettings().staging.overlayThickness;
+                    ctx.apply((ed) => ops.updateOverlay(ed, index, { thickness }));
+                    ctx.setStagingDefaults({ overlayThickness: thickness });
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
               <div className="w-36">
                 <Slider
                   name="Thickness"
@@ -287,6 +306,20 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
                   }}
                 />
               </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3">
+            {overlay.type === "rect" && (
+              <label className="flex items-center gap-1.5 text-[11px] text-muted">
+                <input
+                  type="checkbox"
+                  className="accent-accent"
+                  checked={overlay.fill === true}
+                  onChange={(e) => ctx.apply((ed) => ops.updateOverlay(ed, index, { fill: e.target.checked }))}
+                />
+                Fill
+              </label>
             )}
             {overlay.type === "step" && (
               <label className="flex items-center gap-1.5 text-[11px] text-muted">
@@ -337,7 +370,9 @@ export function OverlaysSection({ ctx }: { ctx: StagingContext }) {
           */}
           {overlay.type === "arrow" && (
             <div className={ui.group}>
-              <span className="text-[11px] text-muted">Style</span>
+              <div className={ui.sectionHeader}>
+                <span className={ui.sectionHeaderTitle}>Style</span>
+              </div>
               <div className={ui.seg}>
                 {ARROW_STYLES.map((s) => {
                   const on = (overlay.style ?? "standard") === s.id;

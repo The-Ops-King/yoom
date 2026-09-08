@@ -58,13 +58,6 @@ export const btnRow = "flex flex-wrap items-center gap-2";
 /** Checkbox line. */
 export const check = "flex items-center gap-2 text-[12px] text-muted";
 
-/** Slider row: fixed-width name, slider takes the rest, value pinned right. */
-export const sliderRow = "flex items-center gap-2 text-[11px] text-muted";
-export const sliderName = "w-14 shrink-0";
-export const slider = "min-w-0 flex-1 disabled:opacity-30";
-export const sliderValue =
-  "w-10 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-dim";
-
 /**
  * Segmented control: mutually exclusive choices in a shared trough. Use for
  * 2-5 options that would otherwise be a row of `btn`s (camera mode and shape,
@@ -84,9 +77,9 @@ export const segItemOn =
 
 /**
  * Filled-bar slider: the row IS the track, accent fill shows the value, name
- * left, value right. Replaces the `sliderRow`/`sliderName`/`slider`/
- * `sliderValue` quartet, which wastes a third of a 320px rail on a thin line.
- * See `slider.tsx` for the `<Slider>` component built from these.
+ * left, value right. Replaces an earlier thin-line row layout that wasted a
+ * third of a 320px rail on a track alone. See `slider.tsx` for the
+ * `<Slider>` component built from these.
  */
 export const sliderFill =
   "relative flex h-9 items-center overflow-hidden rounded-lg border border-border-subtle bg-surface-raised px-3 data-[disabled]:opacity-40";

@@ -180,7 +180,9 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
             would leave no way back to Static.
           */}
           <div className={ui.group}>
-            <span className="text-[11px] text-muted">Kind</span>
+            <div className={ui.sectionHeader}>
+              <span className={ui.sectionHeaderTitle}>Kind</span>
+            </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <div className={ui.seg}>
                 <button
@@ -223,7 +225,9 @@ export function ZoomSection({ ctx }: { ctx: StagingContext }) {
       )}
 
       <div className={ui.group}>
-        <span className={ui.label}>Zooms ({edits.zooms.length})</span>
+        <div className={ui.sectionHeader}>
+          <span className={ui.sectionHeaderTitle}>Zooms ({edits.zooms.length})</span>
+        </div>
         {edits.zooms.length === 0 ? (
           <p className={ui.hint}>No zooms yet.</p>
         ) : (
