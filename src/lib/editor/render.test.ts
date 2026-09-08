@@ -194,6 +194,23 @@ describe("drawFrame", () => {
     expect(mid).toBeGreaterThan(8.64);
     expect(mid).toBeLessThan(108);
   });
+  it("clips a full-mode camera to the frame's own rounded corners, not square ones", () => {
+    const framed = { ...base,
+      camera: { shape: "circle", mirror: false,
+        keyframes: [{ t: 0, mode: "full" as const, rect: { x: 0, y: 0, w: 1, h: 1 } }] } as CameraTrack,
+      frame: { enabled: true, padding: 0.05, radius: 0.01, shadow: 0, background: { kind: "color" as const, color: "#0f0" } },
+    };
+    // At 2112×1272 the padded content box is exactly 1920×1080 at (96,96),
+    // scale 1, so `radius` is `computeFrameLayout`'s own 19px unscaled — the
+    // same value and the same box the screen picture's `framePath` clip uses.
+    radii.length = 0; boxes.length = 0;
+    drawFrame(fakeCtx(), inputs(framed), 0, 2112, 1272);
+    // Two rounded clips this frame: the picture's frame clip, then the
+    // full-mode camera's. Before the fix the camera's was a hardcoded 0
+    // (square corners); it must now match the frame's radius exactly.
+    expect(radii).toEqual([19, 19]);
+    expect(boxes[1]).toEqual(boxes[0]);
+  });
   it("draws the camera as the primary source in camera-only mode, with no bubble", () => {
     const ctx = fakeCtx();
     const e = { ...base, camera: defaultCameraTrack("circle", "medium", 16 / 9) };

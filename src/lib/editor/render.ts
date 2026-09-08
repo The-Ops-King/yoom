@@ -629,7 +629,10 @@ export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t
         : { x: content.x + rect.x * content.w, y: content.y + rect.y * content.h, w: rect.w * content.w, h: rect.h * content.h };
       if (box.w < 1 || box.h < 1) return;
       const crop = coverCrop(cam.videoWidth, cam.videoHeight, box.w, box.h, s.pan);
-      const r = mode === "full" ? 0 : bubbleRadius(box.w, box.h);
+      // `full` has no bubble shape of its own — it fills the frame, so it
+      // takes the FRAME's corner radius (the same one `pic`/`framePath` used
+      // above), not a shape radius and not a hardcoded square corner.
+      const r = mode === "full" ? radius : bubbleRadius(box.w, box.h);
       ctx.save(); ctx.globalAlpha = alpha; ctx.clip(roundedPath(box.x, box.y, box.w, box.h, r));
       if (track.mirror) { ctx.translate(box.x + box.w, box.y); ctx.scale(-1, 1); ctx.drawImage(cam, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, box.w, box.h); }
       else ctx.drawImage(cam, crop.sx, crop.sy, crop.sw, crop.sh, box.x, box.y, box.w, box.h);
