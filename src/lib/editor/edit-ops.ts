@@ -20,6 +20,7 @@ import {
   type Cut,
   type Overlay,
   type Point,
+  type Rect,
   type VideoEdits,
   type Zoom,
   type ZoomKind,
@@ -93,6 +94,28 @@ function nextStepNumber(overlays: readonly Overlay[]): number {
 }
 
 /**
+ * Fixed normalised side of a freshly placed step badge (a square rect; the
+ * badge itself is the circle inscribed in it — see `render.ts`'s `case
+ * "step"`, which sizes the drawn glyph as `Math.min(w, h)` of the rect). A
+ * fraction of the frame rather than a pixel size, so the badge reads the
+ * same on a 1080p take and a 4K one. Matches `DEFAULT_TEXT_SIZE`'s order of
+ * magnitude — the size this codebase already treats as "legible on the
+ * frame" for burned-in text.
+ */
+export const STEP_BADGE_SIZE = 0.05;
+
+/**
+ * A step badge's standard rect, centred on wherever `r` was centred — its
+ * own centre, not its size. This is what makes the badge's size the same
+ * whether it was placed by a click (a near-zero seed rect) or by a drag: the
+ * drag only ever chooses where the badge goes, never how big it is.
+ */
+function stepBadgeRect(r: Rect): Rect {
+  const half = STEP_BADGE_SIZE / 2;
+  return { x: r.x + r.w / 2 - half, y: r.y + r.h / 2 - half, w: STEP_BADGE_SIZE, h: STEP_BADGE_SIZE };
+}
+
+/**
  * Restore the derived-`rect` invariants from `edits.ts`.
  *
  * An arrow or line: `from`/`to` are the truth and `rect` is their bounding box
@@ -118,17 +141,20 @@ function withDerivedRect(o: Overlay): Overlay {
 
 /**
  * Append an overlay, clamped into range (`start >= 0`, `end > start` by
- * `MIN_SPAN`, `rect` clamped into the 0..1 frame via `clampRect`). A step with
- * no explicit `n` is numbered by `nextStepNumber`; an arrow's or line's `rect`
- * is re-derived from its endpoints and a draw's from its `points`. Returns `e`
- * unchanged once `MAX_OVERLAYS` is reached.
+ * `MIN_SPAN`, `rect` clamped into the 0..1 frame via `clampRect`). A step is
+ * always pinned to `STEP_BADGE_SIZE`, centred on wherever its incoming `rect`
+ * was centred — so the placement gesture (click or drag) only ever chooses
+ * position, never size — and one arriving with no explicit `n` is numbered by
+ * `nextStepNumber`. An arrow's or line's `rect` is re-derived from its
+ * endpoints and a draw's from its `points`. Returns `e` unchanged once
+ * `MAX_OVERLAYS` is reached.
  */
 export function addOverlay(e: VideoEdits, overlay: Overlay): VideoEdits {
   if (e.overlays.length >= MAX_OVERLAYS) return e;
   const next = { ...overlay };
   next.start = Math.max(0, next.start);
   if (next.end <= next.start) next.end = next.start + MIN_SPAN;
-  next.rect = clampRect(next.rect);
+  next.rect = clampRect(next.type === "step" ? stepBadgeRect(next.rect) : next.rect);
   if (next.type === "step" && next.n === undefined) next.n = nextStepNumber(e.overlays);
   return { ...e, overlays: [...e.overlays, withDerivedRect(next)] };
 }

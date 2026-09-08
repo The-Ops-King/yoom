@@ -63,7 +63,38 @@ describe("edit-ops", () => {
     e = ops.addOverlay(e, { type: "step", start: 2, end: 3, rect: { x: 0, y: 0, w: 0.1, h: 0.1 } });
     e = ops.removeOverlay(e, 1); // drops the n=2 step
     e = ops.addOverlay(e, { type: "step", start: 3, end: 4, rect: { x: 0, y: 0, w: 0.1, h: 0.1 } });
+    // The freed number (2) is never reused: the next step after a removal is
+    // max(existing n) + 1, i.e. 4, not a plain re-count — so two overlays can
+    // never end up sharing a number.
     expect(e.overlays.map((o) => o.n)).toEqual([1, 3, 4]);
+  });
+
+  it("addOverlay pins a step badge to the standard size, centred on whatever rect arrived", () => {
+    let e = start();
+    // A click seeds a zero-size rect at the point; a drag seeds whatever box
+    // the gesture drew. Both must land at the standard size — only the centre
+    // survives from the input.
+    e = ops.addOverlay(e, { type: "step", start: 0, end: 1, rect: { x: 0.5, y: 0.5, w: 0, h: 0 } });
+    e = ops.addOverlay(e, { type: "step", start: 1, end: 2, rect: { x: 0.1, y: 0.2, w: 0.4, h: 0.6 } });
+    for (const o of e.overlays) {
+      expect(o.rect.w).toBeCloseTo(ops.STEP_BADGE_SIZE);
+      expect(o.rect.h).toBeCloseTo(ops.STEP_BADGE_SIZE);
+    }
+    // Click at (0.5, 0.5): centred there.
+    expect(e.overlays[0].rect.x).toBeCloseTo(0.5 - ops.STEP_BADGE_SIZE / 2);
+    expect(e.overlays[0].rect.y).toBeCloseTo(0.5 - ops.STEP_BADGE_SIZE / 2);
+    // Drag box x:0.1..0.5, y:0.2..0.8: centre (0.3, 0.5).
+    expect(e.overlays[1].rect.x).toBeCloseTo(0.3 - ops.STEP_BADGE_SIZE / 2);
+    expect(e.overlays[1].rect.y).toBeCloseTo(0.5 - ops.STEP_BADGE_SIZE / 2);
+  });
+
+  it("updateOverlay leaves an existing step badge's size alone — only a fresh placement is pinned", () => {
+    let e = ops.addOverlay(start(), { type: "step", start: 0, end: 1, rect: { x: 0.5, y: 0.5, w: 0, h: 0 } });
+    expect(e.overlays[0].rect.w).toBeCloseTo(ops.STEP_BADGE_SIZE);
+    // Resize the placed badge via a handle drag: `updateOverlay` must not
+    // re-pin it back to the standard size.
+    e = ops.updateOverlay(e, 0, { rect: { x: 0.4, y: 0.4, w: 0.3, h: 0.3 } });
+    expect(e.overlays[0].rect).toEqual({ x: 0.4, y: 0.4, w: 0.3, h: 0.3 });
   });
 
   it("addOverlay derives an arrow's rect from its endpoints", () => {

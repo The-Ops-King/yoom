@@ -17,7 +17,7 @@ const MIN_SIDE = 0.01;
  */
 const POINT_PAIR_TOOLS: Tool[] = ["arrow", "line"];
 /** Tools that place a default-sized box on a click, rather than needing a drag. */
-const PLACED_TOOLS: Tool[] = ["text", "emoji"];
+const PLACED_TOOLS: Tool[] = ["text", "emoji", "step"];
 /** The view-space box a clicked (not dragged) `text` / `emoji` overlay gets. */
 const TEXT_BOX = { w: 0.3, h: 0.08 };
 const EMOJI_BOX = { w: 0.1, h: 0.1 };
@@ -182,16 +182,27 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
       let r = bandRect(band);
       if (r.w < MIN_DRAW || r.h < MIN_DRAW) {
         // Text and emoji are PLACED as much as drawn: a click drops a
-        // default-sized box centred on it rather than doing nothing.
+        // default-sized box centred on it rather than doing nothing. A step
+        // badge is placed the same way, but its box only has to carry a
+        // CENTRE — `addOverlay` (edit-ops.ts) pins every step overlay to
+        // `STEP_BADGE_SIZE` regardless of what rect arrives here, so a
+        // zero-size point at the click is enough.
         if (!PLACED_TOOLS.includes(tool)) return;
-        const box = tool === "text" ? TEXT_BOX : EMOJI_BOX;
-        r = { x: band.ax - box.w / 2, y: band.ay - box.h / 2, w: box.w, h: box.h };
+        if (tool === "step") r = { x: band.ax, y: band.ay, w: 0, h: 0 };
+        else {
+          const box = tool === "text" ? TEXT_BOX : EMOJI_BOX;
+          r = { x: band.ax - box.w / 2, y: band.ay - box.h / 2, w: box.w, h: box.h };
+        }
       }
       const rect = clampRect(toSource(r, band.view));
       if (tool === "zoom") ctx.addZoomAt(rect, "static");
       else if (tool === "followZoom") ctx.addZoomAt(rect, "follow");
       else if (tool === "text") ctx.addOverlayAt("text", rect, { text: DEFAULT_TEXT });
       else if (tool === "emoji") ctx.addOverlayAt("emoji", rect, { text: DEFAULT_EMOJI });
+      // A step tool ignores whatever size a drag would have produced: `rect`
+      // only has to reach `addOverlay` with the right CENTRE, and `addOverlay`
+      // (edit-ops.ts) pins its size to `STEP_BADGE_SIZE` no matter how this
+      // rect got here — click or drag.
       else if (tool !== "select") ctx.addOverlayAt(tool, rect);
     };
     window.addEventListener("pointermove", onMove);
@@ -314,8 +325,14 @@ export function OverlayLayer({ ctx }: { ctx: StagingContext }) {
         `render.ts` clips its own overlay pass.
       */}
       <div className="absolute overflow-hidden" style={pctBox(cf)}>
-        {/* A band is the wrong shape for the tools measured by length or path. */}
-        {band && !POINT_PAIR_TOOLS.includes(tool) && tool !== "draw" && (
+        {/*
+          A band is the wrong shape for the tools measured by length or path,
+          and for `step`: its badge is always placed at `STEP_BADGE_SIZE`
+          (edit-ops.ts), so a growing rubber band here would promise a size
+          the drop will not honour. The crosshair cursor is feedback enough
+          until release.
+        */}
+        {band && !POINT_PAIR_TOOLS.includes(tool) && tool !== "draw" && tool !== "step" && (
           <div
             className={`absolute border-2 border-dashed ${
               isZoomTool ? "border-sky-300 bg-sky-400/15" : "border-emerald-300 bg-emerald-400/15"
