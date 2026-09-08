@@ -173,12 +173,16 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
   const isSel = (kind: "cut" | "zoom" | "overlay" | "keyframe", index: number) =>
     selected?.kind === kind && selected.index === index;
 
-  const laneClip = "absolute inset-y-0 rounded-sm border";
+  const laneClip = "absolute inset-y-0 rounded-md border";
   const handle = "absolute inset-y-0 w-1.5 cursor-ew-resize";
-  /** A row, shared by every item packed into it, kept short so several still fit under the track. */
-  const laneRow = "relative h-[18px] shrink-0 rounded-sm border bg-surface";
+  /**
+   * A row, shared by every item packed into it. 36px matches the rail's own
+   * "36px controls" scale from the panel redesign (see `ui.ts`'s
+   * `sliderFill`), up from the pre-redesign 18px hairline rows.
+   */
+  const laneRow = "relative h-9 shrink-0 rounded-md border bg-surface";
   const laneLabel =
-    "pointer-events-none absolute left-0.5 top-1/2 z-20 -translate-y-1/2 rounded-sm bg-surface/85 px-1 text-[9px] leading-none text-muted-dim";
+    "pointer-events-none absolute left-1 top-1/2 z-20 -translate-y-1/2 rounded bg-surface/85 px-1.5 py-0.5 text-[11px] font-medium leading-none text-muted-dim";
 
   /**
    * "Blur" when it is the only one of its type, "Ellipse 2" when it is not.
@@ -280,17 +284,22 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
           hold several items, so the count tracks maximum concurrency, not
           item count, and each item is still individually grabbable via its
           own clip. Past eight rows the stack scrolls rather than pushing the
-          rest of the screen down.
+          rest of the screen down — that threshold is unchanged from before
+          rows got taller; only the pixel math below grew with them.
 
           The scrollbar is given no layout width (and no reserved gutter — that
           would narrow the rows permanently): every clip's percentage is
           resolved against the same width as `trackRef`, so a classic scrollbar
           eating ~15px would slide the whole stack out from under the playhead.
           The ninth row deliberately peeks instead, as the scroll affordance.
+
+          336px = 8 full 36px rows + 7 4px gaps (316px), + one more 4px gap,
+          + a 16px peek of row nine — the same ~44% partial-row peek the old
+          18px-row math used (8px of 18px), carried forward to the new height.
         */}
         <div
           className={`mt-1 space-y-1 ${
-            laneCount > 8 ? "max-h-[184px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""
+            laneCount > 8 ? "max-h-[336px] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""
           }`}
         >
           {/*
@@ -308,7 +317,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
                     key={`zoom-${i}`}
                     title={z.kind === "follow" ? `Follow ${i + 1}` : `Zoom ${i + 1}`}
                     className={`${laneClip} z-30 cursor-grab ${
-                      isSel("zoom", i) ? "border-sky-300 bg-sky-500/50" : "border-sky-500/50 bg-sky-500/25"
+                      isSel("zoom", i) ? "border-sky-300 bg-sky-500/50" : "border-sky-500/70 bg-sky-500/30"
                     }`}
                     style={{ left: pct(z.start), width: pct(z.end - z.start) }}
                     onPointerDown={(e) => {
@@ -350,7 +359,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
                 <div
                   key={`kf-${i}`}
                   title={`Camera keyframe ${k.t.toFixed(2)}s`}
-                  className={`absolute top-1/2 z-30 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border ${
+                  className={`absolute top-1/2 z-30 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 border ${
                     i === 0 ? "cursor-default" : "cursor-ew-resize"
                   } ${isSel("keyframe", i) ? "border-violet-200 bg-violet-300" : "border-violet-400 bg-violet-500"}`}
                   style={{ left: pct(k.t) }}
@@ -383,7 +392,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
                   type="button"
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => ctx.apply((e) => ops.setAllClicks(e, true))}
-                  className="rounded-sm px-0.5 text-[9px] leading-none text-muted hover:text-foreground"
+                  className="rounded px-1 text-[11px] leading-none text-muted hover:text-foreground"
                 >
                   All on
                 </button>
@@ -391,7 +400,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
                   type="button"
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => ctx.apply((e) => ops.setAllClicks(e, false))}
-                  className="rounded-sm px-0.5 text-[9px] leading-none text-muted hover:text-foreground"
+                  className="rounded px-1 text-[11px] leading-none text-muted hover:text-foreground"
                 >
                   All off
                 </button>
@@ -401,7 +410,9 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
                 there is something to actually hit; the dot inside is what you
                 see. A 6px marker with no padding was unclickable in practice.
                 Wider than 16px would start swallowing neighbouring clicks on a
-                click-heavy take.
+                click-heavy take, so the column stays 16px regardless of lane
+                height — its `inset-y-0` height already tracks the lane's own
+                (18px to 36px) for free.
               */}
               {clicks.map((c, i) => (
                 <button
@@ -417,7 +428,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
                 >
                   <span
                     aria-hidden
-                    className={`h-2.5 w-2.5 rounded-full border transition-transform group-hover:scale-125 ${
+                    className={`h-3 w-3 rounded-full border transition-transform group-hover:scale-125 ${
                       c.on
                         ? "border-warn-bright bg-warn"
                         : "border-warn/50 bg-transparent"
@@ -437,7 +448,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
                     key={`ov-${i}`}
                     title={`${overlayLabel(i)} — ${o.type}`}
                     className={`${laneClip} z-30 cursor-grab ${
-                      isSel("overlay", i) ? "border-emerald-200 bg-emerald-500/50" : "border-emerald-500/50 bg-emerald-500/25"
+                      isSel("overlay", i) ? "border-emerald-200 bg-emerald-500/50" : "border-emerald-500/70 bg-emerald-500/30"
                     }`}
                     style={{ left: pct(o.start), width: pct(o.end - o.start) }}
                     onPointerDown={(e) => {
@@ -474,7 +485,7 @@ export function Timeline({ ctx }: { ctx: StagingContext }) {
         </div>
 
         {/* Above the lane clips (z-30), which would otherwise paint over it. */}
-        <div ref={headRef} className="pointer-events-none absolute inset-y-0 z-40 w-0.5 -translate-x-1/2 bg-danger-hover" />
+        <div ref={headRef} className="pointer-events-none absolute inset-y-0 z-40 w-1 -translate-x-1/2 bg-danger-hover" />
       </div>
 
       <div className="flex items-center justify-between text-[11px] text-muted-dim">
