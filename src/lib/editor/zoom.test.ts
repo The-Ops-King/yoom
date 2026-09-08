@@ -150,6 +150,118 @@ describe("follow zooms", () => {
   });
 });
 
+describe("follow zoom deadzone", () => {
+  /** A 0.4 × 0.4 follow window over a 20 s zoom. */
+  const f: Zoom = { start: 0, end: 20, rect: { x: 0, y: 0, w: 0.4, h: 0.4 }, ramp: 0, kind: "follow" };
+
+  it("leaves the window unchanged while the cursor circles inside the deadzone", () => {
+    // Starts centred at (0.5, 0.5) -> window (0.3, 0.3). A small circle of
+    // radius 0.05 stays well within the deadzone (half-extent 0.13 on a 0.4
+    // window at the 65% fraction), so the window must never move from its
+    // opening position.
+    const at = (t: number) => ({ x: 0.5 + 0.05 * Math.cos(t), y: 0.5 + 0.05 * Math.sin(t) });
+    const opening = effectiveRect(f, 0, at);
+    // The opening cursor position (t=0, so cos=1, sin=0) is (0.55, 0.5).
+    expect(opening.x).toBeCloseTo(0.35, 9);
+    expect(opening.y).toBeCloseTo(0.3, 9);
+    for (let t = 0; t <= 20; t += 0.37) {
+      expect(effectiveRect(f, t, at)).toEqual(opening);
+    }
+  });
+
+  it("moves only enough to bring the cursor back to the deadzone edge, and eases rather than snaps", () => {
+    // Cursor holds at the centre until t=1, then jumps hard along X only, to
+    // (0.9, 0.5) — off-centre enough to cross the deadzone but nowhere near
+    // a frame edge, so clamping cannot muddy what the deadzone math did.
+    const at = (t: number) => (t < 1 ? { x: 0.5, y: 0.5 } : { x: 0.9, y: 0.5 });
+    const before = effectiveRect(f, 0.5, at);
+    expect(before).toEqual({ x: 0.3, y: 0.3, w: 0.4, h: 0.4 });
+
+    // Deadzone half-extent is 0.65 * 0.4 / 2 = 0.13. The cursor's new X is
+    // 0.9 - 0.5 = 0.4 past the window's old centre, 0.27 beyond the deadzone
+    // edge, so the centre moves by exactly that much: 0.5 + 0.27 = 0.77,
+    // i.e. a top-left of 0.77 - 0.2 = 0.57 — short of 0.7, which is where a
+    // window fully centred on the cursor would have landed. Y never left the
+    // deadzone (dy=0), so it must not have moved at all.
+    const settled = effectiveRect(f, 3, at);
+    expect(settled.x).toBeCloseTo(0.57, 9);
+    expect(settled.y).toBeCloseTo(0.3, 9);
+    expect(settled.x).toBeLessThan(0.7);
+
+    // Mid-ease it must be a deliberate move: strictly between the old and
+    // new X, not an instant jump to either one.
+    const mid = effectiveRect(f, 1.15, at);
+    expect(mid.x).toBeGreaterThan(before.x);
+    expect(mid.x).toBeLessThan(settled.x);
+    expect(mid.y).toBeCloseTo(0.3, 9);
+  });
+
+  it("is order-independent: scrubbing gives the same result as playing in order", () => {
+    // A cursor path with several deadzone crossings, so the track has
+    // multiple, possibly-interrupted moves to get wrong.
+    const at = (t: number) => ({
+      x: 0.5 + 0.4 * Math.sin(t * 1.3),
+      y: 0.5 + 0.4 * Math.cos(t * 0.7),
+    });
+    const g: Zoom = { start: 0, end: 8, rect: { x: 0, y: 0, w: 0.3, h: 0.3 }, ramp: 0, kind: "follow" };
+
+    const ts: number[] = [];
+    for (let t = 0; t <= 8; t += 0.13) ts.push(t);
+
+    const inOrder = ts.map((t) => effectiveRect(g, t, at));
+
+    // Same t's, deliberately shuffled (reverse, then interleave).
+    const shuffled = [...ts].reverse();
+    for (let i = 0; i < shuffled.length; i += 2) {
+      if (i + 1 < shuffled.length) [shuffled[i], shuffled[i + 1]] = [shuffled[i + 1], shuffled[i]];
+    }
+    const scrambledResults = new Map<number, ReturnType<typeof effectiveRect>>();
+    for (const t of shuffled) scrambledResults.set(t, effectiveRect(g, t, at));
+
+    ts.forEach((t, i) => {
+      expect(scrambledResults.get(t)).toEqual(inOrder[i]);
+    });
+  });
+
+  it("falls back to the stored rect with no cursor track, or before the track starts", () => {
+    expect(effectiveRect(f, 5)).toBe(f.rect);
+    expect(effectiveRect(f, 5, () => null)).toBe(f.rect);
+
+    // Track starts partway through the zoom. Query well clear of the exact
+    // t=4 boundary in either direction so the assertion doesn't depend on
+    // which side of 4 the internal deadzone-walk's fixed-step grid lands on.
+    const at = (t: number) => (t < 4 ? null : { x: 0.9, y: 0.1 });
+    expect(effectiveRect(f, 2, at)).toBe(f.rect);
+    expect(effectiveRect(f, 5, at)).toEqual({ x: 0.6, y: 0, w: 0.4, h: 0.4 });
+  });
+
+  it("never leaves the window outside [0, 1] with the cursor pinned to a frame corner", () => {
+    // Starts centred, then the cursor jumps hard to the (0,0) corner —
+    // exercises the clamp while the window is actually moving there, not
+    // just its already-settled resting state.
+    const at = (t: number) => (t < 1 ? { x: 0.5, y: 0.5 } : { x: 0, y: 0 });
+    for (let t = 0; t <= 20; t += 0.5) {
+      const r = effectiveRect(f, t, at);
+      expect(r.x).toBeGreaterThanOrEqual(0);
+      expect(r.y).toBeGreaterThanOrEqual(0);
+      expect(r.x + r.w).toBeLessThanOrEqual(1 + 1e-9);
+      expect(r.y + r.h).toBeLessThanOrEqual(1 + 1e-9);
+    }
+    // And it should have actually walked all the way to the corner.
+    expect(effectiveRect(f, 20, at)).toEqual({ x: 0, y: 0, w: 0.4, h: 0.4 });
+  });
+
+  it("still holds the window during the zoom while easing to/from the full frame at its edges (ramp unaffected)", () => {
+    const ramped: Zoom = { ...f, ramp: 0.4 };
+    const at = () => ({ x: 0.5, y: 0.5 });
+    const mid = zoomAt([ramped], 10, at);
+    expect(mid).toEqual({ x: 0.3, y: 0.3, w: 0.4, h: 0.4 });
+    const entering = zoomAt([ramped], 0.2, at);
+    expect(entering.w).toBeGreaterThan(0.4);
+    expect(entering.w).toBeLessThan(1);
+  });
+});
+
 describe("fitView", () => {
   const content = { x: 10, y: 20, w: 800, h: 450 };
 

@@ -45,28 +45,221 @@ function chained(a: Zoom, b: Zoom): boolean {
   return gap >= 0 && gap <= Math.max(rampOf(a), rampOf(b));
 }
 
-/**
- * The rect a zoom actually shows at `t`.
- *
- * For an ordinary zoom that is its stored `rect` (by reference — callers must
- * not mutate it). A `kind: "follow"` zoom takes only the SIZE from its rect and
- * centres that window on the smoothed cursor, clamped so it stays inside the
- * source; with no sampler, or before the cursor track starts, it falls back to
- * the stored rect so a take whose cursor track is missing still plays.
- */
-export function effectiveRect(z: Zoom, t: number, cursorAt?: CursorAt): Rect {
-  // `kind` is the only spelling read here; `parseEdits` migrates the legacy
-  // `follow` flag before a stored zoom ever reaches this.
-  if (z.kind !== "follow" || !cursorAt) return z.rect;
-  const p = cursorAt(t);
-  if (!p) return z.rect;
-  const { w, h } = z.rect;
+/** A window centred on `p` (clamped so it stays inside the source). */
+function centeredWindow(p: { x: number; y: number }, w: number, h: number): Rect {
   return {
     x: Math.min(Math.max(p.x - w / 2, 0), Math.max(0, 1 - w)),
     y: Math.min(Math.max(p.y - h / 2, 0), Math.max(0, 1 - h)),
     w,
     h,
   };
+}
+
+/**
+ * A single crossing of the deadzone boundary: the window eases from `from` to
+ * `to` (both windows of the same size) starting at `triggerT`, over
+ * `FOLLOW_EASE_S`. A hold — the window not moving yet, or having settled — is
+ * just a move with `from === to` (by reference; `moveRectAt` checks that).
+ */
+interface FollowMove {
+  triggerT: number;
+  from: Rect;
+  to: Rect;
+}
+
+/** A follow zoom's precomputed window-position track; see `buildFollowTrack`. */
+interface FollowTrack {
+  moves: FollowMove[];
+}
+
+/**
+ * The deadzone's size as a fraction of the follow window, applied on both
+ * axes and centred on the window. 65%: the cursor can range fairly freely
+ * near the middle of the shot without the window reacting — killing the
+ * "circling" nausea the user described — while still leaving a 17.5%-of-window
+ * margin on every side, which is what the eased move below has to close
+ * before the cursor would otherwise reach the edge of frame. Bigger and the
+ * cursor would reach the window's edge before the deadzone is even crossed;
+ * smaller and this degenerates back into the old continuous tracking.
+ */
+const DEADZONE_FRACTION = 0.65;
+
+/**
+ * How long the window takes to ease to its new position once the cursor
+ * crosses the deadzone. Long enough to read as a deliberate reframe rather
+ * than a snap; short enough that the subject doesn't wander back out of frame
+ * while the window catches up.
+ */
+const FOLLOW_EASE_S = 0.35;
+
+/**
+ * The resolution, in seconds, at which a deadzone crossing is detected while
+ * building a follow zoom's track (see `buildFollowTrack`). Far finer than the
+ * cursor's own 250 ms smoothing time constant, so it adds no visible
+ * discretization of its own — sampling between the grid points below is done
+ * with the exact eased formula, not a linear interpolation of the grid.
+ */
+const FOLLOW_STEP_S = 1 / 60;
+
+/** The window rect a `FollowMove` shows at `t` (`t >= move.triggerT`). */
+function moveRectAt(move: FollowMove, t: number): Rect {
+  if (move.from === move.to) return move.to;
+  const e = easeInOutCubic((t - move.triggerT) / FOLLOW_EASE_S);
+  return lerpRect(move.from, move.to, e);
+}
+
+/**
+ * Walk a follow zoom's cursor track once, forward, from `z.start` to `z.end`,
+ * applying the deadzone rule: the window holds its position while the cursor
+ * stays within the inner `DEADZONE_FRACTION` box, and eases to a new position
+ * — offset by exactly enough to bring the cursor back to the deadzone's edge,
+ * never further — the instant the cursor steps outside it. A move already in
+ * progress when the cursor crosses again is interrupted from wherever it
+ * currently sits, so the track never has a discontinuity.
+ *
+ * This mirrors `cursor-path.ts`'s own track: built once from a fixed starting
+ * point regardless of which `t` a caller asks for or in what order, then
+ * sampled by binary search in `evalFollow`. That determinism is what makes
+ * scrubbing and export agree — see the note on `effectiveRect` below.
+ *
+ * Only ever called for `t` inside the zoom's own `[start, end)` — the
+ * pre-roll/gap blending in `zoomAt`/`gapEase` uses the stateless
+ * `centeredWindow` formula instead (see `effectiveRect`), so this never has
+ * to answer for `t` outside that span.
+ */
+function buildFollowTrack(z: Zoom, cursorAt: CursorAt): FollowTrack {
+  const { w, h } = z.rect;
+  const maxX = Math.max(0, 1 - w);
+  const maxY = Math.max(0, 1 - h);
+  const dzHalfW = (DEADZONE_FRACTION * w) / 2;
+  const dzHalfH = (DEADZONE_FRACTION * h) / 2;
+
+  const moves: FollowMove[] = [];
+  let active: FollowMove | null = null;
+
+  const span = z.end - z.start;
+  const steps = Math.max(1, Math.ceil(span / FOLLOW_STEP_S));
+
+  for (let i = 0; i <= steps; i++) {
+    const t = i < steps ? z.start + i * FOLLOW_STEP_S : z.end;
+    const p = cursorAt(t);
+    if (!p) continue; // No cursor data yet at this instant.
+
+    if (!active) {
+      // The cursor track begins mid-zoom (or exactly at its start): the
+      // window snaps to it, exactly as the old stateless formula did — there
+      // is nothing before this instant to ease from.
+      const start = centeredWindow(p, w, h);
+      active = { triggerT: t, from: start, to: start };
+      moves.push(active);
+      continue;
+    }
+
+    // The deadzone is checked against the window's committed REST position
+    // (`active.to`), not wherever it happens to be mid-ease. Checking the
+    // live, still-interpolating position instead would make the cursor chase
+    // a moving target — each grid step's "exceed" would be computed against
+    // a `cur` that had already closed part of the gap, so the target itself
+    // would keep retreating and the window would creep toward the cursor far
+    // more slowly than `FOLLOW_EASE_S` intends (and, near a clamped edge,
+    // never actually settle). Checking against the rest position instead
+    // means: once a move is triggered, nothing retriggers it — the ease just
+    // runs to completion — unless the cursor genuinely moves again.
+    const ref = active.to;
+    const dx = p.x - (ref.x + w / 2);
+    const dy = p.y - (ref.y + h / 2);
+    const exceedX = Math.abs(dx) > dzHalfW ? dx - Math.sign(dx) * dzHalfW : 0;
+    const exceedY = Math.abs(dy) > dzHalfH ? dy - Math.sign(dy) * dzHalfH : 0;
+    if (exceedX === 0 && exceedY === 0) continue; // Inside the deadzone: hold.
+
+    const target: Rect = {
+      x: Math.min(Math.max(ref.x + exceedX, 0), maxX),
+      y: Math.min(Math.max(ref.y + exceedY, 0), maxY),
+      w,
+      h,
+    };
+    if (target.x === active.to.x && target.y === active.to.y) continue; // Clamped to the same edge again: nothing new to do.
+
+    // Ease from wherever the window visually is right now (which may itself
+    // be mid-ease) so an interruption is seamless, never a pop.
+    active = { triggerT: t, from: moveRectAt(active, t), to: target };
+    moves.push(active);
+  }
+
+  return { moves };
+}
+
+/** Sample a built follow track at `t`, or `null` before it has any data. */
+function evalFollow(track: FollowTrack, t: number): Rect | null {
+  const { moves } = track;
+  if (moves.length === 0 || t < moves[0].triggerT) return null;
+  let lo = 0;
+  let hi = moves.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (moves[mid].triggerT <= t) lo = mid;
+    else hi = mid - 1;
+  }
+  return moveRectAt(moves[lo], t);
+}
+
+/**
+ * One follow track per (cursor sampler, zoom) pair, content-keyed on the
+ * zoom's timing and window size — the only fields `buildFollowTrack` reads —
+ * so a zoom object recreated with the same content still hits the cache.
+ * Keyed weakly on the sampler itself for the same reason `cursor-path.ts`
+ * keys its track on the samples array: the caller holds the only reference,
+ * and the tracks die with it.
+ */
+const followCache = new WeakMap<CursorAt, Map<string, FollowTrack>>();
+
+function followKey(z: Zoom): string {
+  const r = z.rect;
+  return `${z.start}|${z.end}|${r.x}|${r.y}|${r.w}|${r.h}`;
+}
+
+function followTrackFor(z: Zoom, cursorAt: CursorAt): FollowTrack {
+  let byKey = followCache.get(cursorAt);
+  if (!byKey) {
+    byKey = new Map();
+    followCache.set(cursorAt, byKey);
+  }
+  const key = followKey(z);
+  const hit = byKey.get(key);
+  if (hit) return hit;
+  const built = buildFollowTrack(z, cursorAt);
+  byKey.set(key, built);
+  return built;
+}
+
+/**
+ * The rect a zoom actually shows at `t`.
+ *
+ * For an ordinary zoom that is its stored `rect` (by reference — callers must
+ * not mutate it). A `kind: "follow"` zoom takes only the SIZE from its rect;
+ * while `t` is inside the zoom's own `[start, end)` span the window HOLDS
+ * that size centred wherever it last settled, moving only once the smoothed
+ * cursor steps outside an inner deadzone (`buildFollowTrack`/`evalFollow`) —
+ * for `t` outside that span (the pre-roll/gap blending `zoomAt` and
+ * `gapEase` do towards a neighbouring zoom) there is no "the zoom" yet to
+ * hold still, so it falls back to the plain formula: the window centred on
+ * the cursor at that instant. Either way, with no sampler, or before the
+ * cursor track starts, it falls back to the stored rect so a take whose
+ * cursor track is missing still plays.
+ */
+export function effectiveRect(z: Zoom, t: number, cursorAt?: CursorAt): Rect {
+  // `kind` is the only spelling read here; `parseEdits` migrates the legacy
+  // `follow` flag before a stored zoom ever reaches this.
+  if (z.kind !== "follow" || !cursorAt) return z.rect;
+
+  if (t >= z.start && t < z.end) {
+    const held = evalFollow(followTrackFor(z, cursorAt), t);
+    return held ?? z.rect;
+  }
+
+  const p = cursorAt(t);
+  if (!p) return z.rect;
+  return centeredWindow(p, z.rect.w, z.rect.h);
 }
 
 /**
