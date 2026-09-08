@@ -4,12 +4,39 @@ import type { StagingContext } from "./types";
 import type { RailSection } from "./rail";
 
 /**
- * One plain glyph per panel — this project has no icon dependency, so these
- * are text characters, not an icon font. Each still carries its real name in
- * `title`/`aria-label`, since the glyph alone is not self-explanatory.
+ * The camera panel's icon. No plain text glyph reads as a camera at 15px —
+ * a filled circle, a ring, a target all get read as something else — so
+ * this is a small inline SVG instead (the project has no icon dependency,
+ * and this keeps it that way). `aria-hidden` because the button already
+ * carries the real name via `title`/`aria-label`.
  */
-const ICONS: { id: RailSection; glyph: string; label: string }[] = [
-  { id: "camera", glyph: "◉", label: "Camera" },
+function CameraGlyph() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="15"
+      height="15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
+  );
+}
+
+/**
+ * One plain glyph per panel — this project has no icon dependency, so these
+ * are text characters, except for the camera panel (see `CameraGlyph`
+ * above), which no glyph reads clearly as. Each still carries its real name
+ * in `title`/`aria-label`, since the glyph alone is not self-explanatory.
+ */
+const ICONS: { id: RailSection; glyph: React.ReactNode; label: string }[] = [
+  { id: "camera", glyph: <CameraGlyph />, label: "Camera" },
   { id: "frame", glyph: "▢", label: "Frame" },
   { id: "zoom", glyph: "⊕", label: "Zoom" },
   { id: "overlays", glyph: "▦", label: "Overlays" },

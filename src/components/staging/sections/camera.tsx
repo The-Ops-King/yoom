@@ -12,7 +12,6 @@ import {
 } from "@/lib/edits";
 import { bubbleHeightFor, cameraAt } from "@/lib/editor/camera-track";
 import * as ops from "@/lib/editor/edit-ops";
-import { SHAPES } from "@/lib/recording/settings";
 import type { BubbleShape } from "@/lib/recording/types";
 import { contentRect } from "../content-rect";
 import { Slider } from "../slider";
@@ -26,6 +25,23 @@ const SHAPE_LABEL: Record<BubbleShape, string> = {
   portrait: "Portrait",
   full: "Full",
 };
+
+/**
+ * Shapes the Shape control offers. Deliberately excludes `"full"`, even
+ * though it is a valid `BubbleShape` value (do not import the canonical
+ * `SHAPES` list from `@/lib/recording/settings` here — that five-item list
+ * is for storage/settings validation, not this control).
+ *
+ * `"full"` is not really a bubble shape — it is a request for full-frame
+ * camera. `defaultCameraTrack` (`@/lib/editor/camera-track.ts`) treats
+ * `shape: "full"` as shorthand for `mode: "full"` with a `{0,0,1,1}` rect,
+ * and stores `shape: "circle"` underneath. Full-frame camera is already a
+ * first-class choice in the Mode control below (Bubble / Full screen /
+ * Hidden); offering "full" here too just reintroduces the bug where
+ * `bubbleHeightFor` returns height `1` for a bubble-width rect, rendering as
+ * a thin vertical sliver instead of an actual full-frame camera.
+ */
+const BUBBLE_SHAPES: BubbleShape[] = ["circle", "rounded", "square", "portrait"];
 
 const MODES: { id: CameraMode; label: string }[] = [
   { id: "bubble", label: "Bubble" },
@@ -57,12 +73,6 @@ function refit(rect: Rect, w: number, h: number): Rect {
     h,
   };
 }
-
-const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
-
-/** Arrow-key pan step; Shift takes the larger one. Mirrors the pad's 0..1 axes. */
-const PAN_STEP = 0.02;
-const PAN_STEP_SHIFT = 0.1;
 
 export function CameraSection({ ctx }: { ctx: StagingContext }) {
   const { edits, player } = ctx;
@@ -134,32 +144,6 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
     ctx.applyLive(() => ops.upsertCameraKeyframe(g.from, g.t, { pan }));
   };
 
-  /** Drag or arrow-key the pan pad's dot to `pan`, clamped to 0..1 per axis. */
-  const setPanFromEvent = (e: { clientX: number; clientY: number; currentTarget: HTMLElement }) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    setPan({
-      x: clamp01((e.clientX - rect.left) / rect.width),
-      y: clamp01((e.clientY - rect.top) / rect.height),
-    });
-  };
-
-  const nudgePan = (dx: number, dy: number) => {
-    setPan({ x: clamp01(sample.pan.x + dx), y: clamp01(sample.pan.y + dy) });
-  };
-
-  const onPanKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!canPanX && !canPanY) return;
-    const step = e.shiftKey ? PAN_STEP_SHIFT : PAN_STEP;
-    switch (e.key) {
-      case "ArrowLeft": nudgePan(-step, 0); break;
-      case "ArrowRight": nudgePan(step, 0); break;
-      case "ArrowUp": nudgePan(0, -step); break;
-      case "ArrowDown": nudgePan(0, step); break;
-      default: return;
-    }
-    e.preventDefault();
-  };
-
   /**
    * Every "at the playhead" control writes one keyframe at `t` so the change
    * animates in and is visible immediately (`cameraAt` settles *at* `t`).
@@ -212,7 +196,7 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
       <div className={ui.group}>
         <span className={ui.label}>Shape at the playhead</span>
         <div className={ui.seg} role="group" aria-label="Bubble shape">
-          {SHAPES.map((shape) => (
+          {BUBBLE_SHAPES.map((shape) => (
             <button
               key={shape}
               type="button"
@@ -267,37 +251,39 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
         <span className={ui.label}>Crop pan</span>
         {/*
           The cover-crop only has slack on the axis the camera's aspect
-          overshoots the bubble's; when neither does, dragging the dot would
-          not move anything, so the pad goes inert (and out of tab order)
-          rather than pretending to work.
+          overshoots the bubble's. The bubble always fills the full height of
+          its own box, so the common case is horizontal-only slack — hence a
+          single horizontal slider for `pan.x`. But height isn't *always*
+          full relative to the camera: e.g. a `rounded` bubble on a
+          portrait-oriented recording (screenAspect < 1) comes out wider
+          than the camera, which puts the slack on `pan.y` instead — see
+          `bubbleHeightFor`. So the vertical slider stays, gated the same way
+          the horizontal one is, rather than assuming it can never apply.
         */}
-        <div
-          role="application"
-          aria-label="Camera crop pan"
-          aria-disabled={!canPanX && !canPanY}
-          tabIndex={canPanX || canPanY ? 0 : -1}
-          onPointerDown={(e) => {
-            if (!canPanX && !canPanY) return;
-            e.currentTarget.setPointerCapture(e.pointerId);
-            setPanFromEvent(e);
-          }}
-          onPointerMove={(e) => {
-            if (e.buttons && (canPanX || canPanY)) setPanFromEvent(e);
-          }}
-          onKeyDown={onPanKeyDown}
-          className={`relative aspect-[1.6] w-full rounded-md border border-border-subtle bg-surface-raised outline-none focus-visible:ring-1 focus-visible:ring-accent/50 ${
-            canPanX || canPanY ? "cursor-crosshair" : "cursor-not-allowed opacity-40"
-          }`}
-        >
-          <span
-            aria-hidden
-            className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-text"
-            style={{ left: `${sample.pan.x * 100}%`, top: `${sample.pan.y * 100}%` }}
+        <Slider
+          name="Horizontal"
+          value={sample.pan.x}
+          min={0}
+          max={1}
+          step={0.01}
+          format={(v) => `${Math.round(v * 100)}%`}
+          disabled={!canPanX}
+          onChange={(x) => setPan({ x, y: sample.pan.y })}
+        />
+        {canPanY && (
+          <Slider
+            name="Vertical"
+            value={sample.pan.y}
+            min={0}
+            max={1}
+            step={0.01}
+            format={(v) => `${Math.round(v * 100)}%`}
+            onChange={(y) => setPan({ x: sample.pan.x, y })}
           />
-        </div>
+        )}
         <p className={ui.hint}>
           {canPanX || canPanY
-            ? "Drag the dot, or focus it and use the arrow keys, to choose what the crop shows."
+            ? "Choose what the crop shows."
             : "This bubble matches the camera's shape, so there is nothing to pan."}
         </p>
       </div>
