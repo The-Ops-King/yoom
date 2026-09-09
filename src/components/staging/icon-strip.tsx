@@ -59,9 +59,12 @@ export function IconStrip({
   section: RailSection;
   onSection: (s: RailSection) => void;
 }) {
-  // Every mode gets the Camera panel: screen-only has no camera track and
-  // the panel says so; camera-only collapses it to the mirror toggle.
-  const visible = ctx.mode === "screen" ? ICONS.filter((i) => i.id !== "camera") : ICONS;
+  // Screen-only has no camera track, so no Camera panel. Camera-only has no
+  // screen, so nothing was tracked for the cursor/click/key panel; its Camera
+  // panel collapses to the mirror toggle.
+  const hidden: RailSection[] =
+    ctx.mode === "screen" ? ["camera"] : ctx.mode === "camera" ? ["cursor"] : [];
+  const visible = ICONS.filter((i) => !hidden.includes(i.id));
 
   return (
     <nav aria-label="Editor panels" className="flex shrink-0 flex-col gap-1">
