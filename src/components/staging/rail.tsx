@@ -36,11 +36,13 @@ export function Rail({
   section: RailSection;
   onSection: (s: RailSection) => void;
 }) {
-  const hasCamera = ctx.mode === "screen+camera";
-  // The Camera panel only exists on a screen+camera take. `section` can still
-  // be "camera" on any other mode (it is `Staging`'s initial state
-  // regardless of mode), so resolve that here rather than rendering an empty
-  // panel — Frame is the icon strip's first entry on a camera-less take.
+  // A camera track exists on screen+camera AND camera-only takes (camera-only
+  // collapses the panel to the mirror toggle). `section` can still be
+  // "camera" on a screen-only take (it is `Staging`'s initial state regardless
+  // of mode), so resolve that here rather than rendering an empty panel —
+  // Frame is the icon strip's first entry on a camera-less take. Keep this in
+  // step with `IconStrip`'s hidden list.
+  const hasCamera = ctx.mode !== "screen";
   const active: RailSection = section === "camera" && !hasCamera ? "frame" : section;
 
   return (
