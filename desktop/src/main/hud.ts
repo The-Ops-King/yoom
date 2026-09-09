@@ -6,7 +6,7 @@ import {
   type HudState,
   type HudStatus,
 } from "../shared/ipc";
-import { updateShareStatus } from "./capture";
+import { hasCaptureSource, updateShareStatus } from "./capture";
 import { onRecorderStatus, stopCursorTracking } from "./cursor";
 import { stopInputTracking, updateInputTracking } from "./input";
 import { clampToWorkArea, hudDefaultBounds, recorderWindowVisibility } from "./mapping";
@@ -278,7 +278,8 @@ export function setHudState(next: HudState): void {
     suppressed = false;
     // Loom-style disappearing act, decided by a pure function so it is
     // testable: see mapping.ts#recorderWindowVisibility.
-    const action = recorderWindowVisibility(prev, next.status);
+    // Camera-only takes announce no display source, so the window stays up.
+    const action = recorderWindowVisibility(prev, next.status, hasCaptureSource());
     if (action === "hide") hideRecorderWindow();
     else if (action === "show") showRecorderWindow();
   }

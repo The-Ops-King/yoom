@@ -45,6 +45,15 @@ let forcePick = false;
 /** The source announced to the page on `IPC.shareSource`, so `null` is sent once. */
 let announced: { id: string; name: string; kind: "screen" | "window" } | null = null;
 
+/**
+ * True while a display-media source (screen OR window) is announced — i.e. the
+ * take captures the screen at all. Camera-only takes never resolve one.
+ * Distinct from `captureDisplayId()`, which is also null for window captures.
+ */
+export function hasCaptureSource(): boolean {
+  return announced !== null;
+}
+
 /** Kept next to `setCaptureKind` so the two never drift apart. */
 function setCaptureSource(
   source: { id: string; name: string; kind: "screen" | "window" } | null,

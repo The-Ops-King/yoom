@@ -281,6 +281,13 @@ describe("recorderWindowVisibility", () => {
     expect(recorderWindowVisibility("other", "countdown")).toBe("hide");
   });
 
+  it("leaves the recorder up for a camera-only take (no display capture)", () => {
+    expect(recorderWindowVisibility("other", "countdown", false)).toBe("none");
+    expect(recorderWindowVisibility("idle", "countdown", false)).toBe("none");
+    // Screen takes are unchanged.
+    expect(recorderWindowVisibility("other", "countdown", true)).toBe("hide");
+  });
+
   it("does nothing while the take runs", () => {
     expect(recorderWindowVisibility("countdown", "recording")).toBe("none");
     expect(recorderWindowVisibility("recording", "paused")).toBe("none");

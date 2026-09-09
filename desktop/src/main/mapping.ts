@@ -238,9 +238,17 @@ export type RecorderVisibility = "hide" | "show" | "none";
 export function recorderWindowVisibility(
   prev: HudStatus,
   next: HudStatus,
+  hasDisplayCapture = true,
 ): RecorderVisibility {
   if (prev === next) return "none";
-  if (next === "countdown") return "hide";
+  // The disappearing act exists to keep the app out of its own screen capture.
+  // A camera-only take captures no screen, and hiding the recorder there is
+  // fatal: it is the app's only regular window (the HUD is a non-activating
+  // panel and camera-only mode has no bubble), and about 1.5 s after it is
+  // hidden the app receives a native terminate — `before-quit` fires with no
+  // `app.quit()` on the JS side, exit code 0. Reproduced with the hide
+  // suppressed: the take ran to `recording` and the app stayed up.
+  if (next === "countdown") return hasDisplayCapture ? "hide" : "none";
   if (HIDDEN_DURING.has(prev) && RESTORES.has(next)) return "show";
   // A discard (⌘⇧X, or the pill's bin) goes straight back to `setup`, which
   // collapses to `other` on this channel and is in neither set above. Leaving
