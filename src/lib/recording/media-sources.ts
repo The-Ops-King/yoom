@@ -46,6 +46,30 @@ export function cameraConstraints(deviceId?: string): MediaTrackConstraints {
   return c;
 }
 
+/** True for the errors `deviceId: { exact }` raises when that device is gone. */
+export function isStaleDeviceError(err: unknown): boolean {
+  if (!(err instanceof Error) && !(typeof err === "object" && err && "name" in err)) return false;
+  const name = (err as { name?: unknown }).name;
+  return name === "OverconstrainedError" || name === "NotFoundError";
+}
+
+const VIRTUAL_CAMERA = /\b(virtual|obs|manycam|snap camera|camo|ndi|mmhmm|xsplit)\b/i;
+
+/** A software camera (OBS, ManyCam, …) rather than a physical one. */
+export function isVirtualCamera(device: Pick<MediaDeviceInfo, "label">): boolean {
+  return VIRTUAL_CAMERA.test(device.label);
+}
+
+/**
+ * Stable sort that keeps physical cameras ahead of virtual ones, so "first
+ * device" — the picker's default — is never a software camera when a real one
+ * exists. macOS lists camera extensions first, which is exactly the order that
+ * made an uninstalled OBS the default.
+ */
+export function orderCameras<T extends Pick<MediaDeviceInfo, "label">>(devices: T[]): T[] {
+  return [...devices.filter((d) => !isVirtualCamera(d)), ...devices.filter(isVirtualCamera)];
+}
+
 export function micConstraints(deviceId?: string): MediaTrackConstraints {
   const c: MediaTrackConstraints = {
     echoCancellation: true,
@@ -130,13 +154,22 @@ export const browserProvider: MediaSourceProvider = {
     };
   },
 
-  getCamera(deviceId?: string): Promise<MediaStream> {
+  async getCamera(deviceId?: string): Promise<MediaStream> {
     // Never ask for audio here — the mic is always its own stream so the mixer
     // owns it and a camera restart cannot drop the microphone.
-    return mediaDevices().getUserMedia({
-      video: cameraConstraints(deviceId),
-      audio: false,
-    });
+    try {
+      return await mediaDevices().getUserMedia({
+        video: cameraConstraints(deviceId),
+        audio: false,
+      });
+    } catch (err) {
+      // A remembered camera can vanish between sessions (an unplugged UVC
+      // camera, an uninstalled virtual camera). `exact` then rejects with
+      // OverconstrainedError or NotFoundError; a real denial is NotAllowedError
+      // and must surface unchanged. Fall back to whatever camera is left.
+      if (!deviceId || !isStaleDeviceError(err)) throw err;
+      return mediaDevices().getUserMedia({ video: cameraConstraints(), audio: false });
+    }
   },
 
   getMic(deviceId?: string): Promise<MediaStream> {

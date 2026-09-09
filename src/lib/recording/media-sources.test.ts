@@ -3,6 +3,8 @@ import {
   browserCapabilities,
   browserProvider,
   cameraConstraints,
+  isStaleDeviceError,
+  orderCameras,
   displayConstraints,
   getProvider,
   isCaptureCancellation,
@@ -243,5 +245,51 @@ describe("isCaptureCancellation", () => {
     expect(isCaptureCancellation(err("NotFoundError"))).toBe(false);
     expect(isCaptureCancellation("NotAllowedError")).toBe(false);
     expect(isCaptureCancellation(null)).toBe(false);
+  });
+});
+
+describe("stale camera handling", () => {
+  it("isStaleDeviceError matches the two 'device gone' names only", () => {
+    const named = (name: string) => Object.assign(new Error("x"), { name });
+    expect(isStaleDeviceError(named("OverconstrainedError"))).toBe(true);
+    expect(isStaleDeviceError(named("NotFoundError"))).toBe(true);
+    expect(isStaleDeviceError(named("NotAllowedError"))).toBe(false);
+    expect(isStaleDeviceError("nope")).toBe(false);
+  });
+
+  it("getCamera falls back to any camera when the remembered one is gone", async () => {
+    const stream = {} as MediaStream;
+    const getUserMedia = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("gone"), { name: "OverconstrainedError" }))
+      .mockResolvedValueOnce(stream);
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "", mediaDevices: { getUserMedia } });
+
+    await expect(getProvider().getCamera("obs-cam")).resolves.toBe(stream);
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(getUserMedia.mock.calls[0][0].video.deviceId).toEqual({ exact: "obs-cam" });
+    expect(getUserMedia.mock.calls[1][0].video.deviceId).toBeUndefined();
+  });
+
+  it("getCamera surfaces a real denial unchanged", async () => {
+    const denied = Object.assign(new Error("no"), { name: "NotAllowedError" });
+    const getUserMedia = vi.fn().mockRejectedValue(denied);
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "", mediaDevices: { getUserMedia } });
+
+    await expect(getProvider().getCamera("cam")).rejects.toBe(denied);
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it("orderCameras puts physical cameras before virtual ones, order otherwise kept", () => {
+    const d = (label: string) => ({ label });
+    const out = orderCameras([d("OBS Virtual Camera"), d("Insta360 Link"), d("ManyCam"), d("FaceTime HD")]);
+    expect(out.map((x) => x.label)).toEqual([
+      "Insta360 Link",
+      "FaceTime HD",
+      "OBS Virtual Camera",
+      "ManyCam",
+    ]);
   });
 });

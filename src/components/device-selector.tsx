@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getProvider } from "@/lib/recording/media-sources";
+import { getProvider, orderCameras } from "@/lib/recording/media-sources";
 
 interface DeviceSelectorProps {
   kind: "audioinput" | "videoinput";
@@ -35,11 +35,17 @@ export function DeviceSelector({
      */
     async function load(warm: boolean): Promise<void> {
       if (warm) await provider.warmPermissions(kind);
-      const filtered = await provider.enumerateDevices(kind);
+      const listed = await provider.enumerateDevices(kind);
       if (cancelled) return;
+      // Physical cameras first: the first entry is the default pick, and a
+      // leftover virtual camera (OBS's extension outlives OBS.app) must never
+      // win that just because macOS lists it first.
+      const filtered = kind === "videoinput" ? orderCameras(listed) : listed;
       setDevices(filtered);
-      if (filtered.length > 0 && !value) onChange(filtered[0].deviceId);
-      if (value && !filtered.some((device) => device.deviceId === value)) onChange("");
+      const known = filtered.some((device) => device.deviceId === value);
+      // No choice yet, or the remembered device is gone: take the first real
+      // one rather than leaving the browser to pick its own default.
+      if (!known) onChange(filtered[0]?.deviceId ?? "");
     }
 
     void load(true);
