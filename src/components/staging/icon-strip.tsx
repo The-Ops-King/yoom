@@ -59,7 +59,9 @@ export function IconStrip({
   section: RailSection;
   onSection: (s: RailSection) => void;
 }) {
-  const visible = ICONS.filter((i) => i.id !== "camera" || ctx.mode === "screen+camera");
+  // Every mode gets the Camera panel: screen-only has no camera track and
+  // the panel says so; camera-only collapses it to the mirror toggle.
+  const visible = ctx.mode === "screen" ? ICONS.filter((i) => i.id !== "camera") : ICONS;
 
   return (
     <nav aria-label="Editor panels" className="flex shrink-0 flex-col gap-1">

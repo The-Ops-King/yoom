@@ -203,6 +203,41 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
 
   const offset = edits.cameraOffsetMs ?? 0;
 
+  const mirrorControl = (
+    <div className={ui.sectionHeader}>
+      <label className={ui.check}>
+        <input
+          type="checkbox"
+          checked={track.mirror}
+          onChange={(e) => setMirror(e.target.checked)}
+        />
+        Mirror the camera
+      </label>
+      <button
+        type="button"
+        className={ui.sectionHeaderAction}
+        onClick={() => setMirror(loadSettings().staging.cameraMirror)}
+      >
+        Reset
+      </button>
+    </div>
+  );
+
+  // Camera-only: the camera IS the picture, so there is no bubble to shape,
+  // move, pan or hide. Mirror is the one thing that still applies — a
+  // mirrored take reads text backwards — so the panel collapses to it.
+  if (ctx.mode === "camera") {
+    return (
+      <div className={ui.section}>
+        {mirrorControl}
+        <p className={ui.hint}>
+          Mirroring matches what you saw while recording. Turn it off to show the room the
+          way others see it, with any text the right way round.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className={ui.section}>
       <div className={ui.group}>
@@ -235,23 +270,7 @@ export function CameraSection({ ctx }: { ctx: StagingContext }) {
         </div>
       </div>
 
-      <div className={ui.sectionHeader}>
-        <label className={ui.check}>
-          <input
-            type="checkbox"
-            checked={track.mirror}
-            onChange={(e) => setMirror(e.target.checked)}
-          />
-          Mirror the camera
-        </label>
-        <button
-          type="button"
-          className={ui.sectionHeaderAction}
-          onClick={() => setMirror(loadSettings().staging.cameraMirror)}
-        >
-          Reset
-        </button>
-      </div>
+      {mirrorControl}
 
       <div className={ui.group}>
         <div className={ui.sectionHeader}>
