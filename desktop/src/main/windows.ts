@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { BrowserWindow, dialog, session, shell, type Session } from "electron";
+import { BrowserWindow, app, dialog, session, shell, type Session } from "electron";
 
 /**
  * The web app the shell wraps. `YOOM_APP_URL` overrides for staging;
@@ -76,6 +76,34 @@ let quitting = false;
 
 export function setQuitting(value: boolean): void {
   quitting = value;
+}
+
+/**
+ * True once a quit was requested by something that means it: the user, via
+ * `requestQuit`, or the OS at logout/shutdown, via `markSystemShutdown`. The
+ * `before-quit` handler in index.ts turns any other quit request (a third
+ * party's `aevt/quit`, e.g. Vorssaint's Auto Quit) into a hide. See
+ * mapping.ts#quitRequestAction.
+ */
+let deliberateQuit = false;
+let shutdownPending = false;
+
+export function isDeliberateQuit(): boolean {
+  return deliberateQuit;
+}
+
+export function isShutdownPending(): boolean {
+  return shutdownPending;
+}
+
+/** Every user-facing Quit goes through here so `before-quit` can tell it apart. */
+export function requestQuit(): void {
+  deliberateQuit = true;
+  app.quit();
+}
+
+export function markSystemShutdown(): void {
+  shutdownPending = true;
 }
 
 export function getRecorderWindow(): BrowserWindow | null {

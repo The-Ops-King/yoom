@@ -10,6 +10,7 @@ import {
   clampToWorkArea,
   cycleShape,
   hudDefaultBounds,
+  quitRequestAction,
   recorderWindowVisibility,
   shapeToCss,
 } from "./mapping";
@@ -318,5 +319,20 @@ describe("recorderWindowVisibility", () => {
     expect(recorderWindowVisibility("other", "staging")).toBe("none");
     expect(recorderWindowVisibility("idle", "idle")).toBe("none");
     expect(recorderWindowVisibility("staging", "idle")).toBe("none");
+  });
+});
+
+describe("quitRequestAction", () => {
+  it("quits for a deliberate request regardless of shutdown state", () => {
+    expect(quitRequestAction(true, false)).toBe("quit");
+    expect(quitRequestAction(true, true)).toBe("quit");
+  });
+
+  it("quits for an external request while the system is shutting down or logging out", () => {
+    expect(quitRequestAction(false, true)).toBe("quit");
+  });
+
+  it("hides instead of quitting for an external request at any other time", () => {
+    expect(quitRequestAction(false, false)).toBe("hide");
   });
 });

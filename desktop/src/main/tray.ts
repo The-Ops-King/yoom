@@ -6,6 +6,7 @@ import { permissionStatuses, showPermissionsDialog } from "./permissions";
 import {
   createRecorderWindow,
   getRecorderWindow,
+  requestQuit,
   sendToRecorder,
   toggleRecorderWindow,
 } from "./windows";
@@ -124,7 +125,7 @@ export function refreshTrayMenu(): void {
         ],
       },
       { type: "separator" },
-      { label: "Quit Yoom", accelerator: "Command+Q", click: () => app.quit() },
+      { label: "Quit Yoom", accelerator: "Command+Q", click: () => requestQuit() },
     ]),
   );
 }

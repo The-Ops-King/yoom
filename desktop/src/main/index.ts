@@ -1,4 +1,4 @@
-import { app } from "electron";
+import { Menu, app, powerMonitor } from "electron";
 import { installDesktopAuthHeader } from "./auth";
 import { installCaptureIpc, installDisplayMediaHandler } from "./capture";
 import { destroyBubble, installBubbleIpc } from "./bubble";
@@ -7,9 +7,15 @@ import { warmPermissionsAtLaunch } from "./permissions";
 import { installPickerIpc } from "./picker";
 import { registerShortcuts, unregisterShortcuts } from "./shortcuts";
 import { createTray, destroyTray, refreshTrayMenu } from "./tray";
+import { quitRequestAction } from "./mapping";
 import {
   createRecorderWindow,
   getRecorderWindow,
+  hideRecorderWindow,
+  isDeliberateQuit,
+  isShutdownPending,
+  markSystemShutdown,
+  requestQuit,
   setQuitting,
   yoomSession,
 } from "./windows";
@@ -29,7 +35,8 @@ if (process.env.YOOM_LEGACY_AUDIO === "1") {
 // A second launch should surface the existing window, never start a second app
 // holding the same tray icon and the same global shortcuts.
 if (!app.requestSingleInstanceLock()) {
-  app.quit();
+  // Deliberate: the losing instance must actually exit, not turn into a hide.
+  requestQuit();
 } else {
   app.on("second-instance", () => {
     createRecorderWindow();
@@ -55,6 +62,37 @@ if (!app.requestSingleInstanceLock()) {
     // The tray menu mirrors the HUD's transport controls, so it has to
     // re-render whenever the take's status moves.
     onHudStatusChange(() => refreshTrayMenu());
+
+    // Electron's default menu wires ⌘Q straight to a native quit, which
+    // `before-quit` cannot tell apart from a third party's Apple Event. Own
+    // the menu so ⌘Q goes through `requestQuit` like the tray does. The rest
+    // mirrors the default menu the recorder page relies on (Edit for
+    // copy/paste, View for DevTools, Window for minimise/zoom).
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        {
+          label: app.name,
+          submenu: [
+            { role: "about" },
+            { type: "separator" },
+            { role: "services" },
+            { type: "separator" },
+            { role: "hide" },
+            { role: "hideOthers" },
+            { role: "unhide" },
+            { type: "separator" },
+            { label: "Quit Yoom", accelerator: "Command+Q", click: () => requestQuit() },
+          ],
+        },
+        { role: "editMenu" },
+        { role: "viewMenu" },
+        { role: "windowMenu" },
+      ]),
+    );
+
+    // Logout and shutdown arrive as the same Apple Event a third party would
+    // send; this notification lands first and is what lets them through.
+    powerMonitor.on("shutdown", () => markSystemShutdown());
 
     createTray();
     createRecorderWindow();
@@ -82,7 +120,15 @@ if (!app.requestSingleInstanceLock()) {
   // `before-quit` runs while the windows still exist; `will-quit` can run after
   // they are already gone. Destroying the camera-holding windows here is what
   // makes the macOS camera indicator go out at quit rather than at process exit.
-  app.on("before-quit", () => {
+  app.on("before-quit", (event) => {
+    // A quit nobody asked for — a third party's `aevt/quit` (Vorssaint's Auto
+    // Quit fires a few seconds into every take, once the recorder window is
+    // hidden) — becomes a hide. The take, the HUD and the bubble all live on.
+    if (quitRequestAction(isDeliberateQuit(), isShutdownPending()) === "hide") {
+      event.preventDefault();
+      hideRecorderWindow();
+      return;
+    }
     // Must come first: it is what lets the recorder window's
     // `will-prevent-unload` handler override the page's `beforeunload` guard.
     // Without it a quit requested while a take is live (or a staged blob is

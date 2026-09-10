@@ -257,3 +257,21 @@ export function recorderWindowVisibility(
   if (HIDDEN_DURING.has(prev) && !HIDDEN_DURING.has(next)) return "show";
   return "none";
 }
+
+export type QuitRequestAction = "quit" | "hide";
+
+/**
+ * What to do when the app is asked to quit.
+ *
+ * Only two callers ever mean it: the user (tray → Quit Yoom, ⌘Q in the app
+ * menu, both routed through `windows.ts#requestQuit`) and the OS at logout or
+ * shutdown (`powerMonitor` "shutdown"). Every other quit arrives as an Apple
+ * Event from a third party. The known offender is Vorssaint's Auto Quit, which
+ * treats the recorder as windowless once the Loom-style disappearing act hides
+ * it at countdown and sends `aevt/quit` a few seconds into every take. Turning
+ * that into a hide keeps the take alive.
+ */
+export function quitRequestAction(deliberate: boolean, shutdownPending: boolean): QuitRequestAction {
+  if (deliberate || shutdownPending) return "quit";
+  return "hide";
+}
