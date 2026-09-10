@@ -922,6 +922,25 @@ export function useRecorder(): UseRecorderResult {
     if (state.status === "idle" || state.status === "error") teardown();
   }, [state.streamsAlive, state.status, teardown]);
 
+  /**
+   * The take is over the moment its bytes land in staging: nothing after that
+   * (editing, rendering, uploading, done) reads a live source, and keeping the
+   * display capture open leaves the screen "shared" — the macOS sharing
+   * indicator stays lit and the desktop shell keeps its capture warm — for
+   * as long as the editor is open. Release everything here. `streamsAlive`
+   * goes false so Discard lands in `idle`, where the desktop shell re-shares
+   * on its own (the auto-acquire is re-armed below) and the browser shows
+   * its "Choose what to share" button, rather than in a `setup` with no
+   * stream behind it. Restart is not reachable from staging (`LIVE` in the
+   * machine), so no path expects the old stream to still be there.
+   */
+  useEffect(() => {
+    if (state.status !== "staging" || !state.streamsAlive) return;
+    teardown();
+    dispatch({ type: "STREAM_ENDED" });
+    autoAcquiredRef.current = false;
+  }, [state.status, state.streamsAlive, teardown]);
+
   // ---------- leave-page guard ----------
 
   // Navigating away mid-capture throws the recording away, so warn first.
