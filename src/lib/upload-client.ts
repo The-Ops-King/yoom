@@ -3,16 +3,16 @@ export const CHUNK_SIZE_BYTES = 8 * 1024 * 1024;
 /** Used when routing through /api/upload/chunk (Vercel caps bodies at 4.5 MB). */
 export const PROXY_CHUNK_SIZE_BYTES = 4 * 1024 * 1024;
 
-const MAX_ATTEMPTS = 5;
+export const MAX_ATTEMPTS = 5;
 /**
  * A chunk PUT that has not answered in this long is treated as a dropped
  * connection: abort it, ask Drive where it got to, and resume. Without it a
  * hung socket left the upload frozen at some percent forever. Generous enough
  * for an 8 MiB chunk on a ~1 Mbps uplink.
  */
-const CHUNK_TIMEOUT_MS = 120_000;
+export const CHUNK_TIMEOUT_MS = 120_000;
 /** The offset query carries no body, so it should answer quickly. */
-const QUERY_TIMEOUT_MS = 30_000;
+export const QUERY_TIMEOUT_MS = 30_000;
 
 export type UploadResult = { id: string };
 export type ProgressCallback = (percent: number) => void;
@@ -25,7 +25,7 @@ export type UploadOptions = {
   signal?: AbortSignal;
 };
 
-function putInit(
+export function putInit(
   sessionUri: string,
   contentRange: string,
   body: BodyInit | undefined,
@@ -61,7 +61,7 @@ function putInit(
 }
 
 /** Parse `Range: bytes=0-N` into the next byte offset to send. */
-function offsetFromRange(header: string | null): number {
+export function offsetFromRange(header: string | null): number {
   if (!header) return 0;
   const match = /bytes=0-(\d+)/.exec(header);
   return match ? Number(match[1]) + 1 : 0;
