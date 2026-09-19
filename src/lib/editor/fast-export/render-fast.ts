@@ -214,7 +214,13 @@ export async function renderFast(
         assembler.push(channels, timestamp);
         audioSourceEdge = timestamp + buffer.duration;
       }
-      const block = assembler.drain(Math.round(untilEditedS * sampleRate));
+      // `drain` treats a non-finite edge as "nothing", so the final
+      // `pumpAudio(Infinity)` asks for every frame there could ever be instead;
+      // it clamps to the assembler's own total either way.
+      const untilFrame = Number.isFinite(untilEditedS)
+        ? Math.round(untilEditedS * sampleRate)
+        : Number.MAX_SAFE_INTEGER;
+      const block = assembler.drain(untilFrame);
       if (block.frames === 0) return;
       const encoded = new AudioBuffer({
         length: block.frames,
