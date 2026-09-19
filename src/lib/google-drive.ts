@@ -101,7 +101,7 @@ async function driveFetch(url: string, init: RequestInit = {}): Promise<Response
 export type ResumableSessionInput = {
   name: string;
   mimeType: string;
-  sizeBytes: number;
+  sizeBytes?: number;
   origin: string;
 };
 
@@ -118,7 +118,9 @@ export async function createResumableSession(
       "Content-Type": "application/json; charset=UTF-8",
       Origin: input.origin,
       "X-Upload-Content-Type": input.mimeType,
-      "X-Upload-Content-Length": String(input.sizeBytes),
+      // Omitted for a streamed upload: the renderer is still producing bytes,
+      // and the final chunk's Content-Range declares the total instead.
+      ...(input.sizeBytes ? { "X-Upload-Content-Length": String(input.sizeBytes) } : {}),
     },
     body: JSON.stringify({
       name: input.name,

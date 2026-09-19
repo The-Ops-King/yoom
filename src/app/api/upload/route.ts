@@ -15,10 +15,12 @@ export async function POST(request: Request) {
   }
 
   const mimeType = body.mimeType || "video/webm";
-  const sizeBytes = Number(body.sizeBytes);
   const filename = body.filename?.trim() || `yoom-${Date.now()}.webm`;
 
-  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_SIZE_BYTES) {
+  // Absent for a streamed upload (the export is still rendering); when given
+  // it must be sane.
+  const sizeBytes = body.sizeBytes === undefined ? undefined : Number(body.sizeBytes);
+  if (sizeBytes !== undefined && (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_SIZE_BYTES)) {
     return NextResponse.json({ error: "Invalid sizeBytes" }, { status: 400 });
   }
 
