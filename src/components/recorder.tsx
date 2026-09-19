@@ -7,7 +7,8 @@ import { YoomLogo } from "./logo";
 import { DeviceSelector } from "./device-selector";
 import { AudioControls } from "./recorder/audio-controls";
 import { Countdown } from "./recorder/countdown";
-import { PreviewStage, formatElapsed } from "./recorder/preview-stage";
+import { PreviewStage } from "./recorder/preview-stage";
+import { PendingTakes } from "./recorder/pending-takes";
 import { useRecorder } from "@/lib/recording/use-recorder";
 import type { RecordingMode } from "@/lib/recording/types";
 
@@ -341,42 +342,11 @@ export function Recorder({ shareBase }: { shareBase: string }) {
             array, and only in `idle` (never mid-setup or mid-recording).
           */}
           {state.status === "idle" && pendingTakes && pendingTakes.length > 0 && (
-            <div className="space-y-2 rounded-lg border border-border bg-surface p-3">
-              <p className="text-sm font-medium text-foreground">
-                Unsaved take{pendingTakes.length > 1 ? "s" : ""}
-              </p>
-              {pendingTakes.map((t) => (
-                <div key={t.id} className="flex items-center justify-between gap-3 text-sm">
-                  <span className="text-muted">
-                    {new Date(t.createdAt).toLocaleString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}
-                    {" · "}
-                    {t.finalized ? "" : "~"}
-                    {formatElapsed(t.durationMs)}
-                  </span>
-                  <span className="flex shrink-0 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => actions.restoreTake(t.id)}
-                      className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white transition-all hover:bg-accent-hover"
-                    >
-                      Restore
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => actions.dropTake(t.id)}
-                      className="shrink-0 rounded-md border border-border bg-surface-raised px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-foreground"
-                    >
-                      Delete
-                    </button>
-                  </span>
-                </div>
-              ))}
-            </div>
+            <PendingTakes
+              takes={pendingTakes}
+              onRestore={actions.restoreTake}
+              onDelete={actions.dropTake}
+            />
           )}
 
           <div className="flex flex-wrap items-center justify-center gap-2">
