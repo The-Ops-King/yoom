@@ -2,6 +2,7 @@ import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   appendChunk,
+  CHUNK_MS,
   createTake,
   deleteTake,
   finalizeTake,
@@ -10,6 +11,7 @@ import {
   pruneTakes,
   resetTakeDbForTests,
   saveTakeDraft,
+  TAKE_DB,
   type TakeMeta,
 } from "./take-store";
 
@@ -37,20 +39,43 @@ const META: TakeMeta = {
  * Reaches past the module's public API to read the raw `chunks` store
  * directly, so a delete/prune test can prove BOTH file kinds' chunks are
  * actually gone rather than just inferring it from `loadTake` returning
- * null (which only requires the "screen" chunks to be missing). Mirrors
- * take-store.ts's own internal db/store names.
+ * null (which only requires the "screen" chunks to be missing). Uses
+ * `TAKE_DB` rather than hardcoded strings, so a renamed store fails this
+ * helper loudly instead of hanging the test to its timeout.
  */
 function rawChunkOwners(): Promise<string[]> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open("yoom-takes", 1);
+    const req = indexedDB.open(TAKE_DB.name, 1);
     req.onsuccess = () => {
       const db = req.result;
-      const getAllReq = db.transaction("chunks", "readonly").objectStore("chunks").getAllKeys();
+      const getAllReq = db.transaction(TAKE_DB.chunks, "readonly").objectStore(TAKE_DB.chunks).getAllKeys();
       getAllReq.onsuccess = () => {
         resolve((getAllReq.result as [string, string, number][]).map((key) => key[0]));
         db.close();
       };
       getAllReq.onerror = () => reject(getAllReq.error);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/**
+ * Writes a chunk keyed under an arbitrary kind string, bypassing the
+ * `FileKind` union — so a delete test can prove `deleteTake`'s range covers
+ * whatever kind a future capture mode adds, not just today's "camera"/"screen".
+ */
+function rawPutChunk(id: string, kind: string, seq: number, data: Blob): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(TAKE_DB.name, 1);
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction(TAKE_DB.chunks, "readwrite");
+      tx.objectStore(TAKE_DB.chunks).put({ key: [id, kind, seq], data });
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
     };
     req.onerror = () => reject(req.error);
   });
@@ -89,10 +114,40 @@ describe("take store", () => {
     expect(take!.finalized).toBe(false);
   });
 
-  it("deletes a take and all its chunks (both kinds), leaving other takes untouched", async () => {
+  it("truncates playback at the first missing chunk instead of splicing a hole", async () => {
+    const id = await createTake({ mode: "screen", mimeType: "video/webm" });
+    await appendChunk(id, "screen", 0, new Blob(["0"]));
+    await appendChunk(id, "screen", 1, new Blob(["1"]));
+    // seq 2 never arrives.
+    await appendChunk(id, "screen", 3, new Blob(["3"]));
+    await appendChunk(id, "screen", 4, new Blob(["4"]));
+    const take = await loadTake(id);
+    expect(await take!.screen.text()).toBe("01");
+  });
+
+  it("returns null when the very first chunk is missing", async () => {
+    const id = await createTake({ mode: "screen", mimeType: "video/webm" });
+    await appendChunk(id, "screen", 1, new Blob(["1"]));
+    expect(await loadTake(id)).toBeNull();
+  });
+
+  it("estimates duration from the chunks actually returned, not the high-water mark", async () => {
+    const id = await createTake({ mode: "screen", mimeType: "video/webm" });
+    await appendChunk(id, "screen", 0, new Blob(["0"]));
+    await appendChunk(id, "screen", 1, new Blob(["1"]));
+    // seq 2/3 never arrive; the high-water mark still jumps to 5 chunks.
+    await appendChunk(id, "screen", 4, new Blob(["4"]));
+    const take = await loadTake(id);
+    expect(take!.meta.durationMs).toBe(2 * CHUNK_MS); // 2 contiguous chunks, not 5
+  });
+
+  it("deletes a take and all its chunks (both kinds, and any future kind), leaving other takes untouched", async () => {
     const id = await createTake({ mode: "screen+camera", mimeType: "video/webm" });
     await appendChunk(id, "screen", 0, new Blob(["x"]));
     await appendChunk(id, "camera", 0, new Blob(["y"]));
+    // "zzz" sorts after "screen" — a range hand-bounded to "camera".."screen"
+    // (the old implementation) would leave this one behind.
+    await rawPutChunk(id, "zzz", 0, new Blob(["q"]));
     const other = await createTake({ mode: "screen", mimeType: "video/webm" });
     await appendChunk(other, "screen", 0, new Blob(["z"]));
 

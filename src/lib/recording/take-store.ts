@@ -12,6 +12,14 @@ const CHUNKS = "chunks";
 /** `MediaRecorder.start(250)` — used to estimate the length of a take that never finished. */
 export const CHUNK_MS = 250;
 
+/**
+ * Test seam: the raw db/store names, for a test that reaches past the public
+ * API to inspect the store directly. Importing these rather than hardcoding
+ * the strings means a rename here breaks the test loudly (a wrong string
+ * fails inside an `onsuccess` callback, hanging the test to its timeout).
+ */
+export const TAKE_DB = { name: DB_NAME, chunks: CHUNKS };
+
 /** `"screen"` is always the PRIMARY file — in camera-only mode the single recorded file is stored under `"screen"`, and `loadTake` returns null without it. */
 export type FileKind = "screen" | "camera";
 export type TakeMeta = {
@@ -207,11 +215,18 @@ function patch(id: string, fn: (r: TakeRecord) => void): Promise<void> {
 export const finalizeTake = (id: string, meta: TakeMeta) => patch(id, (r) => { r.meta = meta; });
 export const saveTakeDraft = (id: string, draft: TakeDraft) => patch(id, (r) => { r.draft = draft; });
 
-function estimatedMeta(r: TakeRecord): TakeMeta {
+/**
+ * `chunkCount` defaults to the take's high-water mark (`r.chunks`) — fine for
+ * the lightweight `listTakes` summary, which doesn't load any chunk blobs.
+ * `loadTake` passes the CONTIGUOUS count it actually returned instead: past a
+ * gap, the high-water mark overshoots how much of the blob is really
+ * playable, which would draw a staging timeline longer than the footage.
+ */
+function estimatedMeta(r: TakeRecord, chunkCount = r.chunks): TakeMeta {
   return {
     mode: r.mode,
     mimeType: r.mimeType,
-    durationMs: r.chunks * CHUNK_MS,
+    durationMs: chunkCount * CHUNK_MS,
     cameraOffsetMs: 0,
     width: null,
     height: null,
@@ -268,7 +283,7 @@ export async function loadTake(id: string): Promise<StoredTake | null> {
     id,
     screen: new Blob(screen, { type: rec.mimeType }),
     camera: camera.length ? new Blob(camera, { type: rec.mimeType }) : null,
-    meta: rec.meta ?? estimatedMeta(rec),
+    meta: rec.meta ?? estimatedMeta(rec, screen.length),
     draft: rec.draft,
     finalized: !!rec.meta,
   };
