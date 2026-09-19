@@ -1,4 +1,4 @@
-import { IDBFactory } from "fake-indexeddb";
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   appendChunk,
@@ -15,6 +15,8 @@ import {
 
 beforeEach(() => {
   globalThis.indexedDB = new IDBFactory();
+  // take-store.ts uses the real IDBKeyRange global, which Node doesn't provide.
+  globalThis.IDBKeyRange = IDBKeyRange as unknown as typeof globalThis.IDBKeyRange;
   resetTakeDbForTests();
 });
 

@@ -215,24 +215,10 @@ export async function listTakes(): Promise<TakeSummary[]> {
   }
 }
 
-/**
- * `IDBKeyRange` is a browser/Electron global; it's absent under plain Node
- * (our vitest env only polyfills `indexedDB`, not `IDBKeyRange`). Falls back
- * to scanning the store and filtering/sorting in JS — fine for a take's
- * handful of chunks, and the range path below still carries production.
- */
 async function chunksOf(db: IDBDatabase, id: string, kind: FileKind): Promise<Blob[]> {
-  const store = db.transaction(CHUNKS).objectStore(CHUNKS);
-  if (typeof IDBKeyRange !== "undefined") {
-    const range = IDBKeyRange.bound([id, kind, 0], [id, kind, Number.MAX_SAFE_INTEGER]);
-    const recs = await result(store.getAll(range) as IDBRequest<ChunkRecord[]>);
-    return recs.map((c) => c.data); // key order = seq order
-  }
-  const all = await result(store.getAll() as IDBRequest<ChunkRecord[]>);
-  return all
-    .filter((c) => c.key[0] === id && c.key[1] === kind)
-    .sort((a, b) => a.key[2] - b.key[2])
-    .map((c) => c.data);
+  const range = IDBKeyRange.bound([id, kind, 0], [id, kind, Number.MAX_SAFE_INTEGER]);
+  const recs = await result(db.transaction(CHUNKS).objectStore(CHUNKS).getAll(range) as IDBRequest<ChunkRecord[]>);
+  return recs.map((c) => c.data); // key order = seq order
 }
 
 export async function loadTake(id: string): Promise<StoredTake | null> {
@@ -256,18 +242,7 @@ export async function deleteTake(id: string): Promise<void> {
   const db = await open();
   const tx = db.transaction([TAKES, CHUNKS], "readwrite");
   tx.objectStore(TAKES).delete(id);
-  const chunks = tx.objectStore(CHUNKS);
-  if (typeof IDBKeyRange !== "undefined") {
-    chunks.delete(IDBKeyRange.bound([id, "camera", 0], [id, "screen", Number.MAX_SAFE_INTEGER]));
-  } else {
-    // See `chunksOf` — no `IDBKeyRange` outside a browser/Electron. Delete inside
-    // the key request's own `onsuccess` so the transaction never goes idle
-    // waiting on an awaited promise (see `appendChunk`).
-    const keysReq = chunks.getAllKeys();
-    keysReq.onsuccess = () => {
-      for (const key of keysReq.result as [string, FileKind, number][]) if (key[0] === id) chunks.delete(key);
-    };
-  }
+  tx.objectStore(CHUNKS).delete(IDBKeyRange.bound([id, "camera", 0], [id, "screen", Number.MAX_SAFE_INTEGER]));
   await done(tx);
 }
 
