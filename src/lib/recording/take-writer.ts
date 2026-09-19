@@ -55,4 +55,15 @@ export class TakeWriter {
   id(): Promise<string | null> {
     return this.takeId;
   }
+
+  /**
+   * `false` once storage has failed: chunks were dropped after that point, so
+   * the stored take is truncated — shorter than the in-memory recording. A
+   * caller finalizing a take should check this first and, if false, leave it
+   * unfinalized so take-store's contiguous-chunk duration estimate applies
+   * instead of the full in-memory `durationMs`.
+   */
+  ok(): boolean {
+    return !this.failed;
+  }
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { TakeWriter } from "./take-writer";
 
 describe("TakeWriter", () => {
@@ -37,6 +37,7 @@ describe("TakeWriter", () => {
   it("stops persisting once a write fails, logs once, and never rejects", async () => {
     const append = vi.fn().mockRejectedValueOnce(new Error("quota")).mockResolvedValue(undefined);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warn.mockRestore());
     const w = new TakeWriter(Promise.resolve("t1"), { append });
     w.chunk("screen", new Blob(["a"]));
     w.chunk("screen", new Blob(["b"]));
@@ -46,7 +47,6 @@ describe("TakeWriter", () => {
     // every remaining chunk, so there's no point (or logging) for the rest.
     expect(append).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledTimes(1);
-    warn.mockRestore();
   });
 
   it("does not renumber or retry a chunk once storage has failed", async () => {
@@ -74,6 +74,17 @@ describe("TakeWriter", () => {
     w.chunk("screen", new Blob(["c"]));
     await w.flush();
     expect(calls).toEqual(["screen0", "camera0", "screen1"]);
+  });
+
+  it("reports ok() until a write fails, then false for the rest of the take", async () => {
+    const append = vi.fn().mockRejectedValueOnce(new Error("quota")).mockResolvedValue(undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warn.mockRestore());
+    const w = new TakeWriter(Promise.resolve("t1"), { append });
+    expect(w.ok()).toBe(true);
+    w.chunk("screen", new Blob(["a"]));
+    await w.flush();
+    expect(w.ok()).toBe(false);
   });
 
   it("does nothing when the take could not be created", async () => {
