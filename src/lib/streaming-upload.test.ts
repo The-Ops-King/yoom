@@ -36,7 +36,11 @@ describe("StreamingUpload", () => {
 
   it("rejects out-of-order writes", async () => {
     const up = new StreamingUpload(SESSION);
-    await expect(up.write(bytes(10), 5)).rejects.toThrow(/out of order/);
+    await expect(up.write(bytes(10), 5)).rejects.toMatchObject({
+      // The banner shows `message` verbatim, so the offsets ride in `cause`.
+      message: "Upload failed. Please try again.",
+      cause: expect.stringContaining("out of order"),
+    });
   });
 
   it("resumes from Drive's committed offset after a network error", async () => {
@@ -144,7 +148,10 @@ describe("StreamingUpload", () => {
     }));
     const up = new StreamingUpload(SESSION);
     await up.write(bytes(500), 0);
-    await expect(up.finish()).rejects.toThrow(/never confirmed/i);
+    await expect(up.finish()).rejects.toMatchObject({
+      message: "Upload failed. Please try again.",
+      cause: expect.stringContaining("never confirmed the file"),
+    });
     // One request made progress (0 -> 256), then MAX_ATTEMPTS that did not.
     expect(calls).toBe(6);
     expect(seen[0]).toBe("bytes 0-499/500");
@@ -184,7 +191,10 @@ describe("StreamingUpload", () => {
     }));
     const up = new StreamingUpload(SESSION);
     await up.write(bytes(500), 0);
-    await expect(up.finish()).rejects.toThrow(/never confirmed/i);
+    await expect(up.finish()).rejects.toMatchObject({
+      message: "Upload failed. Please try again.",
+      cause: expect.stringContaining("never confirmed the file"),
+    });
     // First response advances 0 -> 301, then every later one walks back.
     expect(calls).toBe(6);
   });
@@ -197,7 +207,10 @@ describe("StreamingUpload", () => {
     }));
     const up = new StreamingUpload(SESSION);
     await up.write(bytes(500), 0);
-    await expect(up.finish()).rejects.toThrow(/never confirmed/i);
+    await expect(up.finish()).rejects.toMatchObject({
+      message: "Upload failed. Please try again.",
+      cause: expect.stringContaining("never confirmed the file"),
+    });
     expect(calls).toBe(5); // MAX_ATTEMPTS, no progress ever made
   });
 
@@ -205,7 +218,10 @@ describe("StreamingUpload", () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({}, { status: 200 })));
     const up = new StreamingUpload(SESSION);
     await up.write(bytes(500), 0);
-    await expect(up.finish()).rejects.toThrow(/without a Drive file id/);
+    await expect(up.finish()).rejects.toMatchObject({
+      message: "Upload failed. Please try again.",
+      cause: expect.stringContaining("without returning a file id"),
+    });
   });
 
   it("treats 410 as an expired session", async () => {
@@ -400,7 +416,10 @@ describe("StreamingUpload", () => {
     }));
     const up = new StreamingUpload(SESSION);
     await up.write(bytes(500), 0);
-    await expect(up.finish()).rejects.toThrow(/repeated network errors/);
+    await expect(up.finish()).rejects.toMatchObject({
+      message: "Upload failed. Please check your connection and try again.",
+      cause: expect.stringContaining("repeated network errors"),
+    });
     expect(calls).toBe(MAX_ATTEMPTS);
   });
 
@@ -413,7 +432,10 @@ describe("StreamingUpload", () => {
     }));
     const up = new StreamingUpload(SESSION);
     await up.write(bytes(500), 0);
-    await expect(up.finish()).rejects.toThrow(/while resuming \(500\)/);
+    await expect(up.finish()).rejects.toMatchObject({
+      message: "Upload failed. Please try again.",
+      cause: "Drive returned 500 while resuming",
+    });
     expect(calls).toBe(MAX_ATTEMPTS);
   });
 

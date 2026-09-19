@@ -24,6 +24,13 @@ export interface UploadRecordingInput {
    * the other with string surgery.
    */
   onSlug?: (slug: string) => void;
+  /**
+   * When the take was recorded. One instant stamps both the Drive filename and
+   * the default title, so a caller that already has one — the recorder opens
+   * its own session before the render on the fast path — must pass it here.
+   * Defaults to now, which is only right for a caller with nothing to align to.
+   */
+  now?: Date;
   signal?: AbortSignal;
 }
 
@@ -180,8 +187,11 @@ export async function completeUpload(input: {
 }
 
 /**
- * The Phase 1 flow, unchanged: mint a resumable session, PUT the blob to Drive
- * in chunks, record the metadata, then attach the thumbnail.
+ * The whole-file flow: mint a resumable session, PUT the blob to Drive in
+ * chunks, record the metadata, then attach the thumbnail. The two `/api/upload`
+ * round-trips are `beginUpload` and `completeUpload`, the same pair the fast
+ * exporter drives by hand around its streamed render — this is the path that
+ * has the finished bytes already and so can run them back to back.
  */
 export async function uploadRecording(
   input: UploadRecordingInput,
@@ -198,6 +208,7 @@ export async function uploadRecording(
     slug,
     edits,
     onSlug,
+    now = new Date(),
     signal,
   } = input;
 
@@ -205,7 +216,6 @@ export async function uploadRecording(
     throw new Error("Recording captured no data. Please try again.");
   }
 
-  const now = new Date();
   const mimeType = blob.type || "video/webm";
 
   const { sessionUri, slug: reservedSlug } = await beginUpload({

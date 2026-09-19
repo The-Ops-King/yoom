@@ -15,6 +15,27 @@ const MAX_BUFFERED_BYTES = 64 * 1024 * 1024;
 /** Drive only commits non-final chunks in whole multiples of this. */
 const CHUNK_GRANULARITY_BYTES = 256 * 1024;
 
+/**
+ * Anything thrown out of here can end up on screen WORD FOR WORD: `write`
+ * re-throws a latched chunk failure, that rejection travels out of
+ * `renderFast`, and use-recorder's `failed()` puts `err.message` straight into
+ * the staging error banner. So the message is written for the user in the same
+ * voice as the rest of the flow ("… Please try again."), and the part only a
+ * developer cares about goes in `cause` and in a console line — never lost,
+ * just not shown to someone who cannot act on it.
+ *
+ * The exceptions are the throws a user can never provoke — a bad `chunkSize`,
+ * a write after `finish`, an empty `finish` — which stay blunt on purpose:
+ * they mean this class is being used wrong.
+ */
+function uploadFailed(message: string, detail: string): Error {
+  console.warn(`[Yoom] upload failed: ${detail}`);
+  return new Error(message, { cause: detail });
+}
+
+/** What the banner says when there is nothing more useful to tell the user. */
+const RETRY = "Upload failed. Please try again.";
+
 export type StreamingUploadOptions = UploadOptions & {
   /** Called with the number of bytes Drive has acknowledged. */
   onProgress?: (sentBytes: number) => void;
@@ -80,16 +101,6 @@ export class StreamingUpload {
     }
   }
 
-  /** Bytes Drive has acknowledged so far. */
-  get sentBytes(): number {
-    return this.sent;
-  }
-
-  /** Bytes handed to this upload so far. */
-  get receivedBytes(): number {
-    return this.received;
-  }
-
   /**
    * Append `data`, which must start exactly where the previous write ended.
    * Resolves immediately unless the unsent backlog is over the watermark, in
@@ -99,7 +110,10 @@ export class StreamingUpload {
     if (this.failure) throw this.failure;
     if (this.done) throw new Error("Upload already finished");
     if (position !== this.received) {
-      throw new Error(`Upload bytes out of order (${position} != ${this.received})`);
+      throw uploadFailed(
+        RETRY,
+        `bytes out of order (chunk at ${position}, expected ${this.received})`,
+      );
     }
 
     this.parts.push(new Blob([data as BlobPart]));
@@ -206,14 +220,19 @@ export class StreamingUpload {
       if (this.options.signal?.aborted) throw error;
       this.attempts += 1;
       if (this.attempts >= MAX_ATTEMPTS) {
-        throw new Error("Upload failed after repeated network errors");
+        throw uploadFailed(
+          "Upload failed. Please check your connection and try again.",
+          "repeated network errors",
+        );
       }
       return this.queryCommitted();
     }
 
     if (response.status === 200 || response.status === 201) {
       const json = (await response.json()) as { id?: string };
-      if (!json.id) throw new Error("Upload finished without a Drive file id");
+      if (!json.id) {
+        throw uploadFailed(RETRY, "Drive completed the session without returning a file id");
+      }
       this.advance(this.received);
       return json.id;
     }
@@ -235,7 +254,7 @@ export class StreamingUpload {
       if (header === null) {
         if ((this.attempts += 1) >= MAX_ATTEMPTS) {
           // No progress and no explanation: stop rather than PUT forever.
-          throw new Error("Upload failed: Drive never confirmed the file");
+          throw uploadFailed(RETRY, "Drive never confirmed the file (no Range header)");
         }
         return null;
       }
@@ -252,14 +271,14 @@ export class StreamingUpload {
       if (next <= this.sent && (this.attempts += 1) >= MAX_ATTEMPTS) {
         // A server reporting a stuck or decreasing offset forever still has to
         // terminate, so the budget is only reset by real forward progress.
-        throw new Error("Upload failed: Drive never confirmed the file");
+        throw uploadFailed(RETRY, `Drive never confirmed the file (stuck at ${next})`);
       }
       return this.reconcileTo(next);
     }
 
     this.attempts += 1;
     if (this.attempts >= MAX_ATTEMPTS) {
-      throw new Error(`Upload failed (${response.status})`);
+      throw uploadFailed(RETRY, `Drive returned ${response.status}`);
     }
     return this.queryCommitted();
   }
@@ -292,7 +311,10 @@ export class StreamingUpload {
         if (this.options.signal?.aborted) throw error;
         this.attempts += 1;
         if (this.attempts >= MAX_ATTEMPTS) {
-          throw new Error("Upload failed after repeated network errors");
+          throw uploadFailed(
+            "Upload failed. Please check your connection and try again.",
+            "repeated network errors while resuming",
+          );
         }
         continue;
       }
@@ -302,14 +324,16 @@ export class StreamingUpload {
       }
       if (response.status === 200 || response.status === 201) {
         const json = (await response.json()) as { id?: string };
-        if (!json.id) throw new Error("Upload finished without a Drive file id");
+        if (!json.id) {
+          throw uploadFailed(RETRY, "Drive completed the session without returning a file id");
+        }
         this.advance(this.received);
         return json.id;
       }
       if (response.status !== 308) {
         this.attempts += 1;
         if (this.attempts >= MAX_ATTEMPTS) {
-          throw new Error(`Upload failed while resuming (${response.status})`);
+          throw uploadFailed(RETRY, `Drive returned ${response.status} while resuming`);
         }
         continue;
       }

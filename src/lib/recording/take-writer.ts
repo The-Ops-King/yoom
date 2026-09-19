@@ -58,10 +58,16 @@ export class TakeWriter {
 
   /**
    * `false` once storage has failed: chunks were dropped after that point, so
-   * the stored take is truncated — shorter than the in-memory recording. A
-   * caller finalizing a take should check this first and, if false, leave it
-   * unfinalized so take-store's contiguous-chunk duration estimate applies
-   * instead of the full in-memory `durationMs`.
+   * the stored take is truncated — shorter than the in-memory recording, and
+   * its `durationMs` is the length the recorder THOUGHT it captured.
+   *
+   * Finalize the take either way and pass the inverse as take-store's
+   * `truncated` flag — `finalizeTake(id, meta, { truncated: !writer.ok() })`,
+   * which is what use-recorder does. That keeps every real track the recorder
+   * captured (cursor, clicks, keys, markers, camera offset) and lets `loadTake`
+   * correct the one field that is actually wrong, substituting its
+   * contiguous-chunk duration estimate. Skipping the finalize instead would
+   * throw all of that metadata away to fix the same number.
    */
   ok(): boolean {
     return !this.failed;

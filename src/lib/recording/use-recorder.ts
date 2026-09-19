@@ -502,10 +502,12 @@ export function useRecorder(): UseRecorderResult {
       }
     } else {
       // A take with no draft must land in a CLEAN staging. Only a finished
-      // upload clears the key, so a discarded take's draft is still sitting
-      // there — and `readDraft` matches on duration alone, which for an
-      // unfinalized take is quantized to 250 ms chunks and collides easily.
-      // That would carry a stranger's title and description into this take.
+      // upload or a discard otherwise clears the key, so an abandoned take's
+      // draft is still sitting there — and `readDraft` matches on duration
+      // alone, which for an unfinalized take is quantized to 250 ms chunks and
+      // collides easily. That would carry a stranger's title and description
+      // into this take. This branch is the third and last clearer of the key
+      // (see `staging-draft.ts`).
       clearStagingDraft();
     }
     // Staging keeps writing its draft to the same record, and a new take
@@ -1111,6 +1113,11 @@ export function useRecorder(): UseRecorderResult {
           title: input.title,
           description: input.description,
           edits: input.edits,
+          // Every route that talks to `/api/upload` gets the SAME instant, so
+          // the Drive filename and the default title agree however the take
+          // got here. Left to default, each route would mint its own `new
+          // Date()` after the render instead.
+          now,
           signal,
         };
 
@@ -1413,7 +1420,6 @@ export function useRecorder(): UseRecorderResult {
             width: rendered.width,
             height: rendered.height,
             thumbnail: rendered.thumbnail,
-            now,
           });
           logExport("fast");
           // ---- 7. ----

@@ -112,7 +112,6 @@ describe("take store", () => {
     for (let i = 0; i < 8; i++) await appendChunk(id, "screen", i, new Blob(["x"]));
     const take = await loadTake(id);
     expect(take!.meta.durationMs).toBe(2000); // 8 chunks × 250 ms
-    expect(take!.finalized).toBe(false);
   });
 
   it("truncates playback at the first missing chunk instead of splicing a hole", async () => {
@@ -214,7 +213,6 @@ describe("take store", () => {
 
     const take = await loadTake(id);
 
-    expect(take!.finalized).toBe(true);
     expect(take!.meta.durationMs).toBe(2 * CHUNK_MS); // 2 contiguous chunks, not META.durationMs
     // every other track from `meta` survives untouched — no fallback to an empty estimatedMeta
     expect(take!.meta.mode).toBe(META.mode);

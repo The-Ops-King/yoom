@@ -6,6 +6,10 @@ import type { ClickSample, CursorSample, KeySample, RecordingMode } from "./type
  * A take is deleted once it uploads or is discarded.
  */
 const DB_NAME = "yoom-takes";
+// Stays 1 even though `truncated` was added to the record shape later: a record
+// written before it simply has no such property, and `undefined` is falsy
+// everywhere it is read — the same answer as `false`. No migration to run, so
+// no version to bump.
 const DB_VERSION = 1;
 const TAKES = "takes";
 const CHUNKS = "chunks";
@@ -64,14 +68,14 @@ export type TakeSummary = {
   mode: RecordingMode;
   durationMs: number;
   bytes: number;
-  finalized: boolean;
   /**
    * True when `durationMs` may not match what `loadTake` actually yields —
    * either the take never finalized (`estimatedMeta`'s high-water-mark
    * guess), or it did but was truncated (the recorder's own `meta.durationMs`,
    * which `loadTake` corrects but this summary doesn't — that would mean
    * loading every chunk blob just to list a number). The restore prompt keys
-   * its "~" prefix off this instead of `finalized` directly.
+   * its "~" prefix off this. There is deliberately no separate `finalized`
+   * flag: nothing outside this module needs to tell the two causes apart.
    */
   estimated: boolean;
 };
@@ -81,7 +85,6 @@ export type StoredTake = {
   camera: Blob | null;
   meta: TakeMeta;
   draft: TakeDraft | null;
-  finalized: boolean;
 };
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -235,8 +238,9 @@ function patch(id: string, fn: (r: TakeRecord) => void): Promise<void> {
  * a storage failure mid-recording: `meta` is real (every track the recorder
  * captured), but its `durationMs` reflects what the recorder THOUGHT it
  * wrote, not what's actually on disk. `loadTake` corrects just that field
- * once it knows how many chunks are actually contiguous. `finalized` stays
- * true either way — the take has real metadata, unlike an unfinalized one.
+ * once it knows how many chunks are actually contiguous. Call this even for a
+ * truncated take: `meta` is real metadata, unlike an unfinalized take's, and
+ * only the duration needs fixing.
  */
 export const finalizeTake = (id: string, meta: TakeMeta, opts?: { truncated?: boolean }) =>
   patch(id, (r) => {
@@ -294,7 +298,6 @@ export async function listTakes(): Promise<TakeSummary[]> {
         mode: r.mode,
         durationMs: (r.meta ?? estimatedMeta(r)).durationMs,
         bytes: r.bytes,
-        finalized: !!r.meta,
         estimated: !r.meta || r.truncated,
       }))
       .sort((a, b) => b.createdAt - a.createdAt);
@@ -336,7 +339,6 @@ export async function loadTake(id: string): Promise<StoredTake | null> {
     camera: camera.length ? new Blob(camera, { type: rec.mimeType }) : null,
     meta,
     draft: rec.draft,
-    finalized: !!rec.meta,
   };
 }
 

@@ -94,6 +94,40 @@ describe("uploadRecording", () => {
     expect(JSON.parse(secondInit.body).title).toContain("Recording — ");
   });
 
+  // The recorder mints ONE instant for a take and hands it to every route that
+  // talks to `/api/upload`, so the Drive filename and the default title agree.
+  // Minting a fresh `new Date()` in here stamped both with a POST-render
+  // instant on the legacy path, the no-WebCodecs path and the fast-retry.
+  it("stamps the filename and the default title from a caller's `now`", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ sessionUri: "https://drive/session", slug: "abc12345" }))
+      .mockResolvedValueOnce(
+        jsonResponse({ id: "vid-1", slug: "abc12345", url: "https://jtylerray.com/v/abc12345" }),
+      );
+
+    const recordedAt = new Date("2026-09-02T15:04:05.000Z");
+    await uploadRecording({
+      blob,
+      durationMs: 12_345,
+      width: 1920,
+      height: 1080,
+      thumbnail: null,
+      onProgress: vi.fn(),
+      title: "", // blank, so the server is sent the generated default
+      description: "",
+      slug: "",
+      edits: emptyEdits,
+      now: recordedAt,
+    });
+
+    const beginBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(beginBody.filename).toBe("yoom-2026-09-02T15-04-05-000Z.webm");
+
+    const completeBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(completeBody.title).toBe(defaultRecordingTitle(recordedAt));
+    expect(completeBody.title).not.toBe(defaultRecordingTitle(new Date()));
+  });
+
   // The chunk PUTs are the part that takes minutes, and the recorder offers
   // Cancel for the whole of them. A signal that stopped at the JSON round-trips
   // would make that button a no-op and orphan a finished Drive file.

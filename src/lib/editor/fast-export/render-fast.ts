@@ -33,7 +33,13 @@ import { asLayer } from "./layer";
 import { cameraTimes, frameCount, sourceTimes, thumbnailFrame } from "./timeline";
 
 export type FastRenderOptions = RenderOptions & {
-  /** Receives the output file's bytes strictly in order. Awaited (backpressure). */
+  /**
+   * Receives the output file's bytes CONTIGUOUSLY: each call's `position` is
+   * exactly where the previous call's bytes ended — never a gap, never a
+   * rewrite of bytes already handed over. `StreamingUpload.write`, the real
+   * consumer, enforces precisely that (`position !== received` throws), so
+   * "in order" is not enough on its own. Awaited (backpressure).
+   */
   onChunk: (data: Uint8Array, position: number) => Promise<void>;
 };
 
@@ -120,8 +126,9 @@ function layerOf(sample: VideoSample): VideoLayer {
  *
  * Unlike `renderToBlob` this never plays anything, so it cannot stall and is
  * not capped at 1×. A fragmented MP4 is written monotonically, so `onChunk`
- * sees the file's bytes strictly in order and can stream them to an upload
- * that is still running while the render is.
+ * sees the file's bytes contiguously — each chunk starting exactly where the
+ * last ended — and can stream them to an upload that is still running while
+ * the render is.
  *
  * The pipeline, in the order the body runs it:
  *
@@ -216,14 +223,21 @@ export async function renderFast(
         new WritableStream<StreamTargetChunk>({
           write: async (chunk) => {
             // HAZARD — the whole streaming upload rests on this: `fastStart:
-            // "fragmented"` is documented to write monotonically, so positions
-            // only ever move forward and `onChunk` can append straight into a
-            // Drive session it can never seek back in. mediabunny is pinned as
+            // "fragmented"` is documented to write monotonically and
+            // contiguously, so `onChunk` can append straight into a Drive
+            // session it can never seek back in. mediabunny is pinned as
             // `^1.58.1`, so a minor bump lands here on its own. If an upgrade
-            // ever makes fragmented output seek backwards, this appends the
-            // rewritten bytes at the END of the file instead: the upload does
-            // not fail, it SILENTLY corrupts. Re-verify write ordering before
-            // bumping the dependency.
+            // ever makes fragmented output seek backwards (or skip a hole),
+            // `StreamingUpload.write` THROWS "bytes out of order" on the first
+            // such chunk — the failure is loud, not silent corruption — but the
+            // export is broken all the same, and every take on that version
+            // fails at the same point. Re-verify write ordering before bumping
+            // the dependency.
+            //
+            // Given that contract the file's size is just the running total, so
+            // `max` and `position + byteLength` are the same number on every
+            // call; it is written as `max` only so a violating chunk cannot
+            // shrink the size we report before `write` rejects it.
             size = Math.max(size, chunk.position + chunk.data.byteLength);
             await opts.onChunk(chunk.data, chunk.position);
           },
