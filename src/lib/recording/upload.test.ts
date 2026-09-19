@@ -143,9 +143,9 @@ describe("uploadRecording", () => {
         jsonResponse({ id: "vid-1", slug: "abc12345", url: "https://jtylerray.com/v/abc12345" }),
       );
 
-    let copiedUrl = "";
-    const onSlug = vi.fn((url: string) => {
-      copiedUrl = url;
+    let reported = "";
+    const onSlug = vi.fn((slug: string) => {
+      reported = slug;
       order.push("onSlug");
     });
 
@@ -164,7 +164,7 @@ describe("uploadRecording", () => {
     });
 
     expect(onSlug).toHaveBeenCalledTimes(1);
-    expect(copiedUrl).toMatch(/\/v\/abc12345$/);
+    expect(reported).toBe("abc12345");
     expect(order).toEqual(["onSlug", "put"]);
 
     const completeBody = JSON.parse(fetchMock.mock.calls[1][1].body);

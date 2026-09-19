@@ -179,7 +179,7 @@ export function Recorder({ shareBase }: { shareBase: string }) {
             onClick={actions.cancelExport}
             className="rounded-lg border border-border bg-surface-raised px-5 py-2 text-sm font-medium text-muted transition-colors hover:text-foreground"
           >
-            {rendering ? "Cancel" : "Cancel upload"}
+            {rendering ? "Cancel render" : "Cancel upload"}
           </button>
         </div>
       </main>

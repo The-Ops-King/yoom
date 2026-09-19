@@ -1,5 +1,4 @@
 import type { VideoEdits } from "@/lib/edits";
-import { shareUrl } from "@/lib/share";
 import { uploadToDrive } from "@/lib/upload-client";
 
 export interface UploadRecordingInput {
@@ -17,12 +16,14 @@ export interface UploadRecordingInput {
   /** The whole staging edit list; the server re-validates it. */
   edits: VideoEdits;
   /**
-   * Called with the share URL for the slug `/api/upload` reserved, right after
-   * that round-trip and before a single byte goes to Drive. The recorder copies
-   * it to the clipboard there, while the click's transient activation is still
-   * alive — by the time the upload finishes it is long gone.
+   * Called with the slug `/api/upload` reserved, right after that round-trip
+   * and before a single byte goes to Drive. The recorder turns it into a share
+   * URL and copies that to the clipboard there, while the click's transient
+   * activation is still alive — by the time the upload finishes it is long
+   * gone. The SLUG and not the URL, so no caller has to pick one back out of
+   * the other with string surgery.
    */
-  onSlug?: (url: string) => void;
+  onSlug?: (slug: string) => void;
   signal?: AbortSignal;
 }
 
@@ -219,7 +220,7 @@ export async function uploadRecording(
     // A failing callback (clipboard denied, insecure context) must never cost
     // the user their recording.
     try {
-      onSlug(shareUrl(reservedSlug));
+      onSlug(reservedSlug);
     } catch {
       // ignored
     }

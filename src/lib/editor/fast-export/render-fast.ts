@@ -28,7 +28,7 @@ import {
 } from "../export";
 import { drawFrame, outputSize, preloadOverlayImages, type VideoLayer } from "../render";
 import { AudioAssembler } from "./audio-assembler";
-import { AUDIO_BITRATE, VIDEO_BITRATE, pickCodecs } from "./codecs";
+import { AUDIO_BITRATE, VIDEO_BITRATE, pickCodecs, type CodecPair } from "./codecs";
 import { asLayer } from "./layer";
 import { cameraTimes, frameCount, sourceTimes, thumbnailFrame } from "./timeline";
 
@@ -43,6 +43,12 @@ export type FastRenderResult = {
   thumbnail: Blob | null;
   width: number;
   height: number;
+  /**
+   * The pair this machine actually encoded with. Reported so the recorder can
+   * log it: which codec the hardware chose is the first thing that explains an
+   * export's speed, and there is no way to recover it after the fact.
+   */
+  codecs: CodecPair;
 };
 
 /** Thrown when this machine cannot fast-export; the caller falls back to `renderToBlob`. */
@@ -348,7 +354,7 @@ export async function renderFast(
     await pumpAudio(Infinity);
     await output.finalize();
     opts.onProgress(100);
-    return { mimeType: output.format.mimeType, size, thumbnail, width, height };
+    return { mimeType: output.format.mimeType, size, thumbnail, width, height, codecs };
   } catch (err) {
     // Releases the encoders and the target; safe to call before `start()` and a
     // no-op once finalized.

@@ -1048,6 +1048,19 @@ export function useRecorder(): UseRecorderResult {
    * machine that cannot fast-export runs the old real-time render, and a
    * streamed upload that dies after the render is retried whole-file from the
    * bytes `StreamingUpload` kept, never by rendering again.
+   *
+   * The roadmap, in order — the phase banners below match these numbers:
+   *   1. probe for WebCodecs (free: a machine that cannot fast-export opens no
+   *      session and downloads no exporter)
+   *   2. open the resumable Drive session, which reserves the share slug
+   *   3. copy the share link, inside the click's transient activation
+   *   4. import the fast exporter (the ~545 KB mediabunny chunk)
+   *   5. render, streaming bytes into that session as they are muxed
+   *   6. finish the session, then record the metadata against the Drive file
+   *   7. clear the draft, drop the stored take, navigate to the video
+   *
+   * Steps 1-5 can still fall back to the legacy real-time render. From 6 on the
+   * bytes are on Drive and only the upload half is retryable.
    */
   const finish = useCallback(
     async (input: FinishInput) => {
@@ -1078,306 +1091,340 @@ export function useRecorder(): UseRecorderResult {
       // separates the two calls.
       const now = new Date();
 
-      const renderOpts = {
-        thumbnailAt: input.thumbnailAt,
-        onProgress: (percent: number) => dispatch({ type: "RENDER_PROGRESS", percent }),
-        signal,
-        cursor: toSeconds(cursorRef.current),
-        // The key track is not persisted, so the export has to be handed it.
-        // The CLICK track deliberately is not passed: what the render draws
-        // is `edits.clicks`, the lane the user actually toggled, which rides
-        // along inside `input.edits`.
-        keys: toSeconds(keysRef.current),
-      };
-      // Everything both completion routes send unchanged.
-      const common = {
-        durationMs: Math.round(editedDurationMs(input.edits, current.durationMs)),
-        title: input.title,
-        description: input.description,
-        edits: input.edits,
-        signal,
-      };
-
-      // Loom behaviour: the link must be on the clipboard before the page
-      // changes. `navigator.clipboard.writeText` only works inside the click's
-      // transient activation (~5 s), and a real upload takes far longer than
-      // that — so the server reserves the slug up front and we copy here, one
-      // round-trip after the click.
-      const copyLink = (url: string) => {
-        navigator.clipboard
-          .writeText(url)
-          .then(() => {
-            copiedRef.current = true;
-          })
-          .catch(() => {
-            // Insecure context or denied permission; the detail page still
-            // shows the link.
-          });
-      };
-
-      const done = async (result: UploadRecordingResult, reserved: string | undefined) => {
-        if (reserved && result.slug !== reserved) {
-          // A slug collision made the server mint a different one, so whatever
-          // is on the clipboard points at the wrong video.
-          console.warn(
-            `Reserved slug ${reserved} was taken; saved as ${result.slug}. The copied link is stale.`,
-          );
-          copiedRef.current = false;
-        }
-        // Only now is the edit list safe to forget; every failure above drops
-        // back to staging, which restores the cuts from this draft.
-        clearStagingDraft();
-        // The bytes are safely on the server; the crash-safe copy has done its
-        // job. Awaited, not fired off: the redirect below unmounts this hook,
-        // and a delete still in flight would leave an uploaded take on disk for
-        // the restore prompt to offer next launch.
-        await discardStoredTake();
-        dispatch({ type: "UPLOAD_DONE", videoId: result.id, shareUrl: result.url });
-        router.push(`/library/${result.id}${copiedRef.current ? "?new=1" : ""}`);
-      };
-
-      // A cancel is not an error the user needs told about.
-      const failed = (type: "RENDER_FAILED" | "UPLOAD_FAILED", err: unknown) =>
-        dispatch({
-          type,
-          error: signal.aborted
-            ? ""
-            : err instanceof Error
-              ? err.message
-              : type === "RENDER_FAILED"
-                ? "Render failed."
-                : "Upload failed. Please try again.",
-        });
-
-      /**
-       * Yesterday's path, unchanged: render the whole file in real time, then
-       * upload it. `reserved` is the slug the fast path already put on the
-       * clipboard, if it got that far — `uploadRecording` asks the server for
-       * that same slug so the copied link still lands on this video. With
-       * nothing reserved yet, `onSlug` does the copying as it always did.
-       */
-      const runLegacy = async (reserved: string | undefined) => {
-        let reservedSlug = reserved;
-        let rendered: RenderResult;
-        try {
-          rendered = await renderToBlob(sources, input.edits, renderOpts);
-        } catch (err) {
-          exportAbortRef.current = null;
-          failed("RENDER_FAILED", err);
-          return;
-        }
-        if (rendered.blob.size === 0) {
-          exportAbortRef.current = null;
-          dispatch({ type: "RENDER_FAILED", error: "Render produced no data." });
-          return;
-        }
-        dispatch({ type: "RENDER_DONE" });
-
-        // Free the camera and screen while the bytes go up. The streams are
-        // gone, so the machine must know it: otherwise an UPLOAD_FAILED drops
-        // back to `staging` still believing `streamsAlive`, and Discard lands
-        // in a `setup` screen with no capture behind it.
-        teardown();
-        dispatch({ type: "STREAM_ENDED" });
-        try {
-          const result = await uploadRecording({
-            ...common,
-            blob: rendered.blob,
-            width: rendered.width,
-            height: rendered.height,
-            thumbnail: rendered.thumbnail,
-            slug: reservedSlug ?? input.slug,
-            onProgress: (percent) => dispatch({ type: "UPLOAD_PROGRESS", percent }),
-            onSlug: reservedSlug
-              ? undefined
-              : (url) => {
-                  reservedSlug = url.slice(url.lastIndexOf("/") + 1);
-                  copyLink(url);
-                },
-          });
-          await done(result, reservedSlug);
-        } catch (err) {
-          failed("UPLOAD_FAILED", err);
-        } finally {
-          exportAbortRef.current = null;
-        }
-      };
-
-      // ---- fast path: the render and the upload overlap ----
-      //
-      // The WebCodecs probe is free and comes first: a machine that cannot
-      // fast-export neither opens a Drive session it will never write a byte
-      // to nor downloads the ~545 KB mediabunny chunk below.
-      if (typeof VideoEncoder === "undefined" || typeof VideoDecoder === "undefined") {
-        console.info("[Yoom] export", { path: "legacy", reason: "no WebCodecs" });
-        await runLegacy(undefined);
-        return;
-      }
-
-      let session: { sessionUri: string; slug?: string };
       try {
-        session = await beginUpload({ mimeType: "video/mp4", slug: input.slug, now, signal });
-      } catch (err) {
-        exportAbortRef.current = null;
-        // Still `rendering` as far as the machine is concerned, so this is a
-        // RENDER_FAILED — it drops back to staging with the edits intact.
-        failed("RENDER_FAILED", err);
-        return;
-      }
-      // Copied BEFORE the dynamic import below, and that ordering is load
-      // bearing: `writeText` only works inside the click's transient
-      // activation (~5 s), so nothing slower than the one `/api/upload`
-      // round-trip may sit in front of it. Putting a cold chunk fetch there
-      // would silently cost the user the share link on a slow disk.
-      if (session.slug) copyLink(shareUrl(session.slug));
+        // ---- shared shape of the trip ----
 
-      // `render-fast` is imported dynamically because it pulls in ~1.2 MB of
-      // mediabunny (545 KB built) that the legacy path never touches. A chunk
-      // that will not load is just another reason to render the old way.
-      //
-      // The codec-PAIR probe cannot run before this point — it lives inside
-      // mediabunny — so a machine with WebCodecs but no encodable pair, like a
-      // load failure here, abandons the session opened above. Harmless:
-      // `/api/upload` only hands back a session URI and an optimistic slug
-      // (nothing is persisted until `/api/upload/complete`), and an untouched
-      // resumable session expires on Drive's own schedule.
-      let fast: typeof import("@/lib/editor/fast-export/render-fast");
-      try {
-        fast = await import("@/lib/editor/fast-export/render-fast");
-      } catch (err) {
-        console.warn("[Yoom] fast exporter did not load", err);
-        console.info("[Yoom] export", { path: "legacy", reason: "fast exporter did not load" });
-        // The reserved slug goes with it, so the link already on the clipboard
-        // still points at this recording.
-        await runLegacy(session.slug);
-        return;
-      }
+        const renderOpts = {
+          thumbnailAt: input.thumbnailAt,
+          onProgress: (percent: number) => dispatch({ type: "RENDER_PROGRESS", percent }),
+          signal,
+          cursor: toSeconds(cursorRef.current),
+          // The key track is not persisted, so the export has to be handed it.
+          // The CLICK track deliberately is not passed: what the render draws
+          // is `edits.clicks`, the lane the user actually toggled, which rides
+          // along inside `input.edits`.
+          keys: toSeconds(keysRef.current),
+        };
+        // Everything every completion route sends unchanged.
+        const common = {
+          durationMs: Math.round(editedDurationMs(input.edits, current.durationMs)),
+          title: input.title,
+          description: input.description,
+          edits: input.edits,
+          signal,
+        };
 
-      // Upload percent is acked bytes over the finished file's size, and that
-      // size is only known once `renderFast` returns. So the callback closes
-      // over a total that is still 0 for the whole overlapped half and stays
-      // silent until then — during which the render bar is the honest one (and
-      // the machine ignores UPLOAD_PROGRESS while `rendering` anyway). No
-      // throttling: `renderFast` only reports whole percents, and this fires
-      // once per 8 MiB chunk Drive acknowledges.
-      let totalBytes = 0;
-      const up = new StreamingUpload(session.sessionUri, {
-        signal,
-        onProgress: (sent) => {
-          if (totalBytes <= 0) return;
+        // Filled in as the export progresses and read by `logExport`, so the
+        // terminal log lines cannot drift apart between paths. `codecs` stays
+        // null on the legacy path: MediaRecorder picks its own container and
+        // never tells us which pair it settled on.
+        let renderMs = 0;
+        let exportedBytes = 0;
+        let codecs: FastRenderResult["codecs"] | null = null;
+
+        /**
+         * One line per FINISHED export, on every path, with the same five keys.
+         * Task 10 measures the fast path against the legacy baseline from these,
+         * so a path that completes without logging is a path that cannot be
+         * proven faster. The early `{path, reason}` lines below are a separate
+         * thing: they say why the fast path was declined, before any timing
+         * exists.
+         */
+        const logExport = (path: "fast" | "fast-retry" | "legacy") =>
+          console.info("[Yoom] export", {
+            path,
+            codecs,
+            renderMs: Math.round(renderMs),
+            uploadTailMs: Math.round(performance.now() - startedAt - renderMs),
+            bytes: exportedBytes,
+          });
+
+        // Loom behaviour: the link must be on the clipboard before the page
+        // changes. `navigator.clipboard.writeText` only works inside the click's
+        // transient activation (~5 s), and a real upload takes far longer than
+        // that — so the server reserves the slug up front and we copy here, one
+        // round-trip after the click.
+        const copyLink = (slug: string) => {
+          navigator.clipboard
+            .writeText(shareUrl(slug))
+            .then(() => {
+              copiedRef.current = true;
+            })
+            .catch(() => {
+              // Insecure context or denied permission; the detail page still
+              // shows the link.
+            });
+        };
+
+        /**
+         * Step 7, and terminal: the recording exists, so forget the draft, drop
+         * the crash-safe copy and navigate to it. Pairs with `failed`.
+         */
+        const succeed = async (result: UploadRecordingResult, reserved: string | undefined) => {
+          if (reserved && result.slug !== reserved) {
+            // A slug collision made the server mint a different one, so whatever
+            // is on the clipboard points at the wrong video.
+            console.warn(
+              `Reserved slug ${reserved} was taken; saved as ${result.slug}. The copied link is stale.`,
+            );
+            copiedRef.current = false;
+          }
+          // Only now is the edit list safe to forget; every failure above drops
+          // back to staging, which restores the cuts from this draft.
+          clearStagingDraft();
+          // The bytes are safely on the server; the crash-safe copy has done its
+          // job. Awaited, not fired off: the redirect below unmounts this hook,
+          // and a delete still in flight would leave an uploaded take on disk
+          // for the restore prompt to offer next launch.
+          await discardStoredTake();
+          dispatch({ type: "UPLOAD_DONE", videoId: result.id, shareUrl: result.url });
+          router.push(`/library/${result.id}${copiedRef.current ? "?new=1" : ""}`);
+        };
+
+        // A cancel is not an error the user needs told about.
+        const failed = (type: "RENDER_FAILED" | "UPLOAD_FAILED", err: unknown) =>
           dispatch({
-            type: "UPLOAD_PROGRESS",
-            percent: Math.min(99, Math.round((sent / totalBytes) * 100)),
+            type,
+            error: signal.aborted
+              ? ""
+              : err instanceof Error
+                ? err.message
+                : type === "RENDER_FAILED"
+                  ? "Render failed."
+                  : "Upload failed. Please try again.",
           });
-        },
-      });
 
-      let rendered: FastRenderResult;
-      try {
-        rendered = await fast.renderFast(sources, input.edits, {
-          ...renderOpts,
-          onChunk: (data, position) => up.write(data, position),
-        });
-      } catch (err) {
-        if (!(err instanceof fast.FastExportUnsupported) || signal.aborted) {
-          exportAbortRef.current = null;
-          // `failed` first, `abort` second: it reads `signal.aborted` to decide
-          // whether this is a cancel, and aborting ahead of it would report
-          // every render error as a silent one.
+        /**
+         * Yesterday's path, unchanged: render the whole file in real time, then
+         * upload it. `reserved` is the slug the fast path already put on the
+         * clipboard, if it got that far — `uploadRecording` asks the server for
+         * that same slug so the copied link still lands on this video. With
+         * nothing reserved yet, `onSlug` does the copying as it always did.
+         */
+        const runLegacy = async (reserved?: string) => {
+          let reservedSlug = reserved;
+          let rendered: RenderResult;
+          try {
+            rendered = await renderToBlob(sources, input.edits, renderOpts);
+          } catch (err) {
+            failed("RENDER_FAILED", err);
+            return;
+          }
+          if (rendered.blob.size === 0) {
+            dispatch({ type: "RENDER_FAILED", error: "Render produced no data." });
+            return;
+          }
+          renderMs = performance.now() - startedAt;
+          exportedBytes = rendered.blob.size;
+          dispatch({ type: "RENDER_DONE" });
+
+          // Free the camera and screen while the bytes go up. The streams are
+          // gone, so the machine must know it: otherwise an UPLOAD_FAILED drops
+          // back to `staging` still believing `streamsAlive`, and Discard lands
+          // in a `setup` screen with no capture behind it.
+          teardown();
+          dispatch({ type: "STREAM_ENDED" });
+          try {
+            const result = await uploadRecording({
+              ...common,
+              blob: rendered.blob,
+              width: rendered.width,
+              height: rendered.height,
+              thumbnail: rendered.thumbnail,
+              slug: reservedSlug ?? input.slug,
+              onProgress: (percent) => dispatch({ type: "UPLOAD_PROGRESS", percent }),
+              onSlug: reservedSlug
+                ? undefined
+                : (slug) => {
+                    reservedSlug = slug;
+                    copyLink(slug);
+                  },
+            });
+            logExport("legacy");
+            await succeed(result, reservedSlug);
+          } catch (err) {
+            failed("UPLOAD_FAILED", err);
+          }
+        };
+
+        // ---- 1. can this machine fast-export at all? ----
+        //
+        // The WebCodecs probe is free and comes first: a machine that cannot
+        // fast-export neither opens a Drive session it will never write a byte
+        // to nor downloads the exporter chunk in step 4.
+        if (typeof VideoEncoder === "undefined" || typeof VideoDecoder === "undefined") {
+          console.info("[Yoom] export", { path: "legacy", reason: "no WebCodecs" });
+          await runLegacy();
+          return;
+        }
+
+        // ---- 2. open the Drive session, reserving the share slug ----
+        let session: { sessionUri: string; slug?: string };
+        try {
+          session = await beginUpload({ mimeType: "video/mp4", slug: input.slug, now, signal });
+        } catch (err) {
+          // Still `rendering` as far as the machine is concerned, so this is a
+          // RENDER_FAILED — it drops back to staging with the edits intact.
           failed("RENDER_FAILED", err);
-          // Nobody will ever call `up.finish()` now, so stop the chunk PUTs
-          // still in flight against a session that is going nowhere. Waste
-          // only — Drive drops an abandoned session itself — but it is a line.
+          return;
+        }
+
+        // ---- 3. the share link, while the click is still "recent" ----
+        if (session.slug) copyLink(session.slug);
+
+        // ---- 4. load the fast exporter ----
+        //
+        // THIS IMPORT MUST STAY BELOW STEP 3. `writeText` only succeeds inside
+        // the click's transient activation (~5 s), so nothing slower than the
+        // one `/api/upload` round-trip may run before it — and this is a ~545 KB
+        // chunk fetch that is cold on first Save and on a slow disk. Hoisting it
+        // to the top of `finish`, or to module scope, shaves a little latency
+        // and silently costs the user the share link after every recording,
+        // with every test still green. See the note on `copyLink` above.
+        //
+        // It is dynamic at all because it pulls in ~1.2 MB of mediabunny that
+        // the legacy path never touches; a chunk that will not load is just one
+        // more reason to render the old way.
+        //
+        // The codec-PAIR probe cannot run before this point — it lives inside
+        // mediabunny — so a machine with WebCodecs but no encodable pair, like
+        // a load failure here, abandons the session opened in step 2. Harmless:
+        // `/api/upload` only hands back a session URI and an optimistic slug
+        // (nothing is persisted until `/api/upload/complete`), and an untouched
+        // resumable session expires on Drive's own schedule.
+        let fast: typeof import("@/lib/editor/fast-export/render-fast");
+        try {
+          fast = await import("@/lib/editor/fast-export/render-fast");
+        } catch (err) {
+          console.warn("[Yoom] fast exporter did not load", err);
+          console.info("[Yoom] export", { path: "legacy", reason: "fast exporter did not load" });
+          // The reserved slug goes with it, so the link already on the clipboard
+          // still points at this recording.
+          await runLegacy(session.slug);
+          return;
+        }
+
+        // ---- 5. render, streaming the bytes as they are muxed ----
+        //
+        // Upload percent is acked bytes over the finished file's size, and that
+        // size is only known once `renderFast` returns. So the callback closes
+        // over a total that is still 0 for the whole overlapped half and stays
+        // silent until then — during which the render bar is the honest one (and
+        // the machine ignores UPLOAD_PROGRESS while `rendering` anyway). No
+        // throttling: `renderFast` only reports whole percents, and this fires
+        // once per 8 MiB chunk Drive acknowledges.
+        let renderedBytes = 0;
+        const up = new StreamingUpload(session.sessionUri, {
+          signal,
+          onProgress: (sent) => {
+            if (renderedBytes <= 0) return;
+            dispatch({
+              type: "UPLOAD_PROGRESS",
+              percent: Math.min(99, Math.round((sent / renderedBytes) * 100)),
+            });
+          },
+        });
+
+        let rendered: FastRenderResult;
+        try {
+          rendered = await fast.renderFast(sources, input.edits, {
+            ...renderOpts,
+            onChunk: (data, position) => up.write(data, position),
+          });
+        } catch (err) {
+          if (!(err instanceof fast.FastExportUnsupported) || signal.aborted) {
+            // `failed` first, `abort` second: it reads `signal.aborted` to
+            // decide whether this is a cancel, and aborting ahead of it would
+            // report every render error as a silent one.
+            failed("RENDER_FAILED", err);
+            // Nobody will ever call `up.finish()` now, so stop the chunk PUTs
+            // still in flight against a session that is going nowhere. Waste
+            // only — Drive drops an abandoned session itself — but it is a line.
+            abort.abort();
+            return;
+          }
+          // This machine has WebCodecs but no encodable codec pair, and it said
+          // so before writing a byte. Render the old way into the slug we
+          // reserved. NOT aborted: `runLegacy` renders on this same signal, so
+          // killing it here would cancel the fallback before it started.
+          console.info("[Yoom] export", { path: "legacy", reason: err.message });
+          await runLegacy(session.slug);
+          return;
+        }
+        if (rendered.size === 0) {
+          // Same guard the legacy path has: a zero-byte file fails loudly here
+          // rather than becoming an empty video on the library page.
+          dispatch({ type: "RENDER_FAILED", error: "Render produced no data." });
           abort.abort();
           return;
         }
-        // This machine has WebCodecs but no encodable codec pair, and it said so
-        // before writing a byte. Render the old way into the slug we reserved.
-        // NOT aborted: `runLegacy` renders on this same signal, so killing it
-        // here would cancel the fallback before it started.
-        console.info("[Yoom] export", { path: "legacy", reason: err.message });
-        await runLegacy(session.slug);
-        return;
-      }
-      if (rendered.size === 0) {
-        // Same guard the legacy path has: a zero-byte file fails loudly here
-        // rather than becoming an empty video on the library page.
-        exportAbortRef.current = null;
-        dispatch({ type: "RENDER_FAILED", error: "Render produced no data." });
-        abort.abort();
-        return;
-      }
-      totalBytes = rendered.size;
-      const renderMs = performance.now() - startedAt;
-      dispatch({ type: "RENDER_DONE" });
+        renderedBytes = rendered.size;
+        exportedBytes = rendered.size;
+        codecs = rendered.codecs;
+        renderMs = performance.now() - startedAt;
+        dispatch({ type: "RENDER_DONE" });
 
-      // Free the camera and screen while the tail of the bytes goes up. The
-      // streams are gone, so the machine must know it: otherwise an
-      // UPLOAD_FAILED drops back to `staging` still believing `streamsAlive`,
-      // and Discard lands in a `setup` screen with no capture behind it.
-      teardown();
-      dispatch({ type: "STREAM_ENDED" });
+        // Free the camera and screen while the tail of the bytes goes up. The
+        // streams are gone, so the machine must know it: otherwise an
+        // UPLOAD_FAILED drops back to `staging` still believing `streamsAlive`,
+        // and Discard lands in a `setup` screen with no capture behind it.
+        teardown();
+        dispatch({ type: "STREAM_ENDED" });
 
-      try {
-        let driveFileId: string;
+        // ---- 6. close the session and record the metadata ----
         try {
-          ({ id: driveFileId } = await up.finish());
-        } catch (err) {
-          if (signal.aborted) throw err;
-          // The streamed session died, but `StreamingUpload` kept every byte —
-          // so retry the file whole rather than make the user sit through a
-          // second render. A fresh session reserves the same slug, so the link
-          // already on the clipboard still points here.
-          console.warn("[Yoom] streamed upload failed; retrying whole-file", err);
-          const retried = await uploadRecording({
+          let driveFileId: string;
+          try {
+            ({ id: driveFileId } = await up.finish());
+          } catch (err) {
+            if (signal.aborted) throw err;
+            // The streamed session died, but `StreamingUpload` kept every byte —
+            // so retry the file whole rather than make the user sit through a
+            // second render. A fresh session reserves the same slug, so the link
+            // already on the clipboard still points here.
+            console.warn("[Yoom] streamed upload failed; retrying whole-file", err);
+            const retried = await uploadRecording({
+              ...common,
+              blob: up.blob(rendered.mimeType),
+              width: rendered.width,
+              height: rendered.height,
+              thumbnail: rendered.thumbnail,
+              slug: session.slug ?? input.slug,
+              onProgress: (percent) => dispatch({ type: "UPLOAD_PROGRESS", percent }),
+            });
+            // Its own path name: the tail here is a full whole-file upload, so
+            // averaging it in with a clean "fast" export would understate the
+            // overlap Task 10 is measuring.
+            logExport("fast-retry");
+            await succeed(retried, session.slug);
+            return;
+          }
+          // From here the bytes are on Drive. A `completeUpload` failure below
+          // therefore leaves that file orphaned, and a re-Save from staging
+          // uploads a second copy of the same take. That is the deliberate
+          // trade from the plan: retrying `completeUpload` on its own would
+          // risk duplicate VIDEO ROWS for one Drive file, which is the worse
+          // duplicate — the orphan is invisible to the library and costs only
+          // storage.
+          const result = await completeUpload({
             ...common,
-            blob: up.blob(rendered.mimeType),
+            driveFileId,
+            reservedSlug: session.slug,
             width: rendered.width,
             height: rendered.height,
             thumbnail: rendered.thumbnail,
-            slug: session.slug ?? input.slug,
-            onProgress: (percent) => dispatch({ type: "UPLOAD_PROGRESS", percent }),
+            now,
           });
-          // Logged on its own path so a Task 10 measurement run cannot mistake
-          // a retried export for a clean one — or miss it entirely. The tail is
-          // a full whole-file upload here, so it is not comparable to "fast".
-          console.info("[Yoom] export", {
-            path: "fast-retry",
-            renderMs: Math.round(renderMs),
-            uploadTailMs: Math.round(performance.now() - startedAt - renderMs),
-            bytes: rendered.size,
-          });
-          await done(retried, session.slug);
-          return;
+          logExport("fast");
+          // ---- 7. ----
+          await succeed(result, session.slug);
+        } catch (err) {
+          failed("UPLOAD_FAILED", err);
         }
-        // From here the bytes are on Drive. A `completeUpload` failure below
-        // therefore leaves that file orphaned, and a re-Save from staging
-        // uploads a second copy of the same take. That is the deliberate
-        // trade from the plan: retrying `completeUpload` on its own would
-        // risk duplicate VIDEO ROWS for one Drive file, which is the worse
-        // duplicate — the orphan is invisible to the library and costs only
-        // storage.
-        const result = await completeUpload({
-          ...common,
-          driveFileId,
-          reservedSlug: session.slug,
-          width: rendered.width,
-          height: rendered.height,
-          thumbnail: rendered.thumbnail,
-          now,
-        });
-        // Task 10 measures the overlap from this line.
-        console.info("[Yoom] export", {
-          path: "fast",
-          renderMs: Math.round(renderMs),
-          uploadTailMs: Math.round(performance.now() - startedAt - renderMs),
-          bytes: rendered.size,
-        });
-        await done(result, session.slug);
-      } catch (err) {
-        failed("UPLOAD_FAILED", err);
       } finally {
-        exportAbortRef.current = null;
+        // One place, so the next early return above cannot forget it. Guarded
+        // in case a later export has already claimed the ref.
+        if (exportAbortRef.current === abort) exportAbortRef.current = null;
       }
     },
     [discardStoredTake, router, teardown],
