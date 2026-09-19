@@ -270,6 +270,12 @@ export function useRecorder(): UseRecorderResult {
   const autoAcquiredRef = useRef(false);
   /** Crash-safe copy of the current take (see take-store.ts); null outside a take. */
   const takeWriterRef = useRef<TakeWriter | null>(null);
+  /**
+   * Bumped by every restore attempt and by every new take. A `restoreTake`
+   * continuation whose token no longer matches has been superseded and must
+   * touch nothing (see `restoreTake`).
+   */
+  const restoreSeqRef = useRef(0);
 
   // ---------- boot: settings + capabilities ----------
 
@@ -413,7 +419,15 @@ export function useRecorder(): UseRecorderResult {
    * Put a stored take back on screen. Only from `idle`/`error` — the reducer
    * ignores RESTORE from anywhere else, and the side effects here (the input
    * tracks, the draft, the writer) would still have overwritten a take the user
-   * is editing, so the guard is checked before any of them run.
+   * is editing, so they are gated on a fresh check taken AFTER the last await.
+   *
+   * Reading and patching a long take takes seconds, and every one of those
+   * awaits is a chance for the user to start a new take or to pick a different
+   * stored one. Two guards cover that: the status re-check immediately before
+   * the side effects (a new take is live → drop this one on the floor) and
+   * `restoreSeqRef` (a newer restore was asked for → this continuation is
+   * stale, even if its own status check would still pass because the newer one
+   * has not reached its dispatch yet).
    *
    * Never rejects: a store that cannot be read drops the entry from the prompt
    * (the bytes stay on disk for the next run) rather than leaving a button that
@@ -422,6 +436,7 @@ export function useRecorder(): UseRecorderResult {
   const restoreTake = useCallback(async (id: string) => {
     const status = stateRef.current.status;
     if (status !== "idle" && status !== "error") return;
+    const attempt = ++restoreSeqRef.current;
     let take;
     try {
       take = await loadTake(id);
@@ -434,17 +449,25 @@ export function useRecorder(): UseRecorderResult {
       setPendingTakes((p) => p?.filter((t) => t.id !== id) ?? null);
       return;
     }
-    // The await above gave the user time to start a new take; re-check.
-    const now = stateRef.current.status;
-    if (now !== "idle" && now !== "error") return;
     const { meta } = take;
     // The stored chunks have no EBML duration, same as a fresh recording.
-    const patch = async (b: Blob) =>
-      meta.mimeType.includes("webm")
-        ? fixWebmDuration(b, meta.durationMs, { logger: false }).catch(() => b)
-        : b;
+    // `fixWebmDuration` can throw synchronously (it reads the blob), and this
+    // callback is void-called from a click handler, so the try covers both a
+    // throw and a rejection rather than only the latter.
+    const patch = async (b: Blob) => {
+      if (!meta.mimeType.includes("webm")) return b;
+      try {
+        return await fixWebmDuration(b, meta.durationMs, { logger: false });
+      } catch {
+        return b;
+      }
+    };
     const primary = await patch(take.screen);
     const secondary = take.camera ? await patch(take.camera) : null;
+    // Last chance to bail: from here down everything is a side effect.
+    if (restoreSeqRef.current !== attempt) return;
+    const now = stateRef.current.status;
+    if (now !== "idle" && now !== "error") return;
     cursorRef.current = meta.cursor;
     clicksRef.current = meta.clicks;
     keysRef.current = meta.keys;
@@ -676,6 +699,9 @@ export function useRecorder(): UseRecorderResult {
     chunksRef.current = [];
     screenStartRef.current = 0;
     cameraStartRef.current = 0;
+    // A restore still reading its blobs off disk is now stale: this take owns
+    // the input tracks and the writer it was about to overwrite.
+    restoreSeqRef.current++;
     // Covers the first take and every restart: the shell's `t` restarts at 0
     // with the encoder, so a stale track would sit in front of the new one.
     cursorRef.current = [];
@@ -910,7 +936,16 @@ export function useRecorder(): UseRecorderResult {
         // threw the take away replaced or nulled it.
         if (takeWriterRef.current !== writer) return;
         setTakeId(id);
-        return writer.flush().then(() => finalizeTake(id, meta));
+        return writer.flush().then(() => {
+          // A storage failure dropped chunks, so what is on disk is SHORTER
+          // than `meta.durationMs`. Finalizing with that length would have the
+          // restore prompt advertising 7:00 of a 0:30 file and staging drawing
+          // a timeline past the end of the footage. Leaving the take
+          // unfinalized falls back to take-store's contiguous-chunk estimate,
+          // which describes the bytes that actually landed.
+          if (!writer.ok()) return;
+          return finalizeTake(id, meta);
+        });
       })
       .catch((err) => console.warn("[Yoom] could not finalize the stored take", err));
 
