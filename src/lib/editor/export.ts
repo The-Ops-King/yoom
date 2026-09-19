@@ -264,6 +264,32 @@ export function releaseBackground(el: HTMLImageElement | HTMLVideoElement | null
 }
 
 /**
+ * Everything `drawFrame` needs for a render except the two video layers,
+ * which each exporter fills with what it has: `<video>` elements for the
+ * real-time path, decoded frames for the fast one. Shared so the two paths
+ * cannot drift apart on cursor/key sampling.
+ */
+export function buildRenderInputs(
+  sources: RenderSources,
+  edits: VideoEdits,
+  background: HTMLImageElement | HTMLVideoElement | null,
+  opts: Pick<RenderOptions, "cursor" | "keys">,
+): RenderInputs {
+  return {
+    screen: null,
+    camera: null,
+    mode: sources.mode, edits, background,
+    // Built once per render: O(n) over the track, then O(log n) a frame.
+    cursorAt: opts.cursor?.length ? createCursorSampler(opts.cursor) : undefined,
+    keysAt: opts.keys?.length ? createKeySampler(opts.keys) : undefined,
+    // The drawn pointer keeps up with the hand; the follow zoom lags it.
+    smoothCursorAt: opts.cursor?.length
+      ? createCursorSampler(opts.cursor, { tau: CURSOR_TAU_S })
+      : undefined,
+  };
+}
+
+/**
  * Plays the kept ranges once in real time, drawing every frame through
  * `drawFrame` into an offscreen canvas that a MediaRecorder encodes. The
  * recorder is paused between ranges, so cuts are gapless in the output.
@@ -311,18 +337,9 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) throw new Error("No 2D context.");
 
-    const inputs: RenderInputs = {
-      screen: sources.mode === "camera" ? null : primary,
-      camera: sources.mode === "camera" ? primary : camera,
-      mode: sources.mode, edits, background,
-      // Built once per render: O(n) over the track, then O(log n) a frame.
-      cursorAt: opts.cursor?.length ? createCursorSampler(opts.cursor) : undefined,
-      keysAt: opts.keys?.length ? createKeySampler(opts.keys) : undefined,
-      // The drawn pointer keeps up with the hand; the follow zoom lags it.
-      smoothCursorAt: opts.cursor?.length
-        ? createCursorSampler(opts.cursor, { tau: CURSOR_TAU_S })
-        : undefined,
-    };
+    const inputs = buildRenderInputs(sources, edits, background, opts);
+    inputs.screen = sources.mode === "camera" ? null : primary;
+    inputs.camera = sources.mode === "camera" ? primary : camera;
 
     stream = canvas.captureStream(fps);
     // Route the primary's audio into the recorded stream only — never to
