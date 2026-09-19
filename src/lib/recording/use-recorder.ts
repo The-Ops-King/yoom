@@ -387,12 +387,16 @@ export function useRecorder(): UseRecorderResult {
   }, []);
 
   /**
-   * Forget the stored copy of the current take (restart, cancel, discard,
-   * uploaded). The queued chunks are flushed first: `appendChunk` writes its
-   * record whether or not the take still exists, so a write that lands after
-   * the delete would leave an orphan chunk nothing ever collects.
+   * Delete the persisted bytes of the current take (restart, cancel, discard,
+   * uploaded). The writer ref is dropped synchronously, so nothing can queue a
+   * chunk behind the delete; `flush()` then waits for the writes already in
+   * flight. `appendChunk` aborts on a missing take, so an unflushed write could
+   * not corrupt anything — waiting just keeps the delete from racing a write
+   * that would otherwise log a failure. The cost is that a discard is only as
+   * fast as the outstanding writes, which on the upload path is a beat of
+   * latency before the redirect.
    *
-   * Never rejects — a missing IndexedDB means there was nothing to forget.
+   * Never rejects — a missing IndexedDB means there was nothing to delete.
    */
   const discardStoredTake = useCallback(async () => {
     const writer = takeWriterRef.current;
@@ -679,16 +683,28 @@ export function useRecorder(): UseRecorderResult {
     keysRef.current = [];
 
     const mimeType = pickMimeType();
-    // A restart (⌘⇧K) begins a new take; the abandoned one is not worth keeping.
-    void discardStoredTake();
-    takeWriterRef.current = new TakeWriter(
-      createTake({ mode: current.mode, mimeType: (mimeType || "video/webm").split(";")[0] }),
-    );
-
     const recorder = new MediaRecorder(recordStream, {
       ...(mimeType ? { mimeType } : {}),
       videoBitsPerSecond: current.mode === "camera" ? 5_000_000 : 10_000_000,
     });
+
+    // Start the crash-safe copy of this take. The previous writer is simply
+    // dropped, never deleted: the only way to get here still holding one is a
+    // take that FAILED (an encoder error, the stop watchdog), and those bytes
+    // are exactly what the restore prompt exists to hand back. `pruneTakes`
+    // ages them out if the user never wants them. Restart and Cancel do delete
+    // theirs — they go through `discardRecorder` on the way out.
+    //
+    // The recorder is built first so the store records the container the
+    // browser actually chose, not the one we asked for: `loadTake` types the
+    // restored Blob from this string, and a substituted container would
+    // mislabel it.
+    takeWriterRef.current = new TakeWriter(
+      createTake({
+        mode: current.mode,
+        mimeType: (recorder.mimeType || mimeType || "video/webm").split(";")[0],
+      }),
+    );
 
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
@@ -736,7 +752,7 @@ export function useRecorder(): UseRecorderResult {
     recorder.start(250);
     cameraRecorderRef.current?.start(250);
     recorderRef.current = recorder;
-    // `finishRecording` is a stable callback defined below; so is `discardStoredTake`.
+    // `finishRecording` is a stable callback defined below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -868,6 +884,8 @@ export function useRecorder(): UseRecorderResult {
     // so a crash from here on can be restored into staging as-is. The metadata
     // is snapshotted NOW — the flush below can outlive the take, and a Discard
     // in the meantime would have emptied the refs and the machine's markers.
+    // Snapshotting is enough because all four are reassigned wholesale when a
+    // take ends, never mutated in place, so this object keeps the old arrays.
     const writer = takeWriterRef.current;
     const meta = {
       mode: stateRef.current.mode,
@@ -885,6 +903,12 @@ export function useRecorder(): UseRecorderResult {
       ?.id()
       .then((id) => {
         if (!id) return;
+        // A Discard / Restart / Cancel between the stop and here has already
+        // deleted this take and cleared `takeId`; publishing the dead id would
+        // point staging at a record that no longer exists (its draft saves
+        // would then fail with "Unknown take"). The ref is the flag: whoever
+        // threw the take away replaced or nulled it.
+        if (takeWriterRef.current !== writer) return;
         setTakeId(id);
         return writer.flush().then(() => finalizeTake(id, meta));
       })
@@ -1058,8 +1082,11 @@ export function useRecorder(): UseRecorderResult {
         // Only now is the edit list safe to forget; every failure above drops
         // back to staging, which restores the cuts from this draft.
         clearStagingDraft();
-        // The bytes are safely on the server; the crash-safe copy has done its job.
-        void discardStoredTake();
+        // The bytes are safely on the server; the crash-safe copy has done its
+        // job. Awaited, not fired off: the redirect below unmounts this hook,
+        // and a delete still in flight would leave an uploaded take on disk for
+        // the restore prompt to offer next launch.
+        await discardStoredTake();
         dispatch({ type: "UPLOAD_DONE", videoId: result.id, shareUrl: result.url });
         router.push(`/library/${result.id}${copiedRef.current ? "?new=1" : ""}`);
       } catch (err) {
