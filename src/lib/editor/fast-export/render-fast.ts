@@ -9,6 +9,8 @@ import {
   Output,
   StreamTarget,
   VideoSampleSink,
+  type InputAudioTrack,
+  type InputVideoTrack,
   type StreamTargetChunk,
   type VideoSample,
   type WrappedAudioBuffer,
@@ -65,6 +67,23 @@ function abortError(): DOMException {
 function sourceAtEdited(ranges: Range[], editedS: number): number {
   if (!Number.isFinite(editedS)) return Infinity;
   return editedToSourceIn(ranges, editedS);
+}
+
+/**
+ * Refuses the fast path when a track it needs cannot be DECODED here.
+ *
+ * `pickCodecs` only probes the encoder, so without this a take whose codec
+ * this Chromium can't decode would blow up with a plain Error on the first
+ * `next()` — and the caller falls back only on `FastExportUnsupported`, so the
+ * user would get a hard failure instead of the legacy `<video>` path, which
+ * has the whole media stack behind it and would very likely have worked.
+ *
+ * `null` means "we don't use this track", and is not probed.
+ */
+async function requireDecodable(track: InputVideoTrack | InputAudioTrack | null, what: string): Promise<void> {
+  if (track && !(await track.canDecode())) {
+    throw new FastExportUnsupported(`This machine cannot decode the take's ${what} track.`);
+  }
 }
 
 /**
@@ -138,6 +157,12 @@ export async function renderFast(
       sources.mode === "screen+camera" && sources.camera
         ? await open(sources.camera).getPrimaryVideoTrack()
         : null;
+
+    // Only the tracks this render actually reads: a silent take has no audio
+    // track to probe, and a screen-only take no camera one.
+    await requireDecodable(video, "video");
+    await requireDecodable(cameraTrack, "camera");
+    await requireDecodable(audio, "audio");
 
     const { width, height } = outputSize(video.displayWidth, video.displayHeight, edits);
     const codecs = await pickCodecs(width, height, !!audio);
@@ -214,13 +239,9 @@ export async function renderFast(
         assembler.push(channels, timestamp);
         audioSourceEdge = timestamp + buffer.duration;
       }
-      // `drain` treats a non-finite edge as "nothing", so the final
-      // `pumpAudio(Infinity)` asks for every frame there could ever be instead;
-      // it clamps to the assembler's own total either way.
-      const untilFrame = Number.isFinite(untilEditedS)
-        ? Math.round(untilEditedS * sampleRate)
-        : Number.MAX_SAFE_INTEGER;
-      const block = assembler.drain(untilFrame);
+      // `Infinity * sampleRate` stays `Infinity`, which is the assembler's
+      // documented drain-everything sentinel — exactly what the final flush wants.
+      const block = assembler.drain(Math.round(untilEditedS * sampleRate));
       if (block.frames === 0) return;
       const encoded = new AudioBuffer({
         length: block.frames,
