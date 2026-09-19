@@ -344,4 +344,35 @@ describe("beginUpload / completeUpload", () => {
     expect(body.sizeBytes).toBeUndefined();
     expect(body.filename).toMatch(/\.mp4$/);
   });
+
+  it("uses the passed-in time for the default title, not the current time", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-19T23:00:00Z"));
+    try {
+      const fetchMock = vi.fn(async () => Response.json({ id: "v", slug: "s", url: "u" }));
+      vi.stubGlobal("fetch", fetchMock);
+      const { completeUpload } = await import("./upload");
+
+      const startedAt = new Date("2026-01-01T12:00:00Z");
+      await completeUpload({
+        driveFileId: "d",
+        durationMs: 1,
+        width: null,
+        height: null,
+        title: "",
+        description: "",
+        edits: emptyEdits,
+        thumbnail: null,
+        now: startedAt,
+      });
+
+      const body = JSON.parse(
+        (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string,
+      );
+      expect(body.title).toBe(defaultRecordingTitle(startedAt));
+      expect(body.title).not.toBe(defaultRecordingTitle(new Date()));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

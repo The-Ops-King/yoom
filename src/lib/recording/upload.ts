@@ -110,6 +110,14 @@ export async function completeUpload(input: {
   description: string;
   edits: VideoEdits;
   thumbnail: Blob | null;
+  /**
+   * When the take was recorded, used for the default title. Defaults to now
+   * for safety, but callers should pass the recording's start time — for the
+   * fast exporter, completion happens after a render plus an upload, so
+   * without this a blank-title take would be mislabeled with the finish time
+   * instead of when it was actually recorded.
+   */
+  now?: Date;
   signal?: AbortSignal;
 }): Promise<UploadRecordingResult> {
   const {
@@ -122,6 +130,7 @@ export async function completeUpload(input: {
     description,
     edits,
     thumbnail,
+    now,
     signal,
   } = input;
 
@@ -133,7 +142,7 @@ export async function completeUpload(input: {
       durationMs,
       width,
       height,
-      title: title.trim() || defaultRecordingTitle(),
+      title: title.trim() || defaultRecordingTitle(now),
       description,
       slug: reservedSlug,
       edits,
@@ -187,6 +196,7 @@ export async function uploadRecording(
     throw new Error("Recording captured no data. Please try again.");
   }
 
+  const now = new Date();
   const mimeType = blob.type || "video/webm";
 
   const { sessionUri, slug: reservedSlug } = await beginUpload({
@@ -218,6 +228,7 @@ export async function uploadRecording(
     description,
     edits,
     thumbnail,
+    now,
     signal,
   });
 }
