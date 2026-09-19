@@ -12,6 +12,7 @@ const CHUNKS = "chunks";
 /** `MediaRecorder.start(250)` — used to estimate the length of a take that never finished. */
 export const CHUNK_MS = 250;
 
+/** `"screen"` is always the PRIMARY file — in camera-only mode the single recorded file is stored under `"screen"`, and `loadTake` returns null without it. */
 export type FileKind = "screen" | "camera";
 export type TakeMeta = {
   mode: RecordingMode;
@@ -33,7 +34,7 @@ type TakeRecord = {
   createdAt: number;
   mode: RecordingMode;
   mimeType: string;
-  chunks: number; // screen chunk count, for the duration estimate
+  chunks: number; // high-water mark of screen `seq + 1` seen so far (not a running count), for the duration estimate
   bytes: number;
   meta: TakeMeta | null; // set when the take lands in staging
   draft: TakeDraft | null;
@@ -88,6 +89,7 @@ function open(): Promise<IDBDatabase> {
       resolve(db);
     };
     req.onerror = () => reject(req.error ?? new Error("Could not open the take store."));
+    req.onblocked = () => reject(new Error("Take store open blocked by another connection."));
   });
   // A failed open must not be cached: private mode / a torn-down IDB can recover on a retry.
   dbPromise.catch(() => {
@@ -96,6 +98,7 @@ function open(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
+/** Test seam: drop the cached connection so a fresh fake IndexedDB is picked up. */
 export function resetTakeDbForTests(): void {
   dbPromise = null;
 }
@@ -103,14 +106,14 @@ export function resetTakeDbForTests(): void {
 function done(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
+    tx.onerror = () => reject(tx.error ?? new Error("Take store transaction failed."));
+    tx.onabort = () => reject(tx.error ?? new Error("Take store transaction aborted."));
   });
 }
 function result<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => reject(req.error ?? new Error("Take store request failed."));
   });
 }
 
@@ -135,6 +138,11 @@ export async function createTake(
  * microtask — which in a real browser can let the transaction go idle and
  * auto-commit before the follow-up `put` fires. So the get/put pair is wired
  * through `onsuccess` directly, synchronously, rather than awaited.
+ *
+ * A take record that's gone (raced by a `deleteTake` discard) aborts the
+ * whole transaction — rolling back the chunk `put` too — and rejects, rather
+ * than silently writing an orphaned chunk nothing will ever read. The caller
+ * (`TakeWriter`) logs the rejection and stops.
  */
 export function appendChunk(id: string, kind: FileKind, seq: number, data: Blob): Promise<void> {
   return open().then(
@@ -144,6 +152,7 @@ export function appendChunk(id: string, kind: FileKind, seq: number, data: Blob)
         const chunk: ChunkRecord = { key: [id, kind, seq], data };
         tx.objectStore(CHUNKS).put(chunk);
         const takes = tx.objectStore(TAKES);
+        let missing = false;
         const getReq = takes.get(id) as IDBRequest<TakeRecord | undefined>;
         getReq.onsuccess = () => {
           const rec = getReq.result;
@@ -151,33 +160,46 @@ export function appendChunk(id: string, kind: FileKind, seq: number, data: Blob)
             rec.bytes += data.size;
             if (kind === "screen") rec.chunks = Math.max(rec.chunks, seq + 1);
             takes.put(rec);
+          } else {
+            missing = true;
+            tx.abort();
           }
         };
         tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
+        tx.onerror = () => reject(tx.error ?? new Error("Take store transaction failed."));
+        tx.onabort = () =>
+          reject(missing ? new Error(`Unknown take: ${id}`) : (tx.error ?? new Error("Take store transaction aborted.")));
       }),
   );
 }
 
-/** Same read-modify-write shape as `appendChunk` — see its comment on why the get/put stay unawaited. */
+/**
+ * Same read-modify-write shape as `appendChunk` — see its comment on why the
+ * get/put stay unawaited, and on why a missing take aborts rather than
+ * resolving as if the write had landed.
+ */
 function patch(id: string, fn: (r: TakeRecord) => void): Promise<void> {
   return open().then(
     (db) =>
       new Promise<void>((resolve, reject) => {
         const tx = db.transaction(TAKES, "readwrite");
         const store = tx.objectStore(TAKES);
+        let missing = false;
         const getReq = store.get(id) as IDBRequest<TakeRecord | undefined>;
         getReq.onsuccess = () => {
           const rec = getReq.result;
           if (rec) {
             fn(rec);
             store.put(rec);
+          } else {
+            missing = true;
+            tx.abort();
           }
         };
         tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
+        tx.onerror = () => reject(tx.error ?? new Error("Take store transaction failed."));
+        tx.onabort = () =>
+          reject(missing ? new Error(`Unknown take: ${id}`) : (tx.error ?? new Error("Take store transaction aborted.")));
       }),
   );
 }
@@ -223,7 +245,16 @@ export async function listTakes(): Promise<TakeSummary[]> {
 async function chunksOf(db: IDBDatabase, id: string, kind: FileKind): Promise<Blob[]> {
   const range = IDBKeyRange.bound([id, kind, 0], [id, kind, Number.MAX_SAFE_INTEGER]);
   const recs = await result(db.transaction(CHUNKS).objectStore(CHUNKS).getAll(range) as IDBRequest<ChunkRecord[]>);
-  return recs.map((c) => c.data); // key order = seq order
+  // Key order = seq order. A gap (a chunk that never made it to disk, e.g. a
+  // crash mid-write) would otherwise splice a corrupt file together with a
+  // hole in the middle — truncate at the first one instead, so a restored
+  // take is playable up to the point of loss.
+  const contiguous: Blob[] = [];
+  for (let i = 0; i < recs.length; i++) {
+    if (recs[i].key[2] !== i) break;
+    contiguous.push(recs[i].data);
+  }
+  return contiguous;
 }
 
 export async function loadTake(id: string): Promise<StoredTake | null> {
@@ -247,11 +278,22 @@ export async function deleteTake(id: string): Promise<void> {
   const db = await open();
   const tx = db.transaction([TAKES, CHUNKS], "readwrite");
   tx.objectStore(TAKES).delete(id);
-  tx.objectStore(CHUNKS).delete(IDBKeyRange.bound([id, "camera", 0], [id, "screen", Number.MAX_SAFE_INTEGER]));
+  // A true prefix range — arrays sort after strings in IDB key order, so
+  // `[id, []]` is greater than `[id, <any kind string>, <any seq>]` — rather
+  // than a range hand-bounded by today's two `FileKind` values, so a future
+  // third kind is covered without touching this line.
+  tx.objectStore(CHUNKS).delete(IDBKeyRange.bound([id], [id, []]));
   await done(tx);
 }
 
 /** Drop takes created before `cutoff` (epoch ms). */
 export async function pruneTakes(cutoff: number): Promise<void> {
-  for (const t of await listTakes()) if (t.createdAt < cutoff) await deleteTake(t.id);
+  for (const t of await listTakes()) {
+    if (t.createdAt >= cutoff) continue;
+    try {
+      await deleteTake(t.id);
+    } catch {
+      // Best-effort: one take failing to delete (e.g. a held lock) shouldn't stop the rest.
+    }
+  }
 }
