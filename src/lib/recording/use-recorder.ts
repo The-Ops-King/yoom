@@ -27,8 +27,16 @@ import {
   type RecorderState,
 } from "./recorder-machine";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "./settings";
-import { clearStagingDraft } from "./staging-draft";
-import { createTake, deleteTake, finalizeTake } from "./take-store";
+import { clearStagingDraft, STAGING_DRAFT_KEY } from "./staging-draft";
+import {
+  createTake,
+  deleteTake,
+  finalizeTake,
+  listTakes,
+  loadTake,
+  pruneTakes,
+  type TakeSummary,
+} from "./take-store";
 import { TakeWriter } from "./take-writer";
 import { uploadRecording } from "./upload";
 import type {
@@ -129,6 +137,13 @@ export interface UseRecorderResult {
      */
     takeId: string | null;
   } | null;
+  /**
+   * Unsaved takes left behind by an earlier run, newest first, for the restore
+   * prompt. `null` until the store has been read — which is NOT the same as
+   * "none": the desktop shell holds off re-sharing the screen while it is null,
+   * so the prompt is never skipped by an auto-acquire landing first.
+   */
+  pendingTakes: TakeSummary[] | null;
   getLevel: (id: "mic" | "system") => number;
   actions: {
     /** Screen (screen + camera) or camera only. Idle/setup only. */
@@ -156,6 +171,14 @@ export interface UseRecorderResult {
     /** Drop a timestamp marker at the current elapsed time. Mark button / ⌘⇧M. */
     mark(): void;
     discard(): void;
+    /**
+     * Put a stored take back on screen (staging). Ignored unless the recorder
+     * is `idle`/`error`; never throws, and drops the take from `pendingTakes`
+     * either way so the prompt cannot get stuck on it.
+     */
+    restoreTake(id: string): void;
+    /** Throw a stored take away without looking at it. Never throws. */
+    dropTake(id: string): void;
     /** Render the edit list to one file, then upload it with the details. */
     finish(input: FinishInput): void;
     cancelRender(): void;
@@ -196,6 +219,8 @@ export function useRecorder(): UseRecorderResult {
   // Id of the stored copy of the take on screen, for staging's durable draft.
   // Set when the take is finalized; null again as soon as it is thrown away.
   const [takeId, setTakeId] = useState<string | null>(null);
+  /** Unsaved takes from an earlier run; null until the store has been read. */
+  const [pendingTakes, setPendingTakes] = useState<TakeSummary[] | null>(null);
 
   const router = useRouter();
 
@@ -266,6 +291,19 @@ export function useRecorder(): UseRecorderResult {
     // answer with the last recorded source and no picker.
     if (isDesktop()) setDesktopShareMode("auto");
     hydratedRef.current = true;
+  }, []);
+
+  // What survived the last run. Anything older than two weeks is dropped first:
+  // an unsaved take that has sat there that long is never coming back, and its
+  // chunks are the biggest thing this origin stores.
+  useEffect(() => {
+    void navigator.storage?.persist?.().catch(() => undefined); // ask Chromium not to evict takes
+    void pruneTakes(Date.now() - 14 * 24 * 60 * 60 * 1000)
+      .then(listTakes)
+      .then(setPendingTakes)
+      // `listTakes` never throws and `pruneTakes` swallows its own failures, but
+      // leaving this null forever would wedge the desktop auto-acquire below.
+      .catch(() => setPendingTakes([]));
   }, []);
 
   // Which source the shell is sharing. Subscribed for the life of the page; a
@@ -365,6 +403,83 @@ export function useRecorder(): UseRecorderResult {
     if (!id) return;
     await writer.flush();
     await deleteTake(id).catch(() => undefined);
+  }, []);
+
+  /**
+   * Put a stored take back on screen. Only from `idle`/`error` — the reducer
+   * ignores RESTORE from anywhere else, and the side effects here (the input
+   * tracks, the draft, the writer) would still have overwritten a take the user
+   * is editing, so the guard is checked before any of them run.
+   *
+   * Never rejects: a store that cannot be read drops the entry from the prompt
+   * (the bytes stay on disk for the next run) rather than leaving a button that
+   * does nothing.
+   */
+  const restoreTake = useCallback(async (id: string) => {
+    const status = stateRef.current.status;
+    if (status !== "idle" && status !== "error") return;
+    let take;
+    try {
+      take = await loadTake(id);
+    } catch (err) {
+      console.warn("[Yoom] could not read the stored take", err);
+      setPendingTakes((p) => p?.filter((t) => t.id !== id) ?? null);
+      return;
+    }
+    if (!take) {
+      setPendingTakes((p) => p?.filter((t) => t.id !== id) ?? null);
+      return;
+    }
+    // The await above gave the user time to start a new take; re-check.
+    const now = stateRef.current.status;
+    if (now !== "idle" && now !== "error") return;
+    const { meta } = take;
+    // The stored chunks have no EBML duration, same as a fresh recording.
+    const patch = async (b: Blob) =>
+      meta.mimeType.includes("webm")
+        ? fixWebmDuration(b, meta.durationMs, { logger: false }).catch(() => b)
+        : b;
+    const primary = await patch(take.screen);
+    const secondary = take.camera ? await patch(take.camera) : null;
+    cursorRef.current = meta.cursor;
+    clicksRef.current = meta.clicks;
+    keysRef.current = meta.keys;
+    // Staging reads its draft synchronously at mount, from sessionStorage. The
+    // duration is overwritten because a take that never finalized carries an
+    // ESTIMATED one here, which `readDraft`'s guard would otherwise reject.
+    if (take.draft) {
+      try {
+        sessionStorage.setItem(
+          STAGING_DRAFT_KEY,
+          JSON.stringify({ ...take.draft, durationMs: meta.durationMs }),
+        );
+      } catch {
+        /* the take restores without its edits */
+      }
+    }
+    // Staging keeps writing its draft to the same record, and a new take
+    // replaces this writer wholesale (`beginRecording`), so the reused chunk
+    // sequence is never appended to.
+    takeWriterRef.current = new TakeWriter(Promise.resolve(id));
+    setTakeId(id);
+    setPendingTakes((p) => p?.filter((t) => t.id !== id) ?? null);
+    dispatch({
+      type: "RESTORE",
+      mode: meta.mode,
+      blob: primary,
+      cameraBlob: secondary,
+      cameraOffsetMs: meta.cameraOffsetMs,
+      durationMs: meta.durationMs,
+      width: meta.width,
+      height: meta.height,
+      markers: meta.markers,
+    });
+  }, []);
+
+  /** Throw a stored take away from the restore prompt. Never rejects. */
+  const dropTake = useCallback(async (id: string) => {
+    await deleteTake(id).catch(() => undefined);
+    setPendingTakes((p) => p?.filter((t) => t.id !== id) ?? null);
   }, []);
 
   // Unmount: tear the pipeline down.
@@ -495,11 +610,13 @@ export function useRecorder(): UseRecorderResult {
    * gesture, so there the "Choose what to share" button stays.
    */
   useEffect(() => {
+    // Offer to restore an unsaved take before grabbing the screen again.
+    if (pendingTakes === null || pendingTakes.length > 0) return;
     if (!desktop || autoAcquiredRef.current) return;
     if (state.status !== "idle" || state.mode === "camera") return;
     autoAcquiredRef.current = true;
     void acquire();
-  }, [desktop, state.status, state.mode, acquire]);
+  }, [desktop, pendingTakes, state.status, state.mode, acquire]);
 
   /**
    * "Change" in the ready panel: ask the shell for a one-shot picker, then
@@ -1212,6 +1329,10 @@ export function useRecorder(): UseRecorderResult {
       },
       mark: () => dispatch({ type: "MARK" }),
       discard,
+      // Fire-and-forget like `finish`: both swallow their own failures, so a
+      // click handler never has a rejection to deal with.
+      restoreTake: (id: string) => void restoreTake(id),
+      dropTake: (id: string) => void dropTake(id),
       finish: (input: FinishInput) => void finish(input),
       cancelRender,
       reset,
@@ -1226,9 +1347,11 @@ export function useRecorder(): UseRecorderResult {
       changeShare,
       discard,
       discardRecorder,
+      dropTake,
       finish,
       reacquireWith,
       reset,
+      restoreTake,
     ],
   );
 
@@ -1240,6 +1363,7 @@ export function useRecorder(): UseRecorderResult {
     screenVideoRef,
     cameraVideoRef,
     staging,
+    pendingTakes,
     getLevel,
     actions,
   };
