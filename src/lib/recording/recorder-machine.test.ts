@@ -515,7 +515,7 @@ describe("staging, rendering, upload and done", () => {
 describe("RESTORE", () => {
   const blob = new Blob(["x"]);
   const RESTORE: RecorderEvent = {
-    type: "RESTORE", mode: "screen+camera", blob, cameraBlob: null, cameraOffsetMs: -40,
+    type: "RESTORE", mode: "camera", blob, cameraBlob: null, cameraOffsetMs: -40,
     durationMs: 446_635, width: 1920, height: 1080, markers: [{ t: 1 }],
   };
 
@@ -524,15 +524,46 @@ describe("RESTORE", () => {
     expect(s.status).toBe("staging");
     expect(s.blob).toBe(blob);
     expect(s.durationMs).toBe(446_635);
-    expect(s.mode).toBe("screen+camera");
+    expect(s.mode).toBe("camera");
     expect(s.markers).toEqual([{ t: 1 }]);
     expect(s.streamsAlive).toBe(false);
+    expect(s.cameraBlob).toBe(null);
+    expect(s.cameraOffsetMs).toBe(-40);
+    expect(s.width).toBe(1920);
+    expect(s.height).toBe(1080);
   });
 
-  it("is ignored anywhere but idle or error", () => {
-    const recording = { ...init(), status: "recording" as const };
-    expect(recorderReducer(recording, RESTORE)).toBe(recording);
+  it("carries the exact expected state, nothing more, nothing stale", () => {
+    const s = recorderReducer(init(), RESTORE);
+    expect(s).toEqual({
+      ...init(),
+      status: "staging",
+      mode: "camera",
+      blob,
+      cameraBlob: null,
+      cameraOffsetMs: -40,
+      durationMs: 446_635,
+      width: 1920,
+      height: 1080,
+      markers: [{ t: 1 }],
+      elapsedMs: 446_635,
+      streamsAlive: false,
+      hasCamera: false,
+      hasSystemAudio: false,
+      renderProgress: 0,
+      uploadProgress: 0,
+      error: "",
+      notice: "",
+    });
   });
+
+  it.each(["recording", "staging", "uploading", "done"] as const)(
+    "is ignored in %s — a live or already-staged take must not be clobbered",
+    (status) => {
+      const s = { ...init(), status };
+      expect(recorderReducer(s, RESTORE)).toBe(s);
+    },
+  );
 
   it("enters staging from error, clearing the stale error and notice", () => {
     const errored = {
@@ -545,6 +576,12 @@ describe("RESTORE", () => {
     expect(s.status).toBe("staging");
     expect(s.error).toBe("");
     expect(s.notice).toBe("");
+  });
+
+  it("RESTORE → DISCARD lands back on idle since streams aren't alive", () => {
+    const staged = recorderReducer(init(), RESTORE);
+    const s = recorderReducer(staged, { type: "DISCARD" });
+    expect(s.status).toBe("idle");
   });
 });
 

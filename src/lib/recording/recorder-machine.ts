@@ -83,6 +83,21 @@ export interface RecorderState {
   notice: string;
 }
 
+/**
+ * The recording result fields `BLOB_READY` and `RESTORE` both carry. Kept as a
+ * shared type (not a shared reducer helper) so the two cases' handling stays
+ * separately visible where they diverge — `RESTORE` also touches `mode`,
+ * `markers`, `elapsedMs`, and the live-capture facts; `BLOB_READY` doesn't.
+ */
+type TakePayload = {
+  blob: Blob;
+  cameraBlob: Blob | null;
+  cameraOffsetMs: number;
+  durationMs: number;
+  width: number | null;
+  height: number | null;
+};
+
 export type RecorderEvent =
   | { type: "SELECT_MODE"; mode: RecordingMode }
   | { type: "SET_SURFACE_PREF"; pref: SurfacePref }
@@ -120,27 +135,9 @@ export type RecorderEvent =
   | { type: "CANCEL" }
   | { type: "MAX_DURATION" }
   | { type: "STREAM_ENDED" }
-  | {
-      type: "BLOB_READY";
-      blob: Blob;
-      cameraBlob: Blob | null;
-      cameraOffsetMs: number;
-      durationMs: number;
-      width: number | null;
-      height: number | null;
-    }
+  | ({ type: "BLOB_READY" } & TakePayload)
+  | ({ type: "RESTORE"; mode: RecordingMode; markers: Marker[] } & TakePayload)
   | { type: "DISCARD" }
-  | {
-      type: "RESTORE";
-      mode: RecordingMode;
-      blob: Blob;
-      cameraBlob: Blob | null;
-      cameraOffsetMs: number;
-      durationMs: number;
-      width: number | null;
-      height: number | null;
-      markers: Marker[];
-    }
   | { type: "RENDER" }
   | { type: "RENDER_PROGRESS"; percent: number }
   | { type: "RENDER_DONE" }
@@ -418,8 +415,12 @@ export function recorderReducer(
         width: event.width,
         height: event.height,
         markers: event.markers,
+        elapsedMs: event.durationMs,
         streamsAlive: false,
+        hasCamera: false,
+        hasSystemAudio: false,
         renderProgress: 0,
+        uploadProgress: 0,
         error: "",
         notice: "",
       };
