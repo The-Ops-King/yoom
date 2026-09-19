@@ -28,11 +28,24 @@ describe("AudioAssembler", () => {
     expect(a.drain(1000).frames).toBe(0);
   });
 
-  it("drains nothing for a non-finite edge", () => {
+  it("drains everything that is left for an unbounded edge", () => {
+    // The final flush pumps audio with no target frame; the tail after the last
+    // video frame has to come out, not get dropped.
+    const a = new AudioAssembler([{ start: 0, end: 1 }, { start: 2, end: 3 }], SR, 1);
+    a.push([ramp(0, 30)], 0);
+    expect(a.drain(5).frames).toBe(5);
+    const rest = a.drain(Infinity);
+    expect(rest.frames).toBe(15);
+    expect(Array.from(rest.channels[0])).toEqual([5, 6, 7, 8, 9, ...Array.from(ramp(20, 10))]);
+    expect(a.drain(Infinity).frames).toBe(0);
+  });
+
+  it("drains nothing for an edge that is not a number", () => {
     const a = new AudioAssembler([{ start: 0, end: 1 }], SR, 1);
     a.push([ramp(0, 10)], 0);
     expect(a.drain(Number.NaN).frames).toBe(0);
     expect(a.drain(Number.NaN).channels[0].length).toBe(0);
+    expect(a.drain(-Infinity).frames).toBe(0);
     expect(a.drain(10).frames).toBe(10); // the stream is untouched
   });
 

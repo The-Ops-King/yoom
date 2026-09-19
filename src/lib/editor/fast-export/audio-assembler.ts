@@ -79,10 +79,12 @@ export class AudioAssembler {
 
   /**
    * Hand out edited frames `[drained, min(untilFrame, total))`; unwritten
-   * samples are silence. A non-finite `untilFrame` drains nothing.
+   * samples are silence. `Infinity` drains everything that is left — that is
+   * the final flush, which must not drop the audio past the last video frame.
+   * `NaN` drains nothing rather than throwing on the export's hot path.
    */
   drain(untilFrame: number): AudioBlock {
-    const until = Number.isFinite(untilFrame) ? untilFrame : this.drained;
+    const until = Number.isNaN(untilFrame) ? this.drained : untilFrame;
     const frames = Math.max(0, Math.floor(Math.min(until, this.total)) - this.drained);
     this.ensure(frames);
     const channels = this.pending.map((p) => p.slice(this.head, this.head + frames));
