@@ -34,13 +34,46 @@ describe("TakeWriter", () => {
     ]);
   });
 
-  it("keeps going after a failed write and never rejects", async () => {
+  it("stops persisting once a write fails, logs once, and never rejects", async () => {
     const append = vi.fn().mockRejectedValueOnce(new Error("quota")).mockResolvedValue(undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const w = new TakeWriter(Promise.resolve("t1"), { append });
     w.chunk("screen", new Blob(["a"]));
     w.chunk("screen", new Blob(["b"]));
+    w.chunk("camera", new Blob(["c"]));
     await expect(w.flush()).resolves.toBeUndefined();
-    expect(append).toHaveBeenCalledTimes(2);
+    // Only the failing write was ever attempted: a broken store is broken for
+    // every remaining chunk, so there's no point (or logging) for the rest.
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it("does not renumber or retry a chunk once storage has failed", async () => {
+    const append = vi.fn().mockRejectedValueOnce(new Error("quota"));
+    const w = new TakeWriter(Promise.resolve("t1"), { append });
+    w.chunk("screen", new Blob(["a"])); // seq 0 — fails and latches
+    w.chunk("screen", new Blob(["b"])); // would be seq 1 — must never be sent
+    await w.flush();
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(append).toHaveBeenCalledWith("t1", "screen", 0, expect.anything());
+  });
+
+  it("numbers and writes chunks correctly across a still-pending take id", async () => {
+    // In production the first 250ms chunk can fire before createTake's IDB
+    // transaction resolves; both current and later chunks must still land
+    // in call order once the id shows up.
+    const calls: string[] = [];
+    const append = vi.fn(async (_id: string, kind: string, seq: number) => { calls.push(`${kind}${seq}`); });
+    let resolveId!: (id: string) => void;
+    const idPromise = new Promise<string>((resolve) => { resolveId = resolve; });
+    const w = new TakeWriter(idPromise, { append });
+    w.chunk("screen", new Blob(["a"]));
+    w.chunk("camera", new Blob(["b"]));
+    resolveId("t1");
+    w.chunk("screen", new Blob(["c"]));
+    await w.flush();
+    expect(calls).toEqual(["screen0", "camera0", "screen1"]);
   });
 
   it("does nothing when the take could not be created", async () => {

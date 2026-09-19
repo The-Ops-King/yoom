@@ -10,6 +10,10 @@ export class TakeWriter {
   private queue: Promise<void> = Promise.resolve();
   private readonly seq: Record<FileKind, number> = { screen: 0, camera: 0 };
   private readonly takeId: Promise<string | null>;
+  // IDB failures here (quota, corruption) are persistent, not per-chunk: once
+  // one write fails the rest will too. Latching after the first stops a long
+  // take from queuing — and logging — hundreds of doomed writes.
+  private failed = false;
 
   constructor(takeId: Promise<string>, private readonly deps: Deps = { append: appendChunk }) {
     this.takeId = takeId.catch((err) => {
@@ -19,19 +23,31 @@ export class TakeWriter {
   }
 
   chunk(kind: FileKind, data: Blob): void {
+    // Captured synchronously — numbering can't drift if the write itself
+    // runs later, behind other queued writes or the still-pending take id.
     const seq = this.seq[kind]++;
+    // Writes are serialized (never concurrent): appendChunk does a
+    // read-modify-write of the take record's byte/chunk counters, so two
+    // in-flight appends would race and drop one of those updates.
     this.queue = this.queue.then(async () => {
+      if (this.failed) return;
       const id = await this.takeId;
       if (!id) return;
       try {
         await this.deps.append(id, kind, seq, data);
       } catch (err) {
-        console.warn("[Yoom] could not persist a chunk", err);
+        this.failed = true;
+        console.warn("[Yoom] stopped persisting this take", err);
       }
     });
   }
 
-  /** Resolves once every queued chunk has been attempted. */
+  /**
+   * Resolves once every chunk queued so far has been attempted — not every
+   * chunk that will ever be queued. Callers must stop calling `chunk()`
+   * before awaiting this (see use-recorder's discardStoredTake, which nulls
+   * its writer ref synchronously before awaiting flush).
+   */
   flush(): Promise<void> {
     return this.queue;
   }
