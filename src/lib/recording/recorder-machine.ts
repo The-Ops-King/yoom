@@ -130,6 +130,17 @@ export type RecorderEvent =
       height: number | null;
     }
   | { type: "DISCARD" }
+  | {
+      type: "RESTORE";
+      mode: RecordingMode;
+      blob: Blob;
+      cameraBlob: Blob | null;
+      cameraOffsetMs: number;
+      durationMs: number;
+      width: number | null;
+      height: number | null;
+      markers: Marker[];
+    }
   | { type: "RENDER" }
   | { type: "RENDER_PROGRESS"; percent: number }
   | { type: "RENDER_DONE" }
@@ -388,6 +399,26 @@ export function recorderReducer(
         durationMs: event.durationMs,
         width: event.width,
         height: event.height,
+        renderProgress: 0,
+        error: "",
+      };
+
+    case "RESTORE":
+      // A take recovered from disk after a quit/crash: straight into staging,
+      // with nothing live behind it.
+      if (state.status !== "idle" && state.status !== "error") return state;
+      return {
+        ...state,
+        status: "staging",
+        mode: event.mode,
+        blob: event.blob,
+        cameraBlob: event.cameraBlob,
+        cameraOffsetMs: event.cameraOffsetMs,
+        durationMs: event.durationMs,
+        width: event.width,
+        height: event.height,
+        markers: event.markers,
+        streamsAlive: false,
         renderProgress: 0,
         error: "",
       };

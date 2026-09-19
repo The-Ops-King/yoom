@@ -512,6 +512,29 @@ describe("staging, rendering, upload and done", () => {
   });
 });
 
+describe("RESTORE", () => {
+  const blob = new Blob(["x"]);
+  const RESTORE: RecorderEvent = {
+    type: "RESTORE", mode: "screen+camera", blob, cameraBlob: null, cameraOffsetMs: -40,
+    durationMs: 446_635, width: 1920, height: 1080, markers: [{ t: 1 }],
+  };
+
+  it("enters staging from idle with the stored take and no live streams", () => {
+    const s = recorderReducer(init(), RESTORE);
+    expect(s.status).toBe("staging");
+    expect(s.blob).toBe(blob);
+    expect(s.durationMs).toBe(446_635);
+    expect(s.mode).toBe("screen+camera");
+    expect(s.markers).toEqual([{ t: 1 }]);
+    expect(s.streamsAlive).toBe(false);
+  });
+
+  it("is ignored anywhere but idle or error", () => {
+    const recording = { ...init(), status: "recording" as const };
+    expect(recorderReducer(recording, RESTORE)).toBe(recording);
+  });
+});
+
 describe("live toggles", () => {
   it("TOGGLE_MIC / TOGGLE_SYSTEM flip in any state", () => {
     const rec = run(init(), [
