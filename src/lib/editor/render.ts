@@ -5,9 +5,16 @@ import { cameraAt } from "./camera-track";
 import { MOTION_DT, drawInputLayer, motionOffsets, motionTapAlpha } from "./render-input";
 import { type CursorAt, FULL_RECT, fitView, toOutput, zoomAt } from "./zoom";
 
+/**
+ * What a video layer is drawn from: a live `<video>` (preview, legacy export)
+ * or a decoded `VideoFrame` (fast export). `drawFrame` only needs pixels for
+ * `drawImage` plus the intrinsic size.
+ */
+export type VideoLayer = CanvasImageSource & { readonly videoWidth: number; readonly videoHeight: number };
+
 export interface RenderInputs {
-  screen: HTMLVideoElement | null;
-  camera: HTMLVideoElement | null;
+  screen: VideoLayer | null;
+  camera: VideoLayer | null;
   mode: RecordingMode;
   edits: VideoEdits;
   /** Decoded frame background media (image or looping video), or null for none/colour. */
@@ -46,7 +53,7 @@ export function outputSize(w: number, h: number, edits: VideoEdits): { width: nu
   return { width: l.canvasW, height: l.canvasH };
 }
 
-function primary(inputs: RenderInputs): HTMLVideoElement | null {
+function primary(inputs: RenderInputs): VideoLayer | null {
   return inputs.mode === "camera" ? inputs.camera : inputs.screen;
 }
 
