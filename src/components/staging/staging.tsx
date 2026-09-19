@@ -10,6 +10,7 @@ import { useStagingPlayer } from "@/lib/editor/use-staging-player";
 import { DEFAULT_RAMP_S } from "@/lib/editor/zoom";
 import { loadSettings, persistStaging } from "@/lib/recording/settings";
 import { clearStagingDraft, STAGING_DRAFT_KEY } from "@/lib/recording/staging-draft";
+import { saveTakeDraft } from "@/lib/recording/take-store";
 import { defaultRecordingTitle } from "@/lib/recording/upload";
 import type { BackgroundConfig, StagingDefaults } from "@/lib/recording/types";
 import { Preview } from "./preview";
@@ -191,15 +192,15 @@ export function Staging(props: StagingProps) {
   // Debounced: a drag pushes a new `edits` on every pointer move, and
   // serialising the whole edit list at 60 Hz is pure jank.
   const writeDraft = useCallback(() => {
+    const draft = { durationMs: props.durationMs, edits: persistableEdits(edits), details };
     try {
-      sessionStorage.setItem(
-        STAGING_DRAFT_KEY,
-        JSON.stringify({ durationMs: props.durationMs, edits: persistableEdits(edits), details }),
-      );
+      sessionStorage.setItem(STAGING_DRAFT_KEY, JSON.stringify(draft));
     } catch {
       /* storage full or unavailable: the draft just is not restorable */
     }
-  }, [details, edits, props.durationMs]);
+    // The durable copy: survives a quit or crash, restored with the take.
+    if (props.takeId) void saveTakeDraft(props.takeId, draft).catch(() => undefined);
+  }, [details, edits, props.durationMs, props.takeId]);
   useEffect(() => {
     const timer = setTimeout(writeDraft, PERSIST_DEBOUNCE_MS);
     return () => clearTimeout(timer);

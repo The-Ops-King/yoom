@@ -231,6 +231,7 @@ export function Recorder({ shareBase }: { shareBase: string }) {
           onFinish={actions.finish}
           onDiscard={actions.discard}
           shareBase={shareBase}
+          takeId={staging.takeId}
         />
       ) : (
         <div

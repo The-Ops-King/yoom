@@ -59,6 +59,13 @@ export interface StagingProps {
    * localhost — see `video-card.tsx`'s `shareBase` prop for the same pattern.
    */
   shareBase: string;
+  /**
+   * The current take's id in the take store (`@/lib/recording/take-store`),
+   * or null when there is none to mirror the draft into (e.g. the take store
+   * failed to open). Lets `writeDraft` keep a durable copy of the draft
+   * alongside the take, so a restored take reopens with its edits.
+   */
+  takeId: string | null;
 }
 
 /**
