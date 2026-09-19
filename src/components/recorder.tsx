@@ -355,6 +355,7 @@ export function Recorder({ shareBase }: { shareBase: string }) {
                       minute: "2-digit",
                     })}
                     {" · "}
+                    {t.finalized ? "" : "~"}
                     {formatElapsed(t.durationMs)}
                   </span>
                   <span className="flex shrink-0 gap-2">
