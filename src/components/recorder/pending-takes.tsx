@@ -33,7 +33,7 @@ export function PendingTakes({ takes, onRestore, onDelete }: PendingTakesProps) 
             <span className="text-muted">
               {dateLabel}
               {" · "}
-              {t.finalized ? "" : "~"}
+              {t.estimated ? "~" : ""}
               {formatElapsed(t.durationMs)}
             </span>
             <span className="flex shrink-0 gap-2">
