@@ -423,11 +423,12 @@ export function useRecorder(): UseRecorderResult {
    *
    * Reading and patching a long take takes seconds, and every one of those
    * awaits is a chance for the user to start a new take or to pick a different
-   * stored one. Two guards cover that: the status re-check immediately before
-   * the side effects (a new take is live → drop this one on the floor) and
-   * `restoreSeqRef` (a newer restore was asked for → this continuation is
-   * stale, even if its own status check would still pass because the newer one
-   * has not reached its dispatch yet).
+   * stored one. Two guards cover that, and neither subsumes the other:
+   * `restoreSeqRef` catches a newer restore and a new take (`beginRecording`
+   * bumps it) — including the case where the newer restore has not reached its
+   * dispatch yet, so a status check would still read `idle`; the status
+   * re-check catches the acquire/setup path, which starts no take and so never
+   * bumps the seq, but must not be dropped into staging from under the user.
    *
    * Never rejects: a store that cannot be read drops the entry from the prompt
    * (the bytes stay on disk for the next run) rather than leaving a button that
@@ -465,6 +466,8 @@ export function useRecorder(): UseRecorderResult {
     const primary = await patch(take.screen);
     const secondary = take.camera ? await patch(take.camera) : null;
     // Last chance to bail: from here down everything is a side effect.
+    // The seq covers a newer restore and a new take; the status covers an
+    // acquire that has moved the user on to `setup` in the meantime.
     if (restoreSeqRef.current !== attempt) return;
     const now = stateRef.current.status;
     if (now !== "idle" && now !== "error") return;
@@ -483,6 +486,13 @@ export function useRecorder(): UseRecorderResult {
       } catch {
         /* the take restores without its edits */
       }
+    } else {
+      // A take with no draft must land in a CLEAN staging. Only a finished
+      // upload clears the key, so a discarded take's draft is still sitting
+      // there — and `readDraft` matches on duration alone, which for an
+      // unfinalized take is quantized to 250 ms chunks and collides easily.
+      // That would carry a stranger's title and description into this take.
+      clearStagingDraft();
     }
     // Staging keeps writing its draft to the same record, and a new take
     // replaces this writer wholesale (`beginRecording`), so the reused chunk
@@ -715,11 +725,13 @@ export function useRecorder(): UseRecorderResult {
     });
 
     // Start the crash-safe copy of this take. The previous writer is simply
-    // dropped, never deleted: the only way to get here still holding one is a
-    // take that FAILED (an encoder error, the stop watchdog), and those bytes
-    // are exactly what the restore prompt exists to hand back. `pruneTakes`
-    // ages them out if the user never wants them. Restart and Cancel do delete
-    // theirs — they go through `discardRecorder` on the way out.
+    // dropped, never deleted: the two ways to get here still holding one are a
+    // take that FAILED (an encoder error, the stop watchdog) and a take
+    // RESTORED into staging that the user then recorded over, and in both cases
+    // those bytes are exactly what the restore prompt exists to hand back.
+    // `pruneTakes` ages them out if the user never wants them. Restart and
+    // Cancel do delete theirs — they go through `discardRecorder` on the way
+    // out.
     //
     // The recorder is built first so the store records the container the
     // browser actually chose, not the one we asked for: `loadTake` types the
@@ -936,16 +948,17 @@ export function useRecorder(): UseRecorderResult {
         // threw the take away replaced or nulled it.
         if (takeWriterRef.current !== writer) return;
         setTakeId(id);
-        return writer.flush().then(() => {
-          // A storage failure dropped chunks, so what is on disk is SHORTER
-          // than `meta.durationMs`. Finalizing with that length would have the
-          // restore prompt advertising 7:00 of a 0:30 file and staging drawing
-          // a timeline past the end of the footage. Leaving the take
-          // unfinalized falls back to take-store's contiguous-chunk estimate,
-          // which describes the bytes that actually landed.
-          if (!writer.ok()) return;
-          return finalizeTake(id, meta);
-        });
+        // `ok()` is false when a storage failure dropped chunks: the metadata
+        // is all still true, but what is on disk is SHORTER than
+        // `meta.durationMs`, and finalizing as-is would have the restore prompt
+        // advertising 7:00 of a 0:30 file and staging drawing a timeline past
+        // the end of the footage. The flag is the fix — `loadTake` overrides
+        // that one field with its contiguous-chunk estimate and keeps
+        // everything else. NOT finalizing would be far worse: the take would
+        // fall back to an empty estimated meta and lose the cursor, clicks,
+        // keys, markers, dimensions and `cameraOffsetMs` (which desyncs the
+        // camera audibly) — all of which we are holding right here.
+        return writer.flush().then(() => finalizeTake(id, meta, { truncated: !writer.ok() }));
       })
       .catch((err) => console.warn("[Yoom] could not finalize the stored take", err));
 
