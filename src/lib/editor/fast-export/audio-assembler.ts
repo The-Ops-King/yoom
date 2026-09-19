@@ -1,5 +1,6 @@
 import { editedDurationIn, type Range } from "../cuts";
 
+/** A run of edited frames, one Float32Array per output channel. */
 export type AudioBlock = { channels: Float32Array[]; frames: number };
 
 /** One kept range, resolved onto the edited frame grid. */
@@ -29,8 +30,8 @@ type Segment = {
  * mix them.
  */
 export class AudioAssembler {
-  private readonly total: number;
-  private readonly segments: Segment[];
+  private readonly total: number; // edited frames in the whole timeline
+  private readonly segments: Segment[]; // kept ranges, on the edited frame grid
   private drained = 0; // edited frames already handed out
   private head = 0; // pending[c][head + i] = edited frame `drained + i`
   private pending: Float32Array[];
@@ -106,6 +107,10 @@ export class AudioAssembler {
       // ahead of its drains, and costs one copy of what is still pending.
       for (const p of this.pending) {
         p.copyWithin(0, this.head);
+        // Do not drop this fill: copyWithin leaves the tail holding the
+        // pre-shift duplicate and the dead drained frames, and those slots now
+        // stand for later frames. Zero them so unwritten frames stay silent —
+        // otherwise the garbage resurfaces in a future window as audio.
         p.fill(0, capacity - this.head);
       }
     } else {

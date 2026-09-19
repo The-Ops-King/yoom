@@ -90,7 +90,7 @@ describe("AudioAssembler", () => {
     expect(Array.from(out.channels[1])).toEqual(Array.from(ramp(1, 10)));
   });
 
-  it("holds only the undrained window while pushes and drains interleave", () => {
+  it("stays correct as pushes and drains interleave (exercises sliding compaction)", () => {
     const a = new AudioAssembler([{ start: 0, end: 20 }], SR, 1);
     const got: number[] = [];
     for (let i = 0; i < 20; i++) {
