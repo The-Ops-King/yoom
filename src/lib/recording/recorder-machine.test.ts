@@ -510,6 +510,21 @@ describe("staging, rendering, upload and done", () => {
     expect(uploading.error).toBe("network");
     expect(uploading.blob).toBe(blob);
   });
+
+  // Cancel is offered while uploading too (the fast export streams into the
+  // upload, so both halves share one AbortController). An aborted upload sends
+  // UPLOAD_FAILED with an empty error: back to staging, nothing to apologise for.
+  it("a cancelled upload returns to staging silently", () => {
+    const uploading = run(stopped(), [
+      { type: "BLOB_READY", blob, cameraBlob: null, cameraOffsetMs: 0, durationMs: 1, width: 2, height: 3 },
+      { type: "RENDER" },
+      { type: "RENDER_DONE" },
+      { type: "UPLOAD_FAILED", error: "" },
+    ]);
+    expect(uploading.status).toBe("staging");
+    expect(uploading.error).toBe("");
+    expect(uploading.blob).toBe(blob);
+  });
 });
 
 describe("RESTORE", () => {

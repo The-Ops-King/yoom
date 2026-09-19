@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 import fixWebmDuration from "fix-webm-duration";
 import type { VideoEdits } from "@/lib/edits";
 import { editedDuration } from "@/lib/editor/cuts";
-import { renderToBlob, type RenderSources } from "@/lib/editor/export";
+import { renderToBlob, type RenderResult, type RenderSources } from "@/lib/editor/export";
+import type { FastRenderResult } from "@/lib/editor/fast-export/render-fast";
+import { shareUrl } from "@/lib/share";
+import { StreamingUpload } from "@/lib/streaming-upload";
 import { AudioMixer } from "./audio-mixer";
 import { appendSamples, toSeconds } from "./cursor-track";
 import {
@@ -38,7 +41,12 @@ import {
   type TakeSummary,
 } from "./take-store";
 import { TakeWriter } from "./take-writer";
-import { uploadRecording } from "./upload";
+import {
+  beginUpload,
+  completeUpload,
+  uploadRecording,
+  type UploadRecordingResult,
+} from "./upload";
 import type {
   BubbleConfig,
   Capabilities,
@@ -181,7 +189,11 @@ export interface UseRecorderResult {
     dropTake(id: string): void;
     /** Render the edit list to one file, then upload it with the details. */
     finish(input: FinishInput): void;
-    cancelRender(): void;
+    /**
+     * Abort the export. On the fast path the render and the upload overlap and
+     * share one controller, so this is the only Cancel either half needs.
+     */
+    cancelExport(): void;
     reset(): void;
     toggleMic(on?: boolean): void;
     toggleSystem(on?: boolean): void;
@@ -242,7 +254,9 @@ export function useRecorder(): UseRecorderResult {
   // `onstart` stamps of the two encoders; their delta is `cameraOffsetMs`.
   const screenStartRef = useRef(0);
   const cameraStartRef = useRef(0);
-  const renderAbortRef = useRef<AbortController | null>(null);
+  // One controller for the whole export — render AND upload. On the fast path
+  // the two overlap, so Cancel has to reach both through the same signal.
+  const exportAbortRef = useRef<AbortController | null>(null);
   const startedAtRef = useRef(0);
   const pausedAtRef = useRef(0);
   const pausedTotalRef = useRef(0);
@@ -1026,6 +1040,14 @@ export function useRecorder(): UseRecorderResult {
    * the trip live here because `rendering → uploading` is one user action
    * ("Save"), and a failure in either drops back to `staging` with the raw
    * blobs intact.
+   *
+   * The fast path overlaps them: `renderFast` writes the fragmented MP4's
+   * bytes, in order, straight into a resumable Drive session that was opened
+   * before the first frame, so Save costs max(render, upload) rather than
+   * render + upload. Two fallbacks keep that from being a one-way bet — a
+   * machine that cannot fast-export runs the old real-time render, and a
+   * streamed upload that dies after the render is retried whole-file from the
+   * bytes `StreamingUpload` kept, never by rendering again.
    */
   const finish = useCallback(
     async (input: FinishInput) => {
@@ -1047,83 +1069,58 @@ export function useRecorder(): UseRecorderResult {
 
       dispatch({ type: "RENDER" });
       const abort = new AbortController();
-      renderAbortRef.current = abort;
-      let rendered: { blob: Blob; thumbnail: Blob | null; width: number; height: number };
-      try {
-        rendered = await renderToBlob(sources, input.edits, {
-          thumbnailAt: input.thumbnailAt,
-          onProgress: (percent) => dispatch({ type: "RENDER_PROGRESS", percent }),
-          signal: abort.signal,
-          cursor: toSeconds(cursorRef.current),
-          // The key track is not persisted, so the export has to be handed it.
-          // The CLICK track deliberately is not passed: what the render draws
-          // is `edits.clicks`, the lane the user actually toggled, which rides
-          // along inside `input.edits`.
-          keys: toSeconds(keysRef.current),
-        });
-      } catch (err) {
-        renderAbortRef.current = null;
-        // A cancel is not an error the user needs told about.
-        dispatch({
-          type: "RENDER_FAILED",
-          error: abort.signal.aborted
-            ? ""
-            : err instanceof Error
-              ? err.message
-              : "Render failed.",
-        });
-        return;
-      }
-      renderAbortRef.current = null;
-      if (rendered.blob.size === 0) {
-        dispatch({ type: "RENDER_FAILED", error: "Render produced no data." });
-        return;
-      }
-      dispatch({ type: "RENDER_DONE" });
-
-      // Free the camera and screen while the bytes go up. The streams are gone,
-      // so the machine must know it: otherwise an UPLOAD_FAILED drops back to
-      // `staging` still believing `streamsAlive`, and Discard lands in a `setup`
-      // screen with no capture behind it.
-      teardown();
-      dispatch({ type: "STREAM_ENDED" });
+      exportAbortRef.current = abort;
+      const { signal } = abort;
+      const startedAt = performance.now();
       copiedRef.current = false;
-      let reservedSlug = "";
-      try {
-        const result = await uploadRecording({
-          blob: rendered.blob,
-          durationMs: Math.round(editedDurationMs(input.edits, current.durationMs)),
-          width: rendered.width,
-          height: rendered.height,
-          thumbnail: rendered.thumbnail,
-          title: input.title,
-          description: input.description,
-          slug: input.slug,
-          edits: input.edits,
-          onProgress: (percent) => dispatch({ type: "UPLOAD_PROGRESS", percent }),
-          // Loom behaviour: the link must be on the clipboard before the page
-          // changes. `navigator.clipboard.writeText` only works inside the
-          // click's transient activation (~5 s), and a real upload takes far
-          // longer than that — so the server reserves the slug up front and we
-          // copy here, one round-trip after the click.
-          onSlug: (url) => {
-            reservedSlug = url.slice(url.lastIndexOf("/") + 1);
-            navigator.clipboard
-              .writeText(url)
-              .then(() => {
-                copiedRef.current = true;
-              })
-              .catch(() => {
-                // Insecure context or denied permission; the detail page still
-                // shows the link.
-              });
-          },
-        });
-        if (reservedSlug && result.slug !== reservedSlug) {
+      // One instant for both `/api/upload` calls: the Drive filename and the
+      // default title are stamped from it, and on the fast path a whole render
+      // separates the two calls.
+      const now = new Date();
+
+      const renderOpts = {
+        thumbnailAt: input.thumbnailAt,
+        onProgress: (percent: number) => dispatch({ type: "RENDER_PROGRESS", percent }),
+        signal,
+        cursor: toSeconds(cursorRef.current),
+        // The key track is not persisted, so the export has to be handed it.
+        // The CLICK track deliberately is not passed: what the render draws
+        // is `edits.clicks`, the lane the user actually toggled, which rides
+        // along inside `input.edits`.
+        keys: toSeconds(keysRef.current),
+      };
+      // Everything both completion routes send unchanged.
+      const common = {
+        durationMs: Math.round(editedDurationMs(input.edits, current.durationMs)),
+        title: input.title,
+        description: input.description,
+        edits: input.edits,
+        signal,
+      };
+
+      // Loom behaviour: the link must be on the clipboard before the page
+      // changes. `navigator.clipboard.writeText` only works inside the click's
+      // transient activation (~5 s), and a real upload takes far longer than
+      // that — so the server reserves the slug up front and we copy here, one
+      // round-trip after the click.
+      const copyLink = (url: string) => {
+        navigator.clipboard
+          .writeText(url)
+          .then(() => {
+            copiedRef.current = true;
+          })
+          .catch(() => {
+            // Insecure context or denied permission; the detail page still
+            // shows the link.
+          });
+      };
+
+      const done = async (result: UploadRecordingResult, reserved: string | undefined) => {
+        if (reserved && result.slug !== reserved) {
           // A slug collision made the server mint a different one, so whatever
           // is on the clipboard points at the wrong video.
           console.warn(
-            `Reserved slug ${reservedSlug} was taken; saved as ${result.slug}. The copied link is stale.`,
+            `Reserved slug ${reserved} was taken; saved as ${result.slug}. The copied link is stale.`,
           );
           copiedRef.current = false;
         }
@@ -1137,18 +1134,218 @@ export function useRecorder(): UseRecorderResult {
         await discardStoredTake();
         dispatch({ type: "UPLOAD_DONE", videoId: result.id, shareUrl: result.url });
         router.push(`/library/${result.id}${copiedRef.current ? "?new=1" : ""}`);
-      } catch (err) {
+      };
+
+      // A cancel is not an error the user needs told about.
+      const failed = (type: "RENDER_FAILED" | "UPLOAD_FAILED", err: unknown) =>
         dispatch({
-          type: "UPLOAD_FAILED",
-          error: err instanceof Error ? err.message : "Upload failed. Please try again.",
+          type,
+          error: signal.aborted
+            ? ""
+            : err instanceof Error
+              ? err.message
+              : type === "RENDER_FAILED"
+                ? "Render failed."
+                : "Upload failed. Please try again.",
         });
+
+      /**
+       * Yesterday's path, unchanged: render the whole file in real time, then
+       * upload it. `reserved` is the slug the fast path already put on the
+       * clipboard, if it got that far — `uploadRecording` asks the server for
+       * that same slug so the copied link still lands on this video. With
+       * nothing reserved yet, `onSlug` does the copying as it always did.
+       */
+      const runLegacy = async (reserved: string | undefined) => {
+        let reservedSlug = reserved;
+        let rendered: RenderResult;
+        try {
+          rendered = await renderToBlob(sources, input.edits, renderOpts);
+        } catch (err) {
+          exportAbortRef.current = null;
+          failed("RENDER_FAILED", err);
+          return;
+        }
+        if (rendered.blob.size === 0) {
+          exportAbortRef.current = null;
+          dispatch({ type: "RENDER_FAILED", error: "Render produced no data." });
+          return;
+        }
+        dispatch({ type: "RENDER_DONE" });
+
+        // Free the camera and screen while the bytes go up. The streams are
+        // gone, so the machine must know it: otherwise an UPLOAD_FAILED drops
+        // back to `staging` still believing `streamsAlive`, and Discard lands
+        // in a `setup` screen with no capture behind it.
+        teardown();
+        dispatch({ type: "STREAM_ENDED" });
+        try {
+          const result = await uploadRecording({
+            ...common,
+            blob: rendered.blob,
+            width: rendered.width,
+            height: rendered.height,
+            thumbnail: rendered.thumbnail,
+            slug: reservedSlug ?? input.slug,
+            onProgress: (percent) => dispatch({ type: "UPLOAD_PROGRESS", percent }),
+            onSlug: reservedSlug
+              ? undefined
+              : (url) => {
+                  reservedSlug = url.slice(url.lastIndexOf("/") + 1);
+                  copyLink(url);
+                },
+          });
+          await done(result, reservedSlug);
+        } catch (err) {
+          failed("UPLOAD_FAILED", err);
+        } finally {
+          exportAbortRef.current = null;
+        }
+      };
+
+      // ---- fast path: the render and the upload overlap ----
+      //
+      // The module is dynamically imported because it pulls in ~1.2 MB of
+      // mediabunny that the legacy path never touches, and the free WebCodecs
+      // probe gates that import: a machine without WebCodecs neither downloads
+      // the chunk nor opens a Drive session it will never write a byte to. The
+      // codec-PAIR probe cannot run this early (it lives inside mediabunny), so
+      // that rarer refusal does abandon a session. Harmless: `/api/upload` only
+      // hands back a session URI and an optimistic slug — nothing is persisted
+      // until `/api/upload/complete` — and an untouched resumable session
+      // expires on Drive's own schedule.
+      let fast: typeof import("@/lib/editor/fast-export/render-fast") | null = null;
+      let unsupported = "no WebCodecs";
+      if (typeof VideoEncoder !== "undefined" && typeof VideoDecoder !== "undefined") {
+        try {
+          fast = await import("@/lib/editor/fast-export/render-fast");
+        } catch (err) {
+          unsupported = "fast exporter did not load";
+          console.warn("[Yoom] fast exporter did not load", err);
+        }
+      }
+      if (!fast) {
+        console.info("[Yoom] export", { path: "legacy", reason: unsupported });
+        await runLegacy(undefined);
+        return;
+      }
+
+      let session: { sessionUri: string; slug?: string };
+      try {
+        session = await beginUpload({ mimeType: "video/mp4", slug: input.slug, now, signal });
+      } catch (err) {
+        exportAbortRef.current = null;
+        // Still `rendering` as far as the machine is concerned, so this is a
+        // RENDER_FAILED — it drops back to staging with the edits intact.
+        failed("RENDER_FAILED", err);
+        return;
+      }
+      if (session.slug) copyLink(shareUrl(session.slug));
+
+      // Upload percent is acked bytes over the finished file's size, and that
+      // size is only known once `renderFast` returns. So the callback closes
+      // over a total that is still 0 for the whole overlapped half and stays
+      // silent until then — during which the render bar is the honest one (and
+      // the machine ignores UPLOAD_PROGRESS while `rendering` anyway). No
+      // throttling: `renderFast` only reports whole percents, and this fires
+      // once per 8 MiB chunk Drive acknowledges.
+      let totalBytes = 0;
+      const up = new StreamingUpload(session.sessionUri, {
+        signal,
+        onProgress: (sent) => {
+          if (totalBytes <= 0) return;
+          dispatch({
+            type: "UPLOAD_PROGRESS",
+            percent: Math.min(99, Math.round((sent / totalBytes) * 100)),
+          });
+        },
+      });
+
+      let rendered: FastRenderResult;
+      try {
+        rendered = await fast.renderFast(sources, input.edits, {
+          ...renderOpts,
+          onChunk: (data, position) => up.write(data, position),
+        });
+      } catch (err) {
+        if (!(err instanceof fast.FastExportUnsupported) || signal.aborted) {
+          exportAbortRef.current = null;
+          failed("RENDER_FAILED", err);
+          return;
+        }
+        // This machine has WebCodecs but no encodable codec pair, and it said so
+        // before writing a byte. Render the old way into the slug we reserved.
+        console.info("[Yoom] export", { path: "legacy", reason: err.message });
+        await runLegacy(session.slug);
+        return;
+      }
+      totalBytes = rendered.size;
+      const renderMs = performance.now() - startedAt;
+      dispatch({ type: "RENDER_DONE" });
+
+      // Free the camera and screen while the tail of the bytes goes up. The
+      // streams are gone, so the machine must know it: otherwise an
+      // UPLOAD_FAILED drops back to `staging` still believing `streamsAlive`,
+      // and Discard lands in a `setup` screen with no capture behind it.
+      teardown();
+      dispatch({ type: "STREAM_ENDED" });
+
+      try {
+        let driveFileId: string;
+        try {
+          ({ id: driveFileId } = await up.finish());
+        } catch (err) {
+          if (signal.aborted) throw err;
+          // The streamed session died, but `StreamingUpload` kept every byte —
+          // so retry the file whole rather than make the user sit through a
+          // second render. A fresh session reserves the same slug, so the link
+          // already on the clipboard still points here.
+          console.warn("[Yoom] streamed upload failed; retrying whole-file", err);
+          const retried = await uploadRecording({
+            ...common,
+            blob: up.blob(rendered.mimeType),
+            width: rendered.width,
+            height: rendered.height,
+            thumbnail: rendered.thumbnail,
+            slug: session.slug ?? input.slug,
+            onProgress: (percent) => dispatch({ type: "UPLOAD_PROGRESS", percent }),
+          });
+          await done(retried, session.slug);
+          return;
+        }
+        const result = await completeUpload({
+          ...common,
+          driveFileId,
+          reservedSlug: session.slug,
+          width: rendered.width,
+          height: rendered.height,
+          thumbnail: rendered.thumbnail,
+          now,
+        });
+        // Task 10 measures the overlap from this line.
+        console.info("[Yoom] export", {
+          path: "fast",
+          renderMs: Math.round(renderMs),
+          uploadTailMs: Math.round(performance.now() - startedAt - renderMs),
+          bytes: rendered.size,
+        });
+        await done(result, session.slug);
+      } catch (err) {
+        failed("UPLOAD_FAILED", err);
+      } finally {
+        exportAbortRef.current = null;
       }
     },
     [discardStoredTake, router, teardown],
   );
 
-  /** Abort an in-flight render; the machine falls back to `staging`. */
-  const cancelRender = useCallback(() => renderAbortRef.current?.abort(), []);
+  /**
+   * Abort the export. One controller covers the render and the upload, so this
+   * stops whichever halves are still running; the machine falls back to
+   * `staging` (RENDER_FAILED) or, once uploading, to `staging` via
+   * UPLOAD_FAILED — both with an empty error, since a cancel is not news.
+   */
+  const cancelExport = useCallback(() => exportAbortRef.current?.abort(), []);
 
   // ---------- discard / reset ----------
 
@@ -1409,7 +1606,7 @@ export function useRecorder(): UseRecorderResult {
       restoreTake: (id: string) => void restoreTake(id),
       dropTake: (id: string) => void dropTake(id),
       finish: (input: FinishInput) => void finish(input),
-      cancelRender,
+      cancelExport,
       reset,
       toggleMic: (on?: boolean) => dispatch({ type: "TOGGLE_MIC", on }),
       toggleSystem: (on?: boolean) => dispatch({ type: "TOGGLE_SYSTEM", on }),
@@ -1418,7 +1615,7 @@ export function useRecorder(): UseRecorderResult {
     }),
     [
       acquire,
-      cancelRender,
+      cancelExport,
       changeShare,
       discard,
       discardRecorder,

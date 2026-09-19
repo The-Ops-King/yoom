@@ -168,15 +168,19 @@ export function Recorder({ shareBase }: { shareBase: string }) {
             />
           </div>
           <p className="font-mono text-sm tabular-nums text-muted">{progress}%</p>
-          {rendering && (
-            <button
-              type="button"
-              onClick={actions.cancelRender}
-              className="rounded-lg border border-border bg-surface-raised px-5 py-2 text-sm font-medium text-muted transition-colors hover:text-foreground"
-            >
-              Cancel
-            </button>
-          )}
+          {/*
+            Cancel is offered in BOTH states: on the fast path the render and
+            the upload overlap behind one AbortController, so "uploading" is
+            just as interruptible as "rendering" — and either way the machine
+            drops back to staging with the edits intact.
+          */}
+          <button
+            type="button"
+            onClick={actions.cancelExport}
+            className="rounded-lg border border-border bg-surface-raised px-5 py-2 text-sm font-medium text-muted transition-colors hover:text-foreground"
+          >
+            {rendering ? "Cancel" : "Cancel upload"}
+          </button>
         </div>
       </main>
     );
