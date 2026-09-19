@@ -77,9 +77,13 @@ export class AudioAssembler {
     }
   }
 
-  /** Hand out edited frames `[drained, min(untilFrame, total))`; unwritten samples are silence. */
+  /**
+   * Hand out edited frames `[drained, min(untilFrame, total))`; unwritten
+   * samples are silence. A non-finite `untilFrame` drains nothing.
+   */
   drain(untilFrame: number): AudioBlock {
-    const frames = Math.max(0, Math.floor(Math.min(untilFrame, this.total)) - this.drained);
+    const until = Number.isFinite(untilFrame) ? untilFrame : this.drained;
+    const frames = Math.max(0, Math.floor(Math.min(until, this.total)) - this.drained);
     this.ensure(frames);
     const channels = this.pending.map((p) => p.slice(this.head, this.head + frames));
     this.head += frames;
@@ -93,7 +97,11 @@ export class AudioAssembler {
     const capacity = this.pending[0].length;
     if (this.head + length <= capacity) return;
     if (length <= capacity) {
-      // Drained frames are dead; slide the live window back instead of growing.
+      // Drained frames are dead, so slide the live window back rather than
+      // grow. A caller that drains as it goes never gets here twice over the
+      // same frames and would be fine re-slicing the tail instead; this keeps
+      // the buffers bounded by the undrained window when a caller decodes far
+      // ahead of its drains, and costs one copy of what is still pending.
       for (const p of this.pending) {
         p.copyWithin(0, this.head);
         p.fill(0, capacity - this.head);

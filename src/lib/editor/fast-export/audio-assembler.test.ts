@@ -28,6 +28,14 @@ describe("AudioAssembler", () => {
     expect(a.drain(1000).frames).toBe(0);
   });
 
+  it("drains nothing for a non-finite edge", () => {
+    const a = new AudioAssembler([{ start: 0, end: 1 }], SR, 1);
+    a.push([ramp(0, 10)], 0);
+    expect(a.drain(Number.NaN).frames).toBe(0);
+    expect(a.drain(Number.NaN).channels[0].length).toBe(0);
+    expect(a.drain(10).frames).toBe(10); // the stream is untouched
+  });
+
   it("leaves no hole at a seam that falls between samples", () => {
     // Every boundary here is off the sample grid, so the edited frame a range
     // starts on and the number of frames it owns cannot both round cleanly.
