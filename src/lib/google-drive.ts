@@ -120,7 +120,7 @@ export async function createResumableSession(
       "X-Upload-Content-Type": input.mimeType,
       // Omitted for a streamed upload: the renderer is still producing bytes,
       // and the final chunk's Content-Range declares the total instead.
-      ...(input.sizeBytes ? { "X-Upload-Content-Length": String(input.sizeBytes) } : {}),
+      ...(input.sizeBytes !== undefined ? { "X-Upload-Content-Length": String(input.sizeBytes) } : {}),
     },
     body: JSON.stringify({
       name: input.name,
