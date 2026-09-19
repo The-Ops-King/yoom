@@ -76,6 +76,11 @@ function open(): Promise<IDBDatabase> {
     };
     req.onsuccess = () => {
       const db = req.result;
+      // A version change from another tab would otherwise leave us holding a
+      // connection that blocks it forever.
+      db.onclose = () => {
+        dbPromise = null;
+      };
       db.onversionchange = () => {
         db.close();
         dbPromise = null;
