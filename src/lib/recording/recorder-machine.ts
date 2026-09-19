@@ -421,6 +421,7 @@ export function recorderReducer(
         streamsAlive: false,
         renderProgress: 0,
         error: "",
+        notice: "",
       };
 
     case "DISCARD":

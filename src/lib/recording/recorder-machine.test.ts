@@ -533,6 +533,19 @@ describe("RESTORE", () => {
     const recording = { ...init(), status: "recording" as const };
     expect(recorderReducer(recording, RESTORE)).toBe(recording);
   });
+
+  it("enters staging from error, clearing the stale error and notice", () => {
+    const errored = {
+      ...init(),
+      status: "error" as const,
+      error: "denied",
+      notice: "Reached the 30 minute limit — wrapping up.",
+    };
+    const s = recorderReducer(errored, RESTORE);
+    expect(s.status).toBe("staging");
+    expect(s.error).toBe("");
+    expect(s.notice).toBe("");
+  });
 });
 
 describe("live toggles", () => {
