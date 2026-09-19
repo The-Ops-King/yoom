@@ -17,6 +17,7 @@ function resumeIncomplete(rangeEnd: number): Response {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("chunk sizes", () => {
@@ -194,5 +195,38 @@ describe("uploadToDrive", () => {
       id: "drive-final",
     });
     expect(fetchMock).toHaveBeenCalledTimes(13);
+  });
+
+  it("aborts a chunk that never answers and resumes from Drive's offset", async () => {
+    // Stand in for the real timers: each fetch gets a signal we can fire.
+    const timeouts: { ms: number; ctrl: AbortController }[] = [];
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => {
+      const ctrl = new AbortController();
+      timeouts.push({ ms, ctrl });
+      return ctrl.signal;
+    });
+    let hung = true;
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+      if (hung) {
+        hung = false;
+        // A dead socket: never settles unless its signal aborts.
+        return new Promise<Response>((_, reject) =>
+          init.signal!.addEventListener("abort", () => reject(init.signal!.reason)),
+        );
+      }
+      const range = (init.headers as Record<string, string>)["Content-Range"];
+      if (range.startsWith("bytes */")) return Promise.resolve(new Response(null, { status: 308 }));
+      return Promise.resolve(Response.json({ id: "drive-after-stall" }, { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const upload = uploadToDrive(blobOf(1024), SESSION_URI);
+    await vi.waitFor(() => expect(timeouts).toHaveLength(1));
+    expect(timeouts[0].ms).toBe(120_000);
+    timeouts[0].ctrl.abort(new DOMException("timed out", "TimeoutError"));
+
+    await expect(upload).resolves.toEqual({ id: "drive-after-stall" });
+    // hung chunk, offset query, re-sent chunk
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });

@@ -9,6 +9,7 @@ import { canRedo, canUndo, createHistory, push, redo, undo, type History } from 
 import { useStagingPlayer } from "@/lib/editor/use-staging-player";
 import { DEFAULT_RAMP_S } from "@/lib/editor/zoom";
 import { loadSettings, persistStaging } from "@/lib/recording/settings";
+import { clearStagingDraft, STAGING_DRAFT_KEY } from "@/lib/recording/staging-draft";
 import { defaultRecordingTitle } from "@/lib/recording/upload";
 import type { BackgroundConfig, StagingDefaults } from "@/lib/recording/types";
 import { Preview } from "./preview";
@@ -19,13 +20,6 @@ import { TopBar } from "./top-bar";
 import type { Details, Selection, StagingContext, StagingProps, Tool } from "./types";
 
 export type { StagingProps } from "./types";
-
-/**
- * Draft edits survive a reload while the take is being staged. The media does
- * not — a reload drops the blobs and the recorder returns to idle — so the
- * entry is keyed by duration and cleared on finish/discard.
- */
-const STORAGE_KEY = "yoom.staging.v1";
 
 /** `player.step` counts frames at the export rate; one second is 30 of them. */
 const SECOND_IN_FRAMES = 30;
@@ -45,7 +39,7 @@ type Draft = { edits?: unknown; details?: Details };
  */
 function readDraft(durationMs: number): Draft | null {
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
+    const raw = sessionStorage.getItem(STAGING_DRAFT_KEY);
     if (!raw) return null;
     const j = JSON.parse(raw);
     if (!j || typeof j !== "object" || j.durationMs !== durationMs) return null;
@@ -196,19 +190,20 @@ export function Staging(props: StagingProps) {
 
   // Debounced: a drag pushes a new `edits` on every pointer move, and
   // serialising the whole edit list at 60 Hz is pure jank.
+  const writeDraft = useCallback(() => {
+    try {
+      sessionStorage.setItem(
+        STAGING_DRAFT_KEY,
+        JSON.stringify({ durationMs: props.durationMs, edits: persistableEdits(edits), details }),
+      );
+    } catch {
+      /* storage full or unavailable: the draft just is not restorable */
+    }
+  }, [details, edits, props.durationMs]);
   useEffect(() => {
-    const timer = setTimeout(() => {
-      try {
-        sessionStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify({ durationMs: props.durationMs, edits: persistableEdits(edits), details }),
-        );
-      } catch {
-        /* storage full or unavailable: the draft just is not restorable */
-      }
-    }, PERSIST_DEBOUNCE_MS);
+    const timer = setTimeout(writeDraft, PERSIST_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [edits, details, props.durationMs]);
+  }, [writeDraft]);
 
   const apply = useCallback((fn: (e: VideoEdits) => VideoEdits) => setHistory((h) => push(h, fn(h.present))), []);
   /** Live drags update `present` without a history entry; call `commit` on release. */
@@ -396,6 +391,10 @@ export function Staging(props: StagingProps) {
   }, []);
 
   const finish = useCallback(() => {
+    // Flush now: Save unmounts staging, which would cancel a pending debounced
+    // write and lose the last edit. The recorder clears the draft only once
+    // the upload lands, so a failed render or upload comes back to these edits.
+    writeDraft();
     props.onFinish({
       edits,
       title: details.title,
@@ -403,20 +402,11 @@ export function Staging(props: StagingProps) {
       slug: details.slug,
       thumbnailAt: details.thumbnailAt,
     });
-    try {
-      sessionStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* ignore */
-    }
-  }, [details, edits, props]);
+  }, [details, edits, props, writeDraft]);
 
   const discard = useCallback(() => {
     if (!window.confirm("Discard this take? Both recordings are thrown away.")) return;
-    try {
-      sessionStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* ignore */
-    }
+    clearStagingDraft();
     props.onDiscard();
   }, [props]);
 

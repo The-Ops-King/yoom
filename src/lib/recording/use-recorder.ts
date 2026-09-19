@@ -27,6 +27,7 @@ import {
   type RecorderState,
 } from "./recorder-machine";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "./settings";
+import { clearStagingDraft } from "./staging-draft";
 import { uploadRecording } from "./upload";
 import type {
   BubbleConfig,
@@ -863,6 +864,9 @@ export function useRecorder(): UseRecorderResult {
           );
           copiedRef.current = false;
         }
+        // Only now is the edit list safe to forget; every failure above drops
+        // back to staging, which restores the cuts from this draft.
+        clearStagingDraft();
         dispatch({ type: "UPLOAD_DONE", videoId: result.id, shareUrl: result.url });
         router.push(`/library/${result.id}${copiedRef.current ? "?new=1" : ""}`);
       } catch (err) {

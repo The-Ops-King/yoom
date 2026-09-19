@@ -4,6 +4,15 @@ export const CHUNK_SIZE_BYTES = 8 * 1024 * 1024;
 export const PROXY_CHUNK_SIZE_BYTES = 4 * 1024 * 1024;
 
 const MAX_ATTEMPTS = 5;
+/**
+ * A chunk PUT that has not answered in this long is treated as a dropped
+ * connection: abort it, ask Drive where it got to, and resume. Without it a
+ * hung socket left the upload frozen at some percent forever. Generous enough
+ * for an 8 MiB chunk on a ~1 Mbps uplink.
+ */
+const CHUNK_TIMEOUT_MS = 120_000;
+/** The offset query carries no body, so it should answer quickly. */
+const QUERY_TIMEOUT_MS = 30_000;
 
 export type UploadResult = { id: string };
 export type ProgressCallback = (percent: number) => void;
@@ -21,7 +30,10 @@ function putInit(
   contentRange: string,
   body: BodyInit | undefined,
   options: UploadOptions,
+  timeoutMs: number,
 ): [string, RequestInit] {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   if (options.proxyUrl) {
     return [
       options.proxyUrl,
@@ -33,7 +45,7 @@ function putInit(
           "Content-Type": "application/octet-stream",
         },
         body,
-        signal: options.signal,
+        signal,
       },
     ];
   }
@@ -43,7 +55,7 @@ function putInit(
       method: "PUT",
       headers: { "Content-Range": contentRange },
       body,
-      signal: options.signal,
+      signal,
     },
   ];
 }
@@ -60,7 +72,7 @@ async function queryOffset(
   total: number,
   options: UploadOptions,
 ): Promise<{ offset: number; id?: string }> {
-  const [url, init] = putInit(sessionUri, `bytes */${total}`, undefined, options);
+  const [url, init] = putInit(sessionUri, `bytes */${total}`, undefined, options, QUERY_TIMEOUT_MS);
   const response = await fetch(url, init);
 
   if (response.status === 404 || response.status === 410) {
@@ -106,6 +118,7 @@ export async function uploadToDrive(
       contentRange,
       blob.slice(offset, end),
       options,
+      CHUNK_TIMEOUT_MS,
     );
 
     let response: Response;
