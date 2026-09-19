@@ -63,9 +63,17 @@ export async function beginUpload(input: {
   mimeType: string;
   sizeBytes?: number;
   slug: string;
+  /**
+   * When the take was recorded, used to stamp the Drive filename. Defaults to
+   * now for safety, but callers should pass the same instant they give
+   * `completeUpload` — a file whose name disagrees with its title is
+   * confusing to debug, and the fast exporter's two calls will be separated
+   * by a whole render.
+   */
+  now?: Date;
   signal?: AbortSignal;
 }): Promise<{ sessionUri: string; slug?: string }> {
-  const { mimeType, sizeBytes, slug, signal } = input;
+  const { mimeType, sizeBytes, slug, now = new Date(), signal } = input;
 
   const sessionRes = await fetch("/api/upload", {
     method: "POST",
@@ -73,7 +81,7 @@ export async function beginUpload(input: {
     body: JSON.stringify({
       mimeType,
       ...(sizeBytes !== undefined ? { sizeBytes } : {}),
-      filename: filenameFor(new Date(), extensionFor(mimeType)),
+      filename: filenameFor(now, extensionFor(mimeType)),
       slug: slug || undefined,
     }),
     signal,
@@ -203,6 +211,7 @@ export async function uploadRecording(
     mimeType,
     sizeBytes: blob.size,
     slug,
+    now,
     signal,
   });
 

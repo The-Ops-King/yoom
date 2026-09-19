@@ -375,4 +375,37 @@ describe("beginUpload / completeUpload", () => {
       vi.useRealTimers();
     }
   });
+
+  it("derives the filename and the default title from the same passed-in instant", async () => {
+    const now = new Date("2026-03-04T05:06:07.000Z");
+    const expectedFilenameStamp = now.toISOString().replace(/[:.]/g, "-");
+
+    const beginFetch = vi.fn(async () => Response.json({ sessionUri: "https://s", slug: "abc12345" }));
+    vi.stubGlobal("fetch", beginFetch);
+    const { beginUpload, completeUpload } = await import("./upload");
+
+    await beginUpload({ mimeType: "video/webm", slug: "", now });
+    const beginBody = JSON.parse(
+      (beginFetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string,
+    );
+    expect(beginBody.filename).toBe(`yoom-${expectedFilenameStamp}.webm`);
+
+    const completeFetch = vi.fn(async () => Response.json({ id: "v", slug: "s", url: "u" }));
+    vi.stubGlobal("fetch", completeFetch);
+    await completeUpload({
+      driveFileId: "d",
+      durationMs: 1,
+      width: null,
+      height: null,
+      title: "",
+      description: "",
+      edits: emptyEdits,
+      thumbnail: null,
+      now,
+    });
+    const completeBody = JSON.parse(
+      (completeFetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string,
+    );
+    expect(completeBody.title).toBe(defaultRecordingTitle(now));
+  });
 });
