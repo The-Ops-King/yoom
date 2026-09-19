@@ -28,6 +28,8 @@ import {
 } from "./recorder-machine";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "./settings";
 import { clearStagingDraft } from "./staging-draft";
+import { createTake, deleteTake, finalizeTake } from "./take-store";
+import { TakeWriter } from "./take-writer";
 import { uploadRecording } from "./upload";
 import type {
   BubbleConfig,
@@ -121,6 +123,11 @@ export interface UseRecorderResult {
     clicks: ClickSample[];
     /** The take's key presses, on the same terms as `clicks`. */
     keys: KeySample[];
+    /**
+     * Id of the crash-safe copy of this take in the take store, so staging can
+     * keep its draft somewhere durable. Null when IndexedDB is unavailable.
+     */
+    takeId: string | null;
   } | null;
   getLevel: (id: "mic" | "system") => number;
   actions: {
@@ -186,6 +193,9 @@ export function useRecorder(): UseRecorderResult {
     screenUrl: string | null;
     cameraUrl: string | null;
   } | null>(null);
+  // Id of the stored copy of the take on screen, for staging's durable draft.
+  // Set when the take is finalized; null again as soon as it is thrown away.
+  const [takeId, setTakeId] = useState<string | null>(null);
 
   const router = useRouter();
 
@@ -233,6 +243,8 @@ export function useRecorder(): UseRecorderResult {
   // after a Cancel back to `idle` the user asked to stop sharing, and grabbing
   // the screen again behind their back would be rude.
   const autoAcquiredRef = useRef(false);
+  /** Crash-safe copy of the current take (see take-store.ts); null outside a take. */
+  const takeWriterRef = useRef<TakeWriter | null>(null);
 
   // ---------- boot: settings + capabilities ----------
 
@@ -334,6 +346,25 @@ export function useRecorder(): UseRecorderResult {
     if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null;
     recorderRef.current = null;
     cameraRecorderRef.current = null;
+  }, []);
+
+  /**
+   * Forget the stored copy of the current take (restart, cancel, discard,
+   * uploaded). The queued chunks are flushed first: `appendChunk` writes its
+   * record whether or not the take still exists, so a write that lands after
+   * the delete would leave an orphan chunk nothing ever collects.
+   *
+   * Never rejects — a missing IndexedDB means there was nothing to forget.
+   */
+  const discardStoredTake = useCallback(async () => {
+    const writer = takeWriterRef.current;
+    takeWriterRef.current = null;
+    setTakeId(null);
+    if (!writer) return;
+    const id = await writer.id();
+    if (!id) return;
+    await writer.flush();
+    await deleteTake(id).catch(() => undefined);
   }, []);
 
   // Unmount: tear the pipeline down.
@@ -531,13 +562,22 @@ export function useRecorder(): UseRecorderResult {
     keysRef.current = [];
 
     const mimeType = pickMimeType();
+    // A restart (⌘⇧K) begins a new take; the abandoned one is not worth keeping.
+    void discardStoredTake();
+    takeWriterRef.current = new TakeWriter(
+      createTake({ mode: current.mode, mimeType: (mimeType || "video/webm").split(";")[0] }),
+    );
+
     const recorder = new MediaRecorder(recordStream, {
       ...(mimeType ? { mimeType } : {}),
       videoBitsPerSecond: current.mode === "camera" ? 5_000_000 : 10_000_000,
     });
 
     recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
+      if (e.data.size > 0) {
+        chunksRef.current.push(e.data);
+        takeWriterRef.current?.chunk("screen", e.data);
+      }
     };
     recorder.onerror = (e) => {
       console.error("[Yoom] MediaRecorder error", e);
@@ -558,7 +598,10 @@ export function useRecorder(): UseRecorderResult {
         videoBitsPerSecond: 4_000_000,
       });
       camRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) cameraChunksRef.current.push(e.data);
+        if (e.data.size > 0) {
+          cameraChunksRef.current.push(e.data);
+          takeWriterRef.current?.chunk("camera", e.data);
+        }
       };
       camRecorder.onstart = () => {
         cameraStartRef.current = performance.now();
@@ -576,7 +619,7 @@ export function useRecorder(): UseRecorderResult {
     recorder.start(250);
     cameraRecorderRef.current?.start(250);
     recorderRef.current = recorder;
-    // `finishRecording` is a stable callback defined below.
+    // `finishRecording` is a stable callback defined below; so is `discardStoredTake`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -642,6 +685,9 @@ export function useRecorder(): UseRecorderResult {
     if (chunksRef.current.length === 0) {
       recorderRef.current = null;
       cameraRecorderRef.current = null;
+      // Nothing was captured, so the stored copy is an empty shell — drop it
+      // rather than leave it for the restore prompt to offer.
+      void discardStoredTake();
       dispatch({
         type: "RECORD_FAILED",
         error: "Recording captured no data. Please try again.",
@@ -700,6 +746,33 @@ export function useRecorder(): UseRecorderResult {
         : 0;
 
     const { width, height } = dimensionsRef.current;
+
+    // Complete the stored copy: the same description staging is about to get,
+    // so a crash from here on can be restored into staging as-is. The metadata
+    // is snapshotted NOW — the flush below can outlive the take, and a Discard
+    // in the meantime would have emptied the refs and the machine's markers.
+    const writer = takeWriterRef.current;
+    const meta = {
+      mode: stateRef.current.mode,
+      mimeType: type,
+      durationMs,
+      cameraOffsetMs,
+      width,
+      height,
+      markers: stateRef.current.markers,
+      cursor: cursorRef.current,
+      clicks: clicksRef.current,
+      keys: keysRef.current,
+    };
+    void writer
+      ?.id()
+      .then((id) => {
+        if (!id) return;
+        setTakeId(id);
+        return writer.flush().then(() => finalizeTake(id, meta));
+      })
+      .catch((err) => console.warn("[Yoom] could not finalize the stored take", err));
+
     dispatch({
       type: "BLOB_READY",
       blob,
@@ -709,7 +782,7 @@ export function useRecorder(): UseRecorderResult {
       width,
       height,
     });
-  }, []);
+  }, [discardStoredTake]);
 
   // ---------- staging object URLs ----------
 
@@ -748,12 +821,13 @@ export function useRecorder(): UseRecorderResult {
       stagingUrls
         ? {
             ...stagingUrls,
+            takeId,
             cursor: toSeconds(cursorRef.current),
             clicks: toSeconds(clicksRef.current),
             keys: toSeconds(keysRef.current),
           }
         : null,
-    [stagingUrls],
+    [stagingUrls, takeId],
   );
 
   // ---------- render + upload ----------
@@ -867,6 +941,8 @@ export function useRecorder(): UseRecorderResult {
         // Only now is the edit list safe to forget; every failure above drops
         // back to staging, which restores the cuts from this draft.
         clearStagingDraft();
+        // The bytes are safely on the server; the crash-safe copy has done its job.
+        void discardStoredTake();
         dispatch({ type: "UPLOAD_DONE", videoId: result.id, shareUrl: result.url });
         router.push(`/library/${result.id}${copiedRef.current ? "?new=1" : ""}`);
       } catch (err) {
@@ -876,7 +952,7 @@ export function useRecorder(): UseRecorderResult {
         });
       }
     },
-    [router, teardown],
+    [discardStoredTake, router, teardown],
   );
 
   /** Abort an in-flight render; the machine falls back to `staging`. */
@@ -889,6 +965,10 @@ export function useRecorder(): UseRecorderResult {
    * first so `finishRecording` never runs for a take the user abandoned.
    */
   const discardRecorder = useCallback(() => {
+    // Covers both callers — Restart and Cancel throw the take away, so its
+    // stored copy goes with it. This drops the writer ref synchronously, so the
+    // encoders' last `ondataavailable` cannot queue anything more behind it.
+    void discardStoredTake();
     chunksRef.current = [];
     cameraChunksRef.current = [];
     cursorRef.current = [];
@@ -909,11 +989,12 @@ export function useRecorder(): UseRecorderResult {
       cam.ondataavailable = null;
       cam.stop();
     }
-  }, []);
+  }, [discardStoredTake]);
 
   const discard = useCallback(() => {
     dispatch({ type: "DISCARD" });
-  }, []);
+    void discardStoredTake();
+  }, [discardStoredTake]);
 
   const reset = useCallback(() => {
     teardown();
