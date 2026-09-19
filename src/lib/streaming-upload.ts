@@ -53,6 +53,12 @@ export class StreamingUpload {
   private attempts = 0;
   /** Set if Drive completes the file before `finish` asks it to. */
   private doneId: string | null = null;
+  /**
+   * Set once `finish` has been entered, successfully or not. Latches writes
+   * shut so a late chunk from the exporter cannot append to a stream whose
+   * total has already been declared to Drive. `blob()` stays available, since
+   * a failed finish is exactly when the caller needs the whole-file fallback.
+   */
   private done = false;
   /**
    * Bytes per non-final chunk. Same rule as `uploadToDrive`: the proxy route
@@ -126,6 +132,14 @@ export class StreamingUpload {
     // Drain whole chunks first so the final PUT stays small. `>` not `>=`: a
     // remainder of exactly one chunk goes out as the final chunk instead,
     // carrying the real total.
+    //
+    // Both loops below re-read `this.sent` on EVERY pass and must keep doing
+    // so. Hoisting it into a `from` local would pin the range across a retry,
+    // and `putRange` can move `sent` backwards (a partial commit). A pinned
+    // `from` would then resend from the wrong offset, leaving a gap or a
+    // duplicate in the middle of the user's only copy of the render. This is
+    // the bug the plan's reference implementation shipped; do not "simplify"
+    // it back in.
     while (this.received - this.sent > this.chunkSize) {
       const id = await this.putRange(this.sent, this.sent + this.chunkSize, "*");
       if (id) return { id };
@@ -149,6 +163,9 @@ export class StreamingUpload {
     this.sending = this.sending.then(async () => {
       if (this.failure || this.doneId) return;
       try {
+        // Re-reads `this.sent` every pass, deliberately: see `finish`. A
+        // cached `from` local would survive a rewind and resend the wrong
+        // bytes.
         while (this.received - this.sent >= this.chunkSize) {
           const id = await this.putRange(this.sent, this.sent + this.chunkSize, "*");
           if (id) {
@@ -191,7 +208,7 @@ export class StreamingUpload {
       if (this.attempts >= MAX_ATTEMPTS) {
         throw new Error("Upload failed after repeated network errors");
       }
-      return this.committed();
+      return this.queryCommitted();
     }
 
     if (response.status === 200 || response.status === 201) {
@@ -206,11 +223,19 @@ export class StreamingUpload {
     }
 
     if (response.status === 308) {
-      // A 308 without Range means Drive committed nothing for this chunk.
+      // Deliberately NOT `reconcileTo`, which would assign `sent` even when it
+      // did not grow. `offsetFromRange` cannot tell "no Range header" from
+      // "offset 0", and the two mean different things depending on the
+      // request: after a *chunk* PUT, a missing Range means only that this
+      // chunk did not land and the session offset is unchanged, so trusting it
+      // as 0 would restart a 500 MB upload from the beginning. After a `bytes
+      // */*` *query* the same wire shape genuinely does mean "nothing
+      // committed", which is why `queryCommitted` may assign unconditionally.
       const next = offsetFromRange(response.headers.get("range"));
       if (next > this.sent) {
         this.advance(next);
       } else if ((this.attempts += 1) >= MAX_ATTEMPTS) {
+        // No progress and no explanation: stop rather than PUT forever.
         throw new Error("Upload failed: Drive never confirmed the file");
       }
       return null;
@@ -220,21 +245,21 @@ export class StreamingUpload {
     if (this.attempts >= MAX_ATTEMPTS) {
       throw new Error(`Upload failed (${response.status})`);
     }
-    return this.committed();
+    return this.queryCommitted();
   }
 
   /**
-   * Ask Drive how much it actually holds and rewind `sent` to that. Returns an
-   * id if Drive says the session is already complete, else null so the caller
-   * re-derives its next range from the (possibly rewound) offset — that is
-   * what keeps a partial commit from skipping or duplicating bytes.
+   * Ask Drive how much it actually holds and reconcile `sent` to that. Returns
+   * an id if Drive says the session is already complete, else null so the
+   * caller re-derives its next range from the corrected offset — that is what
+   * keeps a partial commit from skipping or duplicating bytes.
    *
    * The query is itself retried within the same `attempts` budget: losing the
    * connection on the recovery request is no more fatal than losing it on the
    * chunk. Every retry here increments `attempts` and nothing in this loop
    * resets it, so it is bounded by MAX_ATTEMPTS.
    */
-  private async committed(): Promise<string | null> {
+  private async queryCommitted(): Promise<string | null> {
     for (;;) {
       const [url, init] = putInit(
         this.sessionUri,
@@ -273,12 +298,21 @@ export class StreamingUpload {
         continue;
       }
 
-      return this.rewind(offsetFromRange(response.headers.get("range")));
+      return this.reconcileTo(offsetFromRange(response.headers.get("range")));
     }
   }
 
-  /** Move `sent` to Drive's committed offset, forwards or backwards. */
-  private rewind(next: number): null {
+  /**
+   * Move `sent` to the offset an unbounded-range query reported. This goes
+   * forwards as well as back: Drive may have committed more than we
+   * thought (a response we never saw) or less (a partial commit).
+   */
+  private reconcileTo(next: number): null {
+    // Reset the budget ONLY on real forward progress. Resetting it
+    // unconditionally — e.g. when Drive re-reports the offset it gave us last
+    // time — would let a wedged session retry forever and defeat MAX_ATTEMPTS
+    // entirely. `attempts` counts consecutive requests that achieved nothing,
+    // not requests since the last error.
     if (next > this.sent) this.attempts = 0;
     this.sent = next;
     this.options.onProgress?.(this.sent);
