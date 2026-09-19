@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CHUNK_SIZE_BYTES } from "@/lib/upload-client";
+import {
+  CHUNK_SIZE_BYTES,
+  MAX_ATTEMPTS,
+  PROXY_CHUNK_SIZE_BYTES,
+} from "@/lib/upload-client";
 import { StreamingUpload } from "@/lib/streaming-upload";
 
 const SESSION = "https://www.googleapis.com/upload/drive/v3/files?upload_id=s";
@@ -129,17 +133,35 @@ describe("StreamingUpload", () => {
 
   // --- finish() cannot spin forever, nor claim success without an id ---
 
-  it("gives up instead of looping when Drive keeps answering 308", async () => {
+  it("gives up when Drive keeps answering 308 with a Range that never advances", async () => {
     let calls = 0;
+    const seen: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => {
       calls++;
-      const end = Number(/bytes \d+-(\d+)/.exec(rangeOf(init)) ?? [, , "-1"][2]);
-      return new Response(null, { status: 308, headers: { Range: `bytes=0-${end}` } });
+      seen.push(rangeOf(init));
+      // Drive is stuck: it always claims the same 256 bytes, no matter what we send.
+      return new Response(null, { status: 308, headers: { Range: "bytes=0-255" } });
     }));
     const up = new StreamingUpload(SESSION);
     await up.write(bytes(500), 0);
-    await expect(up.finish()).rejects.toThrow(/never confirmed|stalled/i);
-    expect(calls).toBeLessThanOrEqual(10);
+    await expect(up.finish()).rejects.toThrow(/never confirmed/i);
+    // One request made progress (0 -> 256), then MAX_ATTEMPTS that did not.
+    expect(calls).toBe(6);
+    expect(seen[0]).toBe("bytes 0-499/500");
+    expect(seen[1]).toBe("bytes 256-499/500");
+    expect(seen.at(-1)).toBe("bytes 256-499/500");
+  });
+
+  it("gives up when Drive keeps answering 308 with no Range at all", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      calls++;
+      return new Response(null, { status: 308 }); // committed nothing, ever
+    }));
+    const up = new StreamingUpload(SESSION);
+    await up.write(bytes(500), 0);
+    await expect(up.finish()).rejects.toThrow(/never confirmed/i);
+    expect(calls).toBe(5); // MAX_ATTEMPTS, no progress ever made
   });
 
   it("refuses a 200 that carries no Drive file id", async () => {
@@ -241,6 +263,131 @@ describe("StreamingUpload", () => {
     release();
     await writes;
     expect(settled).toBe(true);
+  });
+
+  // --- chunk sizing ---
+
+  it("uses the smaller proxy chunk size when routing through the proxy", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      expect(url).toBe("/api/upload/chunk");
+      const headers = init.headers as Record<string, string>;
+      expect(headers["x-upload-session-uri"]).toBe(SESSION);
+      const r = headers["x-upload-content-range"];
+      seen.push(r);
+      if (r.endsWith("/*")) {
+        const end = Number(/bytes \d+-(\d+)/.exec(r)![1]);
+        return new Response(null, { status: 308, headers: { Range: `bytes=0-${end}` } });
+      }
+      return Response.json({ id: "drive-proxy" }, { status: 200 });
+    }));
+    const up = new StreamingUpload(SESSION, { proxyUrl: "/api/upload/chunk" });
+    const total = PROXY_CHUNK_SIZE_BYTES + 10;
+    await up.write(bytes(total), 0);
+    await expect(up.finish()).resolves.toEqual({ id: "drive-proxy" });
+    expect(seen).toEqual([
+      `bytes 0-${PROXY_CHUNK_SIZE_BYTES - 1}/*`,
+      `bytes ${PROXY_CHUNK_SIZE_BYTES}-${total - 1}/${total}`,
+    ]);
+    // Still a multiple of 256 KiB, and under Vercel's 4.5 MB body cap.
+    expect(PROXY_CHUNK_SIZE_BYTES % (256 * 1024)).toBe(0);
+    expect(PROXY_CHUNK_SIZE_BYTES).toBeLessThan(4.5 * 1000 * 1000);
+  });
+
+  it("honours an explicit chunkSize", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => {
+      const r = rangeOf(init);
+      seen.push(r);
+      if (r.endsWith("/*")) {
+        const end = Number(/bytes \d+-(\d+)/.exec(r)![1]);
+        return new Response(null, { status: 308, headers: { Range: `bytes=0-${end}` } });
+      }
+      return Response.json({ id: "drive-7" }, { status: 200 });
+    }));
+    const chunkSize = 256 * 1024;
+    const up = new StreamingUpload(SESSION, { chunkSize });
+    await up.write(bytes(2 * chunkSize + 5), 0);
+    await expect(up.finish()).resolves.toEqual({ id: "drive-7" });
+    expect(seen).toEqual([
+      `bytes 0-${chunkSize - 1}/*`,
+      `bytes ${chunkSize}-${2 * chunkSize - 1}/*`,
+      `bytes ${2 * chunkSize}-${2 * chunkSize + 4}/${2 * chunkSize + 5}`,
+    ]);
+  });
+
+  it("refuses a chunkSize that Drive would reject", async () => {
+    expect(() => new StreamingUpload(SESSION, { chunkSize: 1000 })).toThrow(
+      /multiple of 256 KiB/,
+    );
+    expect(() => new StreamingUpload(SESSION, { chunkSize: 0 })).toThrow(
+      /multiple of 256 KiB/,
+    );
+  });
+
+  // --- the offset query is retried too ---
+
+  it("retries the offset query after a transient network error", async () => {
+    const seen: string[] = [];
+    let queries = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => {
+      const r = rangeOf(init);
+      seen.push(r);
+      if (r === "bytes */*") {
+        queries++;
+        if (queries === 1) throw new TypeError("query dropped");
+        return new Response(null, { status: 308, headers: { Range: "bytes=0-255" } });
+      }
+      if (seen.filter((s) => s !== "bytes */*").length === 1) {
+        return new Response(null, { status: 503 }); // pushes us into the query
+      }
+      return Response.json({ id: "drive-8" }, { status: 201 });
+    }));
+    const up = new StreamingUpload(SESSION);
+    await up.write(bytes(500), 0);
+    await expect(up.finish()).resolves.toEqual({ id: "drive-8" });
+    expect(seen).toEqual([
+      "bytes 0-499/500",
+      "bytes */*", // throws
+      "bytes */*", // retried, reports 256 committed
+      "bytes 256-499/500",
+    ]);
+  });
+
+  it("gives up if the offset query keeps failing", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => {
+      calls++;
+      if (rangeOf(init) === "bytes */*") throw new TypeError("query down");
+      return new Response(null, { status: 503 });
+    }));
+    const up = new StreamingUpload(SESSION);
+    await up.write(bytes(500), 0);
+    await expect(up.finish()).rejects.toThrow(/repeated network errors/);
+    expect(calls).toBe(MAX_ATTEMPTS);
+  });
+
+  it("gives up if the offset query keeps returning an error status", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => {
+      calls++;
+      if (rangeOf(init) === "bytes */*") return new Response(null, { status: 500 });
+      return new Response(null, { status: 503 });
+    }));
+    const up = new StreamingUpload(SESSION);
+    await up.write(bytes(500), 0);
+    await expect(up.finish()).rejects.toThrow(/while resuming \(500\)/);
+    expect(calls).toBe(MAX_ATTEMPTS);
+  });
+
+  it("treats an expired session during the offset query as fatal", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => {
+      if (rangeOf(init) === "bytes */*") return new Response(null, { status: 404 });
+      return new Response(null, { status: 503 });
+    }));
+    const up = new StreamingUpload(SESSION);
+    await up.write(bytes(500), 0);
+    await expect(up.finish()).rejects.toThrow(/session expired/i);
   });
 
   it("reports progress as Drive acknowledges bytes", async () => {

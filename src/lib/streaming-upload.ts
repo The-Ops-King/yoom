@@ -2,6 +2,7 @@ import {
   CHUNK_SIZE_BYTES,
   CHUNK_TIMEOUT_MS,
   MAX_ATTEMPTS,
+  PROXY_CHUNK_SIZE_BYTES,
   QUERY_TIMEOUT_MS,
   offsetFromRange,
   putInit,
@@ -10,6 +11,9 @@ import {
 
 /** Unsent bytes allowed before `write` makes the encoder wait. */
 const MAX_BUFFERED_BYTES = 64 * 1024 * 1024;
+
+/** Drive only commits non-final chunks in whole multiples of this. */
+const CHUNK_GRANULARITY_BYTES = 256 * 1024;
 
 export type StreamingUploadOptions = UploadOptions & {
   /** Called with the number of bytes Drive has acknowledged. */
@@ -50,11 +54,25 @@ export class StreamingUpload {
   /** Set if Drive completes the file before `finish` asks it to. */
   private doneId: string | null = null;
   private done = false;
+  /**
+   * Bytes per non-final chunk. Same rule as `uploadToDrive`: the proxy route
+   * has to stay under Vercel's 4.5 MB body cap, a direct Drive PUT does not.
+   */
+  private readonly chunkSize: number;
 
   constructor(
     private readonly sessionUri: string,
     private readonly options: StreamingUploadOptions = {},
-  ) {}
+  ) {
+    this.chunkSize =
+      options.chunkSize ??
+      (options.proxyUrl ? PROXY_CHUNK_SIZE_BYTES : CHUNK_SIZE_BYTES);
+    if (this.chunkSize <= 0 || this.chunkSize % CHUNK_GRANULARITY_BYTES !== 0) {
+      // Drive rejects a non-final chunk that is not a whole multiple of
+      // 256 KiB, and a rejected chunk mid-stream costs the whole render.
+      throw new Error("Upload chunk size must be a positive multiple of 256 KiB");
+    }
+  }
 
   /** Bytes Drive has acknowledged so far. */
   get sentBytes(): number {
@@ -83,7 +101,7 @@ export class StreamingUpload {
     this.received += data.byteLength;
 
     if (this.options.autoSend === false) return;
-    if (this.received - this.sent >= CHUNK_SIZE_BYTES) this.kick();
+    if (this.received - this.sent >= this.chunkSize) this.kick();
     if (this.received - this.sent > MAX_BUFFERED_BYTES) await this.sending;
     if (this.failure) throw this.failure;
   }
@@ -108,8 +126,8 @@ export class StreamingUpload {
     // Drain whole chunks first so the final PUT stays small. `>` not `>=`: a
     // remainder of exactly one chunk goes out as the final chunk instead,
     // carrying the real total.
-    while (this.received - this.sent > CHUNK_SIZE_BYTES) {
-      const id = await this.putRange(this.sent, this.sent + CHUNK_SIZE_BYTES, "*");
+    while (this.received - this.sent > this.chunkSize) {
+      const id = await this.putRange(this.sent, this.sent + this.chunkSize, "*");
       if (id) return { id };
     }
 
@@ -131,8 +149,8 @@ export class StreamingUpload {
     this.sending = this.sending.then(async () => {
       if (this.failure || this.doneId) return;
       try {
-        while (this.received - this.sent >= CHUNK_SIZE_BYTES) {
-          const id = await this.putRange(this.sent, this.sent + CHUNK_SIZE_BYTES, "*");
+        while (this.received - this.sent >= this.chunkSize) {
+          const id = await this.putRange(this.sent, this.sent + this.chunkSize, "*");
           if (id) {
             this.doneId = id;
             return;
@@ -210,31 +228,57 @@ export class StreamingUpload {
    * id if Drive says the session is already complete, else null so the caller
    * re-derives its next range from the (possibly rewound) offset — that is
    * what keeps a partial commit from skipping or duplicating bytes.
+   *
+   * The query is itself retried within the same `attempts` budget: losing the
+   * connection on the recovery request is no more fatal than losing it on the
+   * chunk. Every retry here increments `attempts` and nothing in this loop
+   * resets it, so it is bounded by MAX_ATTEMPTS.
    */
   private async committed(): Promise<string | null> {
-    const [url, init] = putInit(
-      this.sessionUri,
-      "bytes */*",
-      undefined,
-      this.options,
-      QUERY_TIMEOUT_MS,
-    );
-    const response = await fetch(url, init);
+    for (;;) {
+      const [url, init] = putInit(
+        this.sessionUri,
+        "bytes */*",
+        undefined,
+        this.options,
+        QUERY_TIMEOUT_MS,
+      );
 
-    if (response.status === 404 || response.status === 410) {
-      throw new Error("Upload session expired. Please try recording again.");
-    }
-    if (response.status === 200 || response.status === 201) {
-      const json = (await response.json()) as { id?: string };
-      if (!json.id) throw new Error("Upload finished without a Drive file id");
-      this.advance(this.received);
-      return json.id;
-    }
-    if (response.status !== 308) {
-      throw new Error(`Upload failed while resuming (${response.status})`);
-    }
+      let response: Response;
+      try {
+        response = await fetch(url, init);
+      } catch (error) {
+        if (this.options.signal?.aborted) throw error;
+        this.attempts += 1;
+        if (this.attempts >= MAX_ATTEMPTS) {
+          throw new Error("Upload failed after repeated network errors");
+        }
+        continue;
+      }
 
-    const next = offsetFromRange(response.headers.get("range"));
+      if (response.status === 404 || response.status === 410) {
+        throw new Error("Upload session expired. Please try recording again.");
+      }
+      if (response.status === 200 || response.status === 201) {
+        const json = (await response.json()) as { id?: string };
+        if (!json.id) throw new Error("Upload finished without a Drive file id");
+        this.advance(this.received);
+        return json.id;
+      }
+      if (response.status !== 308) {
+        this.attempts += 1;
+        if (this.attempts >= MAX_ATTEMPTS) {
+          throw new Error(`Upload failed while resuming (${response.status})`);
+        }
+        continue;
+      }
+
+      return this.rewind(offsetFromRange(response.headers.get("range")));
+    }
+  }
+
+  /** Move `sent` to Drive's committed offset, forwards or backwards. */
+  private rewind(next: number): null {
     if (next > this.sent) this.attempts = 0;
     this.sent = next;
     this.options.onProgress?.(this.sent);
