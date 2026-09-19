@@ -152,6 +152,43 @@ describe("StreamingUpload", () => {
     expect(seen.at(-1)).toBe("bytes 256-499/500");
   });
 
+  it("resumes from a Range that moves backwards rather than leaving a gap", async () => {
+    // Believed unreachable (a session's committed offset is monotonically
+    // non-decreasing), but handled in the safe direction on purpose: resuming
+    // above what Drive holds would silently corrupt the video.
+    const seen: string[] = [];
+    const committed = [299, 99]; // second 308 reports LESS than the first
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => {
+      seen.push(rangeOf(init));
+      const end = committed.shift();
+      if (end === undefined) return Response.json({ id: "drive-9" }, { status: 200 });
+      return new Response(null, { status: 308, headers: { Range: `bytes=0-${end}` } });
+    }));
+    const up = new StreamingUpload(SESSION);
+    await up.write(bytes(500), 0);
+    await expect(up.finish()).resolves.toEqual({ id: "drive-9" });
+    expect(seen).toEqual([
+      "bytes 0-499/500",
+      "bytes 300-499/500", // Drive acked 0-299
+      "bytes 100-499/500", // Drive walked back to 0-99; resend from ITS number
+    ]);
+  });
+
+  it("still terminates if Drive reports a decreasing offset forever", async () => {
+    let calls = 0;
+    let end = 400;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      calls++;
+      end = Math.max(end - 100, 0);
+      return new Response(null, { status: 308, headers: { Range: `bytes=0-${end}` } });
+    }));
+    const up = new StreamingUpload(SESSION);
+    await up.write(bytes(500), 0);
+    await expect(up.finish()).rejects.toThrow(/never confirmed/i);
+    // First response advances 0 -> 301, then every later one walks back.
+    expect(calls).toBe(6);
+  });
+
   it("gives up when Drive keeps answering 308 with no Range at all", async () => {
     let calls = 0;
     vi.stubGlobal("fetch", vi.fn(async () => {

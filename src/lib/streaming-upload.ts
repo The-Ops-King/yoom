@@ -223,22 +223,38 @@ export class StreamingUpload {
     }
 
     if (response.status === 308) {
-      // Deliberately NOT `reconcileTo`, which would assign `sent` even when it
-      // did not grow. `offsetFromRange` cannot tell "no Range header" from
-      // "offset 0", and the two mean different things depending on the
-      // request: after a *chunk* PUT, a missing Range means only that this
-      // chunk did not land and the session offset is unchanged, so trusting it
-      // as 0 would restart a 500 MB upload from the beginning. After a `bytes
-      // */*` *query* the same wire shape genuinely does mean "nothing
-      // committed", which is why `queryCommitted` may assign unconditionally.
-      const next = offsetFromRange(response.headers.get("range"));
-      if (next > this.sent) {
-        this.advance(next);
-      } else if ((this.attempts += 1) >= MAX_ATTEMPTS) {
-        // No progress and no explanation: stop rather than PUT forever.
+      // Branch on whether Drive sent a Range at all, NOT on whether the offset
+      // grew. `offsetFromRange` cannot tell "no Range header" from "offset 0",
+      // and after a *chunk* PUT those mean opposite things: a missing Range
+      // means only that this chunk did not land and the session offset is
+      // unchanged, so reading it as 0 would restart a 500 MB upload from the
+      // beginning. (After a `bytes */*` query the same wire shape genuinely
+      // does mean "nothing committed", which is why `queryCommitted` may
+      // assign unconditionally.)
+      const header = response.headers.get("range");
+      if (header === null) {
+        if ((this.attempts += 1) >= MAX_ATTEMPTS) {
+          // No progress and no explanation: stop rather than PUT forever.
+          throw new Error("Upload failed: Drive never confirmed the file");
+        }
+        return null;
+      }
+
+      // Drive sent a number, so believe it even if it moves us BACKWARDS.
+      // That should be unreachable — a session's committed offset is
+      // monotonically non-decreasing — but the two failure modes are wildly
+      // asymmetric. Resuming below what Drive holds costs a re-send; resuming
+      // above it leaves a gap in the middle of the file and produces a corrupt
+      // video that uploads "successfully". Always err downwards. (An
+      // unparseable Range degrades to 0 for the same reason: wasteful, never a
+      // gap.)
+      const next = offsetFromRange(header);
+      if (next <= this.sent && (this.attempts += 1) >= MAX_ATTEMPTS) {
+        // A server reporting a stuck or decreasing offset forever still has to
+        // terminate, so the budget is only reset by real forward progress.
         throw new Error("Upload failed: Drive never confirmed the file");
       }
-      return null;
+      return this.reconcileTo(next);
     }
 
     this.attempts += 1;
