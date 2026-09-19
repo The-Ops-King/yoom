@@ -97,6 +97,7 @@ describe("take store", () => {
 
   it("lists unfinished and finalized takes, newest first, and keeps the draft", async () => {
     const a = await createTake({ mode: "screen", mimeType: "video/webm" }, 1_000);
+    await appendChunk(a, "screen", 0, new Blob(["a"]));
     const b = await createTake({ mode: "screen", mimeType: "video/webm" }, 2_000);
     await appendChunk(b, "screen", 0, new Blob(["zz"]));
     await saveTakeDraft(b, { durationMs: 1234, edits: { version: 1 }, details: { title: "Hi" } });
@@ -162,6 +163,7 @@ describe("take store", () => {
 
   it("prunes takes older than the cutoff, leaving newer takes and their chunks intact", async () => {
     const id = await createTake({ mode: "screen", mimeType: "video/webm" }, 1_000);
+    await appendChunk(id, "screen", 0, new Blob(["old"]));
     const survivorId = await createTake({ mode: "screen", mimeType: "video/webm" }, 10_000);
     await appendChunk(survivorId, "screen", 0, new Blob(["keep"]));
 
@@ -190,6 +192,40 @@ describe("take store", () => {
     await expect(finalizeTake("nope", META)).rejects.toThrow();
     // the chunk from the rejected appendChunk didn't get left behind either
     expect(await rawChunkOwners()).not.toContain("nope");
+  });
+
+  it("omits a zero-byte take (e.g. a crash before the first chunk landed) from listTakes", async () => {
+    const empty = await createTake({ mode: "screen", mimeType: "video/webm" });
+    const real = await createTake({ mode: "screen", mimeType: "video/webm" });
+    await appendChunk(real, "screen", 0, new Blob(["x"]));
+
+    const list = await listTakes();
+
+    expect(list.map((t) => t.id)).toEqual([real]);
+    expect(list.map((t) => t.id)).not.toContain(empty);
+  });
+
+  it("keeps a truncated take's other tracks but reports the contiguous duration, not the recorder's", async () => {
+    const id = await createTake({ mode: "screen+camera", mimeType: "video/webm" });
+    await appendChunk(id, "screen", 0, new Blob(["0"]));
+    await appendChunk(id, "screen", 1, new Blob(["1"]));
+    // seq 2 never arrives — the recorder still thinks it captured META's full 1234 ms.
+    await finalizeTake(id, META, { truncated: true });
+
+    const take = await loadTake(id);
+
+    expect(take!.finalized).toBe(true);
+    expect(take!.meta.durationMs).toBe(2 * CHUNK_MS); // 2 contiguous chunks, not META.durationMs
+    // every other track from `meta` survives untouched — no fallback to an empty estimatedMeta
+    expect(take!.meta.mode).toBe(META.mode);
+    expect(take!.meta.mimeType).toBe(META.mimeType);
+    expect(take!.meta.cameraOffsetMs).toBe(META.cameraOffsetMs);
+    expect(take!.meta.width).toBe(META.width);
+    expect(take!.meta.height).toBe(META.height);
+    expect(take!.meta.markers).toEqual(META.markers);
+    expect(take!.meta.cursor).toEqual(META.cursor);
+    expect(take!.meta.clicks).toEqual(META.clicks);
+    expect(take!.meta.keys).toEqual(META.keys);
   });
 
   it("returns empty results when IndexedDB is unavailable", async () => {

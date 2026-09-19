@@ -45,6 +45,15 @@ type TakeRecord = {
   chunks: number; // high-water mark of screen `seq + 1` seen so far (not a running count), for the duration estimate
   bytes: number;
   meta: TakeMeta | null; // set when the take lands in staging
+  /**
+   * Set by `finalizeTake(id, meta, { truncated: true })` when a storage
+   * failure cut the take short mid-recording. `meta.durationMs` is then the
+   * length the recorder THOUGHT it captured, not what's actually on disk —
+   * `loadTake` overrides just that field with the contiguous-chunk estimate,
+   * keeping every other track (cursor, clicks, keys, markers, camera offset)
+   * from `meta` rather than falling back to an empty `estimatedMeta`.
+   */
+  truncated: boolean;
   draft: TakeDraft | null;
 };
 type ChunkRecord = { key: [string, FileKind, number]; data: Blob };
@@ -132,7 +141,7 @@ export async function createTake(
   const db = await open();
   const id = `${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const tx = db.transaction(TAKES, "readwrite");
-  const rec: TakeRecord = { id, createdAt: now, ...init, chunks: 0, bytes: 0, meta: null, draft: null };
+  const rec: TakeRecord = { id, createdAt: now, ...init, chunks: 0, bytes: 0, meta: null, truncated: false, draft: null };
   tx.objectStore(TAKES).put(rec);
   await done(tx);
   return id;
@@ -212,8 +221,25 @@ function patch(id: string, fn: (r: TakeRecord) => void): Promise<void> {
   );
 }
 
-export const finalizeTake = (id: string, meta: TakeMeta) => patch(id, (r) => { r.meta = meta; });
+/**
+ * `opts.truncated` marks a take that landed in staging but was cut short by
+ * a storage failure mid-recording: `meta` is real (every track the recorder
+ * captured), but its `durationMs` reflects what the recorder THOUGHT it
+ * wrote, not what's actually on disk. `loadTake` corrects just that field
+ * once it knows how many chunks are actually contiguous. `finalized` stays
+ * true either way — the take has real metadata, unlike an unfinalized one.
+ */
+export const finalizeTake = (id: string, meta: TakeMeta, opts?: { truncated?: boolean }) =>
+  patch(id, (r) => {
+    r.meta = meta;
+    r.truncated = opts?.truncated ?? false;
+  });
 export const saveTakeDraft = (id: string, draft: TakeDraft) => patch(id, (r) => { r.draft = draft; });
+
+/** The playable length of `chunkCount` contiguous 250 ms chunks. */
+function estimatedDurationMs(chunkCount: number): number {
+  return chunkCount * CHUNK_MS;
+}
 
 /**
  * `chunkCount` defaults to the take's high-water mark (`r.chunks`) — fine for
@@ -226,7 +252,7 @@ function estimatedMeta(r: TakeRecord, chunkCount = r.chunks): TakeMeta {
   return {
     mode: r.mode,
     mimeType: r.mimeType,
-    durationMs: chunkCount * CHUNK_MS,
+    durationMs: estimatedDurationMs(chunkCount),
     cameraOffsetMs: 0,
     width: null,
     height: null,
@@ -237,12 +263,22 @@ function estimatedMeta(r: TakeRecord, chunkCount = r.chunks): TakeMeta {
   };
 }
 
-/** Newest first. Never throws: a browser without IndexedDB just has no takes. */
+/**
+ * Newest first. Never throws: a browser without IndexedDB just has no takes.
+ *
+ * Omits a take with `bytes === 0`: a crash, or a throw from
+ * `new MediaRecorder(...)`/`recorder.start(250)`, can leave a take record
+ * with no chunks ever written. `loadTake` returns null for it (nothing to
+ * play), so it can only ever show as a phantom, unrestorable row — and while
+ * it's pending, the desktop shell holds off auto-sharing the screen on every
+ * launch.
+ */
 export async function listTakes(): Promise<TakeSummary[]> {
   try {
     const db = await open();
     const all = await result(db.transaction(TAKES).objectStore(TAKES).getAll() as IDBRequest<TakeRecord[]>);
     return all
+      .filter((r) => r.bytes > 0)
       .map((r) => ({
         id: r.id,
         createdAt: r.createdAt,
@@ -279,11 +315,16 @@ export async function loadTake(id: string): Promise<StoredTake | null> {
   const screen = await chunksOf(db, id, "screen");
   if (screen.length === 0) return null;
   const camera = await chunksOf(db, id, "camera");
+  const meta = rec.meta
+    ? rec.truncated
+      ? { ...rec.meta, durationMs: estimatedDurationMs(screen.length) }
+      : rec.meta
+    : estimatedMeta(rec, screen.length);
   return {
     id,
     screen: new Blob(screen, { type: rec.mimeType }),
     camera: camera.length ? new Blob(camera, { type: rec.mimeType }) : null,
-    meta: rec.meta ?? estimatedMeta(rec, screen.length),
+    meta,
     draft: rec.draft,
     finalized: !!rec.meta,
   };
