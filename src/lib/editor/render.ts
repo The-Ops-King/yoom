@@ -507,6 +507,12 @@ function drawOverlay(
 /**
  * Draw one frame at source time `t` into a `W`×`H` context. Pure with respect
  * to the inputs: the preview and the export both call exactly this.
+ *
+ * KEEP THIS SYNCHRONOUS. The fast exporter passes decoded frames straight from
+ * `VideoSample.toCanvasImageSource()`, which may close itself on the next
+ * microtask; an `await` anywhere in here would hand `drawImage` a closed frame
+ * and export black. Anything that needs to be loaded (overlay images,
+ * backgrounds) is preloaded by the callers before the first frame.
  */
 export function drawFrame(ctx: CanvasRenderingContext2D, inputs: RenderInputs, t: number, W: number, H: number): void {
   const src = primary(inputs);

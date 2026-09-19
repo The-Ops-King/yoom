@@ -19,6 +19,7 @@ import type { VideoEdits } from "@/lib/edits";
 import { CHUNK_SIZE_BYTES } from "@/lib/upload-client";
 import { editedToSourceIn, keptRanges, type Range } from "../cuts";
 import {
+  abortError,
   buildRenderInputs,
   loadBackground,
   releaseBackground,
@@ -52,12 +53,13 @@ const FPS = 30;
 /** Audio is kept this far ahead of video so the muxer can interleave without buffering. */
 const AUDIO_LEAD_S = 1;
 
-/** Thumbnail JPEG quality — the same as the legacy exporter's, so takes look alike. */
+/**
+ * Thumbnail JPEG quality. Deliberately the same number the legacy exporter
+ * passes (`export.ts`, both `canvas.toBlob(..., "image/jpeg", 0.8)` calls), so
+ * a take's poster looks identical whichever exporter produced it. Change both
+ * or neither.
+ */
 const THUMBNAIL_QUALITY = 0.8;
-
-function abortError(): DOMException {
-  return new DOMException("Aborted", "AbortError");
-}
 
 /**
  * Source second at an edited second, clamped to the last range's end. An
@@ -115,8 +117,20 @@ function layerOf(sample: VideoSample): VideoLayer {
  * sees the file's bytes strictly in order and can stream them to an upload
  * that is still running while the render is.
  *
- * Throws `FastExportUnsupported` when this machine has no WebCodecs or no
- * encodable codec pair; the caller then falls back to `renderToBlob`.
+ * The pipeline, in the order the body runs it:
+ *
+ *   1. open the source blobs and pull the tracks this render reads;
+ *   2. probe that each of those tracks can actually be DECODED here;
+ *   3. work out the output size, load the background, build the canvas;
+ *   4. build the fragmented output and its video/audio tracks, then `start()`;
+ *   5. the frame loop — decode, draw, encode, with audio pumped a second ahead
+ *      of video so the muxer never has to buffer one track waiting on the other;
+ *   6. flush the audio tail, `finalize()`, report 100;
+ *   7. tear down in the `finally`, in the order documented there.
+ *
+ * Throws `FastExportUnsupported` when this machine has no WebCodecs, cannot
+ * decode the take, or has no encodable codec pair; the caller then falls back
+ * to `renderToBlob`.
  */
 export async function renderFast(
   sources: RenderSources,
@@ -149,6 +163,7 @@ export async function renderFast(
   let lastCamera: VideoSample | null = null;
 
   try {
+    // --- 1. Open the sources and pull the tracks this render reads ---------
     const primaryIn = open(primaryBlob);
     const video = await primaryIn.getPrimaryVideoTrack();
     if (!video) throw new Error("The recording has no video track we can render.");
@@ -158,6 +173,7 @@ export async function renderFast(
         ? await open(sources.camera).getPrimaryVideoTrack()
         : null;
 
+    // --- 2. Can this machine decode it, and encode what we'd write? -------
     // Only the tracks this render actually reads: a silent take has no audio
     // track to probe, and a screen-only take no camera one.
     await requireDecodable(video, "video");
@@ -171,6 +187,7 @@ export async function renderFast(
     const ranges = keptRanges(edits, sources.durationMs / 1000);
     if (!ranges.length) throw new Error("Everything is cut. Keep at least part of the take.");
 
+    // --- 3. The drawing surface everything is rendered through ------------
     background = await loadBackground(edits);
     // Image overlays decode asynchronously; drawFrame is sync and skips images
     // that are not ready, so decode them all before the first frame.
@@ -185,14 +202,22 @@ export async function renderFast(
     const frames = frameCount(ranges, fps);
     const thumbAt = thumbnailFrame(opts.thumbnailAt, frames, fps);
 
+    // --- 4. The fragmented output and its tracks --------------------------
     let size = 0;
     output = new Output({
       format: new Mp4OutputFormat({ fastStart: "fragmented" }),
       target: new StreamTarget(
         new WritableStream<StreamTargetChunk>({
           write: async (chunk) => {
-            // Fragmented output is written monotonically, so the furthest write
-            // that has landed is the file's length so far.
+            // HAZARD — the whole streaming upload rests on this: `fastStart:
+            // "fragmented"` is documented to write monotonically, so positions
+            // only ever move forward and `onChunk` can append straight into a
+            // Drive session it can never seek back in. mediabunny is pinned as
+            // `^1.58.1`, so a minor bump lands here on its own. If an upgrade
+            // ever makes fragmented output seek backwards, this appends the
+            // rewritten bytes at the END of the file instead: the upload does
+            // not fail, it SILENTLY corrupts. Re-verify write ordering before
+            // bumping the dependency.
             size = Math.max(size, chunk.position + chunk.data.byteLength);
             await opts.onChunk(chunk.data, chunk.position);
           },
@@ -219,10 +244,11 @@ export async function renderFast(
     }
     await output.start();
 
+    // --- 5. The frame loop ------------------------------------------------
     /** Source seconds of decoded audio already handed to the assembler. */
     let audioSourceEdge = 0;
     /** Edited audio frames already handed to the encoder. */
-    let audioDrained = 0;
+    let audioDrainedFrames = 0;
     const pumpAudio = async (untilEditedS: number) => {
       if (!assembler || !audioBuffers || !audioOut) return;
       // Decoded audio is pulled in stream order, and edited time increases with
@@ -255,7 +281,7 @@ export async function renderFast(
       );
       // Buffers are placed back to back, so this must stay contiguous.
       await audioOut.add(encoded);
-      audioDrained += block.frames;
+      audioDrainedFrames += block.frames;
     };
 
     const times = [...sourceTimes(ranges, fps)];
@@ -269,14 +295,20 @@ export async function renderFast(
       ? new VideoSampleSink(cameraTrack).samplesAtTimestamps(cameraTimes(times, offsetS))
       : null;
 
+    // The take's shape does not change frame to frame; decide it once.
+    const cameraOnly = sources.mode === "camera";
+
     let thumbnail: Blob | null = null;
-    let reported = -1;
+    let reportedPct = -1;
     for (let k = 0; k < frames; k++) {
       if (opts.signal.aborted) throw abortError();
       const editedT = k / fps;
       // Keep the audio track ahead of the video one: whichever runs behind makes
-      // the muxer hold the other's packets in memory until it catches up.
-      if (audioOut && audioDrained / sampleRate < editedT + AUDIO_LEAD_S / 2) {
+      // the muxer hold the other's packets in memory until it catches up. The
+      // half is hysteresis — pump only once audio has fallen HALF a lead behind,
+      // then refill a whole lead, so this batches into a decode every ~15 frames
+      // instead of touching the audio decoder on every one.
+      if (audioOut && audioDrainedFrames / sampleRate < editedT + AUDIO_LEAD_S / 2) {
         await pumpAudio(editedT + AUDIO_LEAD_S);
       }
 
@@ -292,8 +324,8 @@ export async function renderFast(
       // `toCanvasImageSource()` may hand back a frame that closes itself on the
       // next microtask, so an await in between would draw a closed frame.
       const primaryLayer = lastScreen ? layerOf(lastScreen) : null;
-      renderInputs.screen = sources.mode === "camera" ? null : primaryLayer;
-      renderInputs.camera = sources.mode === "camera"
+      renderInputs.screen = cameraOnly ? null : primaryLayer;
+      renderInputs.camera = cameraOnly
         ? primaryLayer
         : lastCamera ? layerOf(lastCamera) : null;
       drawFrame(ctx, renderInputs, times[k], width, height);
@@ -307,9 +339,10 @@ export async function renderFast(
       // 100 is the caller's cue that the file is complete; hold it back to 99
       // until finalize has actually run.
       const pct = Math.min(99, Math.floor(((k + 1) / frames) * 100));
-      if (pct !== reported) { reported = pct; opts.onProgress(pct); }
+      if (pct !== reportedPct) { reportedPct = pct; opts.onProgress(pct); }
     }
 
+    // --- 6. Flush the audio tail and close the file -----------------------
     // Anything the lead never reached — the last second of audio, and the tail
     // past the last video frame.
     await pumpAudio(Infinity);
@@ -322,15 +355,23 @@ export async function renderFast(
     if (output && output.state !== "finalized") await output.cancel().catch(() => undefined);
     throw err;
   } finally {
+    // --- 7. Teardown. THE ORDER BELOW IS MANDATORY, innermost first. ------
+    // Step 1 — the two frames we still hold. Nobody else will close these.
     lastScreen?.close();
     lastCamera?.close();
     lastScreen = null;
     lastCamera = null;
-    // `return()` stops each pump and closes every sample still queued behind it.
-    // Without it an abort leaves decoded frames alive and the decoder wedged.
+    // Step 2 — `return()` stops each pump and closes every sample still queued
+    // behind it. Without it an abort leaves decoded frames alive and the
+    // decoder wedged after a few hundred of them.
     await screenSamples?.return().catch(() => undefined);
     await cameraSamples?.return().catch(() => undefined);
     await audioBuffers?.return().catch(() => undefined);
+    // Step 3 — ONLY NOW dispose the Inputs. Disposing one tears out the
+    // demuxer its generators read from, so a dispose before their `return()`
+    // makes those calls throw `InputDisposedError` instead of releasing the
+    // queued frames — which is precisely the leak step 2 exists to prevent.
+    // Do not reorder these three steps or fold them together.
     for (const input of inputs) input.dispose();
     releaseBackground(background);
   }

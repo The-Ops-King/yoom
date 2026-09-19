@@ -49,7 +49,8 @@ const STALL_MS = 4000;
 /** How long a decoder may take to report metadata before we call it dead. */
 const DECODE_TIMEOUT_MS = 15_000;
 
-function abortError(): DOMException {
+/** The rejection both exporters raise on `opts.signal`, so callers can match one shape. */
+export function abortError(): DOMException {
   return new DOMException("Aborted", "AbortError");
 }
 
