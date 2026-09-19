@@ -1205,27 +1205,11 @@ export function useRecorder(): UseRecorderResult {
 
       // ---- fast path: the render and the upload overlap ----
       //
-      // The module is dynamically imported because it pulls in ~1.2 MB of
-      // mediabunny that the legacy path never touches, and the free WebCodecs
-      // probe gates that import: a machine without WebCodecs neither downloads
-      // the chunk nor opens a Drive session it will never write a byte to. The
-      // codec-PAIR probe cannot run this early (it lives inside mediabunny), so
-      // that rarer refusal does abandon a session. Harmless: `/api/upload` only
-      // hands back a session URI and an optimistic slug — nothing is persisted
-      // until `/api/upload/complete` — and an untouched resumable session
-      // expires on Drive's own schedule.
-      let fast: typeof import("@/lib/editor/fast-export/render-fast") | null = null;
-      let unsupported = "no WebCodecs";
-      if (typeof VideoEncoder !== "undefined" && typeof VideoDecoder !== "undefined") {
-        try {
-          fast = await import("@/lib/editor/fast-export/render-fast");
-        } catch (err) {
-          unsupported = "fast exporter did not load";
-          console.warn("[Yoom] fast exporter did not load", err);
-        }
-      }
-      if (!fast) {
-        console.info("[Yoom] export", { path: "legacy", reason: unsupported });
+      // The WebCodecs probe is free and comes first: a machine that cannot
+      // fast-export neither opens a Drive session it will never write a byte
+      // to nor downloads the ~545 KB mediabunny chunk below.
+      if (typeof VideoEncoder === "undefined" || typeof VideoDecoder === "undefined") {
+        console.info("[Yoom] export", { path: "legacy", reason: "no WebCodecs" });
         await runLegacy(undefined);
         return;
       }
@@ -1240,7 +1224,34 @@ export function useRecorder(): UseRecorderResult {
         failed("RENDER_FAILED", err);
         return;
       }
+      // Copied BEFORE the dynamic import below, and that ordering is load
+      // bearing: `writeText` only works inside the click's transient
+      // activation (~5 s), so nothing slower than the one `/api/upload`
+      // round-trip may sit in front of it. Putting a cold chunk fetch there
+      // would silently cost the user the share link on a slow disk.
       if (session.slug) copyLink(shareUrl(session.slug));
+
+      // `render-fast` is imported dynamically because it pulls in ~1.2 MB of
+      // mediabunny (545 KB built) that the legacy path never touches. A chunk
+      // that will not load is just another reason to render the old way.
+      //
+      // The codec-PAIR probe cannot run before this point — it lives inside
+      // mediabunny — so a machine with WebCodecs but no encodable pair, like a
+      // load failure here, abandons the session opened above. Harmless:
+      // `/api/upload` only hands back a session URI and an optimistic slug
+      // (nothing is persisted until `/api/upload/complete`), and an untouched
+      // resumable session expires on Drive's own schedule.
+      let fast: typeof import("@/lib/editor/fast-export/render-fast");
+      try {
+        fast = await import("@/lib/editor/fast-export/render-fast");
+      } catch (err) {
+        console.warn("[Yoom] fast exporter did not load", err);
+        console.info("[Yoom] export", { path: "legacy", reason: "fast exporter did not load" });
+        // The reserved slug goes with it, so the link already on the clipboard
+        // still points at this recording.
+        await runLegacy(session.slug);
+        return;
+      }
 
       // Upload percent is acked bytes over the finished file's size, and that
       // size is only known once `renderFast` returns. So the callback closes
