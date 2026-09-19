@@ -79,7 +79,9 @@ describe("uploadRecording", () => {
     });
     expect(JSON.parse(firstInit.body).filename).toMatch(/^yoom-.*\.webm$/);
 
-    expect(uploadToDrive).toHaveBeenCalledWith(blob, "https://drive/session", onProgress);
+    expect(uploadToDrive).toHaveBeenCalledWith(blob, "https://drive/session", onProgress, {
+      signal: undefined,
+    });
 
     const [secondUrl, secondInit] = fetchMock.mock.calls[1];
     expect(secondUrl).toBe("/api/upload/complete");
@@ -90,6 +92,41 @@ describe("uploadRecording", () => {
       height: 1080,
     });
     expect(JSON.parse(secondInit.body).title).toContain("Recording — ");
+  });
+
+  // The chunk PUTs are the part that takes minutes, and the recorder offers
+  // Cancel for the whole of them. A signal that stopped at the JSON round-trips
+  // would make that button a no-op and orphan a finished Drive file.
+  it("hands its abort signal to the Drive upload, not just the JSON calls", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({ sessionUri: "https://drive/session", slug: "abc12345" }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ id: "vid-1", slug: "abc12345", url: "https://jtylerray.com/v/abc12345" }),
+      );
+
+    const controller = new AbortController();
+    await uploadRecording({
+      blob,
+      durationMs: 1,
+      width: 1920,
+      height: 1080,
+      thumbnail: null,
+      onProgress: vi.fn(),
+      title: "",
+      description: "",
+      slug: "",
+      edits: emptyEdits,
+      signal: controller.signal,
+    });
+
+    expect(uploadToDrive).toHaveBeenCalledWith(
+      blob,
+      "https://drive/session",
+      expect.anything(),
+      { signal: controller.signal },
+    );
   });
 
   it("reports the reserved slug before the first chunk PUT and forwards it", async () => {

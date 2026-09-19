@@ -225,7 +225,12 @@ export async function uploadRecording(
     }
   }
 
-  const { id: driveFileId } = await uploadToDrive(blob, sessionUri, onProgress);
+  // The signal has to reach the chunk PUTs, not just the two JSON round-trips
+  // either side of them: the PUTs are the part that takes minutes, and Cancel
+  // is offered for the whole of it. Without this an abort sat invisible until
+  // Drive finished, then surfaced as a `completeUpload` rejection — leaving an
+  // orphaned Drive file and a cancel that looked like it did nothing.
+  const { id: driveFileId } = await uploadToDrive(blob, sessionUri, onProgress, { signal });
 
   return completeUpload({
     driveFileId,

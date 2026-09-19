@@ -1281,13 +1281,30 @@ export function useRecorder(): UseRecorderResult {
       } catch (err) {
         if (!(err instanceof fast.FastExportUnsupported) || signal.aborted) {
           exportAbortRef.current = null;
+          // `failed` first, `abort` second: it reads `signal.aborted` to decide
+          // whether this is a cancel, and aborting ahead of it would report
+          // every render error as a silent one.
           failed("RENDER_FAILED", err);
+          // Nobody will ever call `up.finish()` now, so stop the chunk PUTs
+          // still in flight against a session that is going nowhere. Waste
+          // only — Drive drops an abandoned session itself — but it is a line.
+          abort.abort();
           return;
         }
         // This machine has WebCodecs but no encodable codec pair, and it said so
         // before writing a byte. Render the old way into the slug we reserved.
+        // NOT aborted: `runLegacy` renders on this same signal, so killing it
+        // here would cancel the fallback before it started.
         console.info("[Yoom] export", { path: "legacy", reason: err.message });
         await runLegacy(session.slug);
+        return;
+      }
+      if (rendered.size === 0) {
+        // Same guard the legacy path has: a zero-byte file fails loudly here
+        // rather than becoming an empty video on the library page.
+        exportAbortRef.current = null;
+        dispatch({ type: "RENDER_FAILED", error: "Render produced no data." });
+        abort.abort();
         return;
       }
       totalBytes = rendered.size;
@@ -1321,9 +1338,25 @@ export function useRecorder(): UseRecorderResult {
             slug: session.slug ?? input.slug,
             onProgress: (percent) => dispatch({ type: "UPLOAD_PROGRESS", percent }),
           });
+          // Logged on its own path so a Task 10 measurement run cannot mistake
+          // a retried export for a clean one — or miss it entirely. The tail is
+          // a full whole-file upload here, so it is not comparable to "fast".
+          console.info("[Yoom] export", {
+            path: "fast-retry",
+            renderMs: Math.round(renderMs),
+            uploadTailMs: Math.round(performance.now() - startedAt - renderMs),
+            bytes: rendered.size,
+          });
           await done(retried, session.slug);
           return;
         }
+        // From here the bytes are on Drive. A `completeUpload` failure below
+        // therefore leaves that file orphaned, and a re-Save from staging
+        // uploads a second copy of the same take. That is the deliberate
+        // trade from the plan: retrying `completeUpload` on its own would
+        // risk duplicate VIDEO ROWS for one Drive file, which is the worse
+        // duplicate — the orphan is invisible to the library and costs only
+        // storage.
         const result = await completeUpload({
           ...common,
           driveFileId,
