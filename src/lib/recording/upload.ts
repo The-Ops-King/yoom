@@ -54,41 +54,26 @@ function extensionFor(mimeType: string): string {
 }
 
 /**
- * The Phase 1 flow, unchanged: mint a resumable session, PUT the blob to Drive
- * in chunks, record the metadata, then attach the thumbnail.
+ * Opens the resumable Drive session (and, with it, the share slug). Split out
+ * of `uploadRecording` so the fast exporter can open the session up front and
+ * stream bytes into it while the export is still rendering; `sizeBytes` is
+ * omitted for that streamed case, since the final size isn't known yet.
  */
-export async function uploadRecording(
-  input: UploadRecordingInput,
-): Promise<UploadRecordingResult> {
-  const {
-    blob,
-    durationMs,
-    width,
-    height,
-    thumbnail,
-    onProgress,
-    title,
-    description,
-    slug,
-    edits,
-    onSlug,
-    signal,
-  } = input;
-
-  if (blob.size === 0) {
-    throw new Error("Recording captured no data. Please try again.");
-  }
-
-  const now = new Date();
-  const mimeType = blob.type || "video/webm";
+export async function beginUpload(input: {
+  mimeType: string;
+  sizeBytes?: number;
+  slug: string;
+  signal?: AbortSignal;
+}): Promise<{ sessionUri: string; slug?: string }> {
+  const { mimeType, sizeBytes, slug, signal } = input;
 
   const sessionRes = await fetch("/api/upload", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       mimeType,
-      sizeBytes: blob.size,
-      filename: filenameFor(now, extensionFor(mimeType)),
+      ...(sizeBytes !== undefined ? { sizeBytes } : {}),
+      filename: filenameFor(new Date(), extensionFor(mimeType)),
       slug: slug || undefined,
     }),
     signal,
@@ -104,22 +89,41 @@ export async function uploadRecording(
     throw new Error(message);
   }
 
-  const { sessionUri, slug: reservedSlug } = (await sessionRes.json()) as {
-    sessionUri: string;
-    slug?: string;
-  };
+  return (await sessionRes.json()) as { sessionUri: string; slug?: string };
+}
 
-  if (reservedSlug && onSlug) {
-    // A failing callback (clipboard denied, insecure context) must never cost
-    // the user their recording.
-    try {
-      onSlug(shareUrl(reservedSlug));
-    } catch {
-      // ignored
-    }
-  }
-
-  const { id: driveFileId } = await uploadToDrive(blob, sessionUri, onProgress);
+/**
+ * Records the finished upload's metadata against the Drive file, then
+ * attaches the thumbnail. Split out of `uploadRecording` so the fast exporter
+ * can call it once its own streamed PUT to Drive has finished. The thumbnail
+ * POST lives here (not with the caller) because every completion path — the
+ * whole-file fallback and the streamed export — needs it fired the same way,
+ * right after the video row exists and best-effort.
+ */
+export async function completeUpload(input: {
+  driveFileId: string;
+  reservedSlug?: string;
+  durationMs: number;
+  width: number | null;
+  height: number | null;
+  title: string;
+  description: string;
+  edits: VideoEdits;
+  thumbnail: Blob | null;
+  signal?: AbortSignal;
+}): Promise<UploadRecordingResult> {
+  const {
+    driveFileId,
+    reservedSlug,
+    durationMs,
+    width,
+    height,
+    title,
+    description,
+    edits,
+    thumbnail,
+    signal,
+  } = input;
 
   const completeRes = await fetch("/api/upload/complete", {
     method: "POST",
@@ -129,7 +133,7 @@ export async function uploadRecording(
       durationMs,
       width,
       height,
-      title: title.trim() || defaultRecordingTitle(now),
+      title: title.trim() || defaultRecordingTitle(),
       description,
       slug: reservedSlug,
       edits,
@@ -155,4 +159,65 @@ export async function uploadRecording(
   }
 
   return { id, slug: finalSlug, url, slugChanged };
+}
+
+/**
+ * The Phase 1 flow, unchanged: mint a resumable session, PUT the blob to Drive
+ * in chunks, record the metadata, then attach the thumbnail.
+ */
+export async function uploadRecording(
+  input: UploadRecordingInput,
+): Promise<UploadRecordingResult> {
+  const {
+    blob,
+    durationMs,
+    width,
+    height,
+    thumbnail,
+    onProgress,
+    title,
+    description,
+    slug,
+    edits,
+    onSlug,
+    signal,
+  } = input;
+
+  if (blob.size === 0) {
+    throw new Error("Recording captured no data. Please try again.");
+  }
+
+  const mimeType = blob.type || "video/webm";
+
+  const { sessionUri, slug: reservedSlug } = await beginUpload({
+    mimeType,
+    sizeBytes: blob.size,
+    slug,
+    signal,
+  });
+
+  if (reservedSlug && onSlug) {
+    // A failing callback (clipboard denied, insecure context) must never cost
+    // the user their recording.
+    try {
+      onSlug(shareUrl(reservedSlug));
+    } catch {
+      // ignored
+    }
+  }
+
+  const { id: driveFileId } = await uploadToDrive(blob, sessionUri, onProgress);
+
+  return completeUpload({
+    driveFileId,
+    reservedSlug,
+    durationMs,
+    width,
+    height,
+    title,
+    description,
+    edits,
+    thumbnail,
+    signal,
+  });
 }

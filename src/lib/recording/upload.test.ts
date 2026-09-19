@@ -332,3 +332,16 @@ describe("uploadRecording", () => {
     expect(complete.edits.markers).toHaveLength(1);
   });
 });
+
+describe("beginUpload / completeUpload", () => {
+  it("opens a session without a size for a streamed upload", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ sessionUri: "https://s", slug: "abc12345" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { beginUpload } = await import("./upload");
+    const s = await beginUpload({ mimeType: "video/mp4", slug: "" });
+    expect(s).toEqual({ sessionUri: "https://s", slug: "abc12345" });
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.sizeBytes).toBeUndefined();
+    expect(body.filename).toMatch(/\.mp4$/);
+  });
+});
