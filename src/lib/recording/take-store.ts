@@ -65,6 +65,15 @@ export type TakeSummary = {
   durationMs: number;
   bytes: number;
   finalized: boolean;
+  /**
+   * True when `durationMs` may not match what `loadTake` actually yields —
+   * either the take never finalized (`estimatedMeta`'s high-water-mark
+   * guess), or it did but was truncated (the recorder's own `meta.durationMs`,
+   * which `loadTake` corrects but this summary doesn't — that would mean
+   * loading every chunk blob just to list a number). The restore prompt keys
+   * its "~" prefix off this instead of `finalized` directly.
+   */
+  estimated: boolean;
 };
 export type StoredTake = {
   id: string;
@@ -286,6 +295,7 @@ export async function listTakes(): Promise<TakeSummary[]> {
         durationMs: (r.meta ?? estimatedMeta(r)).durationMs,
         bytes: r.bytes,
         finalized: !!r.meta,
+        estimated: !r.meta || r.truncated,
       }))
       .sort((a, b) => b.createdAt - a.createdAt);
   } catch {

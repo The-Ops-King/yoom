@@ -228,6 +228,24 @@ describe("take store", () => {
     expect(take!.meta.keys).toEqual(META.keys);
   });
 
+  it("flags a listed duration as estimated unless the take finalized cleanly", async () => {
+    const unfinished = await createTake({ mode: "screen", mimeType: "video/webm" });
+    await appendChunk(unfinished, "screen", 0, new Blob(["x"]));
+
+    const truncated = await createTake({ mode: "screen", mimeType: "video/webm" });
+    await appendChunk(truncated, "screen", 0, new Blob(["x"]));
+    await finalizeTake(truncated, META, { truncated: true });
+
+    const clean = await createTake({ mode: "screen", mimeType: "video/webm" });
+    await appendChunk(clean, "screen", 0, new Blob(["x"]));
+    await finalizeTake(clean, META);
+
+    const byId = new Map((await listTakes()).map((t) => [t.id, t]));
+    expect(byId.get(unfinished)!.estimated).toBe(true);
+    expect(byId.get(truncated)!.estimated).toBe(true);
+    expect(byId.get(clean)!.estimated).toBe(false);
+  });
+
   it("returns empty results when IndexedDB is unavailable", async () => {
     // @ts-expect-error simulate a browser without IDB
     delete globalThis.indexedDB;
