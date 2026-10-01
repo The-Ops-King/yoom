@@ -54,26 +54,10 @@ export async function POST(request: Request) {
     .join(": ")
     .slice(0, DETAIL_MAX);
 
-  let sessionId = body.sessionId?.trim() || null;
-  if (!sessionId) {
-    const viewer = readViewerContext(request);
-    sessionId = await createViewSession({
-      video_id: video.id,
-      viewer_name: body.viewerName?.trim().slice(0, 80) || null,
-      ip_hash: viewer.ipHash,
-      user_agent: viewer.userAgent,
-      country: viewer.country,
-      city: viewer.city,
-    });
-  }
-
-  const recorded = await recordPlaybackError(sessionId, code, detail, usedFallback);
-  if (!recorded) {
-    return Response.json({ error: "Not found" }, { status: 404, headers: cors });
-  }
-
-  // Logged as well as stored: this is the line that turns "someone said it
-  // broke" into a timestamp, a route and a MediaError code in the Vercel logs.
+  // Logged before the write, and unconditionally: the log line is the part
+  // that has to survive. A schema that has not caught up with this route (the
+  // columns arrive in their own migration) must not swallow the one record of
+  // a viewer who could not watch the video.
   console.warn("[Yoom] playback error", {
     videoId: video.id,
     slug: video.slug,
@@ -83,5 +67,26 @@ export async function POST(request: Request) {
     usedFallback,
   });
 
-  return Response.json({ ok: true, sessionId }, { headers: cors });
+  // Nothing below may throw. This endpoint exists to observe a failure the
+  // viewer is already living through, and the fallback player does not wait on
+  // it — a 500 here would buy a retry storm and nothing else.
+  let sessionId = body.sessionId?.trim() || null;
+  try {
+    if (!sessionId) {
+      const viewer = readViewerContext(request);
+      sessionId = await createViewSession({
+        video_id: video.id,
+        viewer_name: body.viewerName?.trim().slice(0, 80) || null,
+        ip_hash: viewer.ipHash,
+        user_agent: viewer.userAgent,
+        country: viewer.country,
+        city: viewer.city,
+      });
+    }
+    const recorded = await recordPlaybackError(sessionId, code, detail, usedFallback);
+    return Response.json({ ok: recorded, sessionId }, { headers: cors });
+  } catch (error) {
+    console.error("[Yoom] could not store playback error", error);
+    return Response.json({ ok: false, sessionId }, { headers: cors });
+  }
 }
