@@ -59,6 +59,10 @@ const session: ViewSession = {
   alert_sent_at: null,
   summary_sent_at: null,
   milestones: {},
+  playback_error_code: null,
+  playback_error_detail: null,
+  playback_error_at: null,
+  used_drive_fallback: false,
 };
 
 beforeEach(() => {

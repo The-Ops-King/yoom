@@ -16,6 +16,15 @@ export type ViewTrackerOptions = {
 export type ViewTracker = {
   /** Attach to the <video> element's ref. */
   videoRef: React.RefObject<HTMLVideoElement | null>;
+  /**
+   * Report that the player failed. Safe to call before playback ever started —
+   * the route opens a session when this hook has not yet made one.
+   */
+  reportPlaybackError: (
+    code: number | null,
+    detail: string,
+    usedFallback: boolean,
+  ) => void;
 };
 
 function percentOf(video: HTMLVideoElement, durationMs: number | null): number {
@@ -35,6 +44,10 @@ export function useViewTracker(options: ViewTrackerOptions): ViewTracker {
   const sessionIdRef = useRef<string | null>(null);
   const startingRef = useRef(false);
   const lastPercentRef = useRef(0);
+  // One playback-error report per page view: a failing element can fire
+  // `error` repeatedly (each retry, each source change) and that must not turn
+  // into a row per retry.
+  const reportedErrorRef = useRef(false);
   // Intentionally never reset: a bfcache restore after `pagehide` resumes the
   // same page instance (no new session should start), while a fresh load
   // re-runs this hook from scratch with a new ref.
@@ -64,6 +77,42 @@ export function useViewTracker(options: ViewTrackerOptions): ViewTracker {
       }).catch(() => undefined);
     },
     [apiBase],
+  );
+
+  const reportPlaybackError = useCallback(
+    (code: number | null, detail: string, usedFallback: boolean) => {
+      if (reportedErrorRef.current) return;
+      reportedErrorRef.current = true;
+
+      void (async () => {
+        try {
+          // `text/plain` keeps this a simple request: no CORS preflight, same
+          // as the heartbeat.
+          const response = await fetch(`${apiBase}/api/view/error`, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain" },
+            body: JSON.stringify({
+              videoId,
+              sessionId: sessionIdRef.current,
+              code,
+              detail,
+              usedFallback,
+              viewerName,
+            }),
+            keepalive: true,
+          });
+          if (!response.ok) return;
+          const json = (await response.json()) as { sessionId?: string };
+          // Adopt the session the route opened, so a later heartbeat (the
+          // Drive fallback cannot send one, but a recovered player can) lands
+          // on the same row rather than orphaning it.
+          if (json.sessionId) sessionIdRef.current = json.sessionId;
+        } catch {
+          // Telemetry is best-effort; never break the fallback.
+        }
+      })();
+    },
+    [apiBase, videoId, viewerName],
   );
 
   const start = useCallback(async () => {
@@ -139,5 +188,5 @@ export function useViewTracker(options: ViewTrackerOptions): ViewTracker {
     };
   }, [durationMs, heartbeat, start]);
 
-  return { videoRef };
+  return { videoRef, reportPlaybackError };
 }

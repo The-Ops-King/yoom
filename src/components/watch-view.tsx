@@ -15,6 +15,8 @@ export type WatchVideo = {
   description: string | null;
   durationMs: number | null;
   hasThumbnail: boolean;
+  /** Drive file id, so the player can fall back to Drive's own player. */
+  driveFileId: string | null;
 };
 
 type WatchViewProps = {
@@ -66,7 +68,7 @@ export function WatchView({
     }
   }, [mounted, nameResolved]);
 
-  const { videoRef } = useViewTracker({
+  const { videoRef, reportPlaybackError } = useViewTracker({
     videoId: video.id,
     apiBase,
     durationMs: video.durationMs,
@@ -106,6 +108,8 @@ export function WatchView({
           poster={video.hasThumbnail ? `${apiBase}/api/thumb/${video.id}` : undefined}
           edits={edits}
           videoRef={videoRef}
+          driveFileId={video.driveFileId}
+          onPlaybackError={reportPlaybackError}
         />
 
         {mounted && !nameResolved && (

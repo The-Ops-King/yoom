@@ -35,6 +35,10 @@ export type ViewSession = {
   alert_sent_at: string | null;
   summary_sent_at: string | null;
   milestones: Record<string, unknown>;
+  playback_error_code: number | null;
+  playback_error_detail: string | null;
+  playback_error_at: string | null;
+  used_drive_fallback: boolean;
 };
 
 export type Settings = {
@@ -182,6 +186,31 @@ export async function updateViewSession(
   const row = unwrap(result);
   // PostgREST can surface a missing composite as an all-null row; treat it as absent.
   return row && row.id ? row : null;
+}
+
+/**
+ * Record that a viewer's player failed, and whether the Drive fallback caught
+ * it. Best-effort telemetry: it never throws into the request path, because a
+ * failed report must not also break the fallback that is rescuing the viewer.
+ */
+export async function recordPlaybackError(
+  sessionId: string,
+  code: number | null,
+  detail: string | null,
+  usedFallback: boolean,
+): Promise<boolean> {
+  const result = (await getSupabase()
+    .from("view_sessions")
+    .update({
+      playback_error_code: code,
+      playback_error_detail: detail,
+      playback_error_at: new Date().toISOString(),
+      used_drive_fallback: usedFallback,
+    })
+    .eq("id", sessionId)
+    .select("id")
+    .maybeSingle()) as QueryResult<{ id: string } | null>;
+  return Boolean(unwrap(result));
 }
 
 /**

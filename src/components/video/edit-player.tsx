@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { hasDrawableEdits, type Marker, type VideoEdits } from "@/lib/edits";
+import { drivePreviewUrl } from "@/lib/drive-embed";
 import { fmtDuration } from "@/lib/format";
 
 export type EditPlayerProps = {
@@ -20,6 +21,19 @@ export type EditPlayerProps = {
   markers?: Marker[];
   className?: string;
   autoPlay?: boolean;
+  /**
+   * Drive file behind this recording. When the native player raises a
+   * `MediaError` the component swaps in Drive's own player for this id, so a
+   * viewer whose browser cannot decode our file still sees the recording.
+   * Omit to keep the plain `<video>` with no fallback.
+   */
+  driveFileId?: string | null;
+  /** Called once when the native player fails, before the fallback renders. */
+  onPlaybackError?: (
+    code: number | null,
+    detail: string,
+    usedFallback: boolean,
+  ) => void;
 };
 
 /**
@@ -37,11 +51,15 @@ export function EditPlayer({
   markers,
   className,
   autoPlay,
+  driveFileId,
+  onPlaybackError,
 }: EditPlayerProps) {
   const internalRef = useRef<HTMLVideoElement | null>(null);
   const ref = videoRef ?? internalRef;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [duration, setDuration] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const fallbackUrl = drivePreviewUrl(driveFileId);
 
   // Keep the canvas backing store matched to the element's rendered box and
   // the device pixel ratio, so future overlays land on the right pixels.
@@ -110,6 +128,38 @@ export function EditPlayer({
     setDuration(Number.isFinite(value) ? value : 0);
   }
 
+  /**
+   * The native player gave up. Report it, then hand the viewer Drive's player
+   * if we have a file id for it.
+   *
+   * Reporting happens even with no fallback available: knowing the recording
+   * failed is the point, and before this the only trace was a view session
+   * stuck at 0% that looked identical to someone who never pressed play.
+   */
+  function onVideoError(event: React.SyntheticEvent<HTMLVideoElement>) {
+    const media = event.currentTarget.error;
+    const code = media?.code ?? null;
+    const detail = [media?.message, `src=${event.currentTarget.currentSrc || src}`]
+      .filter(Boolean)
+      .join(" ");
+    onPlaybackError?.(code, detail, Boolean(fallbackUrl));
+    if (fallbackUrl) setFailed(true);
+  }
+
+  if (failed && fallbackUrl) {
+    return (
+      <div className={className}>
+        <iframe
+          src={fallbackUrl}
+          title="Video player"
+          allow="autoplay; fullscreen"
+          allowFullScreen
+          className="aspect-video w-full rounded-xl border border-border bg-black shadow-lg shadow-black/30"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={className}>
       <div className="relative">
@@ -123,6 +173,7 @@ export function EditPlayer({
           autoPlay={autoPlay}
           onLoadedMetadata={(event) => onDuration(event.currentTarget.duration)}
           onDurationChange={(event) => onDuration(event.currentTarget.duration)}
+          onError={onVideoError}
           className="w-full rounded-xl border border-border bg-black shadow-lg shadow-black/30"
         />
         <canvas

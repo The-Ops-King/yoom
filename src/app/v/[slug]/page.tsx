@@ -85,6 +85,7 @@ export default async function WatchPage({ params }: PageProps) {
         description: video.description,
         durationMs: video.duration_ms,
         hasThumbnail: Boolean(video.thumbnail_drive_file_id),
+        driveFileId: video.drive_file_id,
       }}
       apiBase={appUrl()}
       shareUrl={shareUrl(video.slug)}
