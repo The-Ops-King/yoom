@@ -1,6 +1,7 @@
 import fixWebmDuration from "fix-webm-duration";
 import type { VideoEdits } from "@/lib/edits";
 import type { CursorSample, KeySample, RecordingMode } from "@/lib/recording/types";
+import { EXPORT_CODECS, pickMimeType } from "@/lib/recording/mime";
 import { getWallpaperBlob } from "@/lib/wallpapers";
 import { CURSOR_TAU_S, createCursorSampler } from "./cursor-path";
 import { createKeySampler } from "./render-input";
@@ -37,8 +38,6 @@ export interface RenderOptions {
 }
 
 export interface RenderResult { blob: Blob; thumbnail: Blob | null; width: number; height: number }
-
-const CODECS = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
 
 /** Camera drift past this many seconds is corrected with a hard seek. */
 const RESYNC_S = 0.08;
@@ -352,7 +351,7 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
     audioCtx.createMediaElementSource(primary).connect(dest);
     dest.stream.getAudioTracks().forEach((t) => stream?.addTrack(t));
 
-    const mimeType = CODECS.find((c) => MediaRecorder.isTypeSupported(c)) ?? "";
+    const mimeType = pickMimeType(EXPORT_CODECS);
     recorder = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 10_000_000 });
     const chunks: Blob[] = [];
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
@@ -464,10 +463,16 @@ export async function renderToBlob(sources: RenderSources, edits: VideoEdits, op
     }
     cleanup();
 
-    const type = recorder.mimeType?.split(";")[0] || "video/webm";
+    const type = recorder.mimeType?.split(";")[0] || mimeType.split(";")[0] || "video/webm";
     let blob = new Blob(chunks, { type });
     const durationMs = Math.round(recordedMs > 0 ? recordedMs : total * 1000);
-    try { blob = await fixWebmDuration(blob, durationMs, { logger: false }); } catch { /* keep raw */ }
+    // MediaRecorder omits the EBML duration, so a WebM has to be patched or it
+    // will not seek. An MP4 already carries its duration, and handing one to an
+    // EBML patcher is a way to corrupt it — the guard is load-bearing now that
+    // `EXPORT_CODECS` asks for MP4 first.
+    if (type.includes("webm")) {
+      try { blob = await fixWebmDuration(blob, durationMs, { logger: false }); } catch { /* keep raw */ }
+    }
     report(100);
     return { blob, thumbnail, width, height };
   } catch (err) {

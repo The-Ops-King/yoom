@@ -22,6 +22,7 @@ import {
   setDesktopShareMode,
 } from "./desktop-bridge";
 import { getProvider, isCaptureCancellation } from "./media-sources";
+import { CAPTURE_CODECS, pickMimeType } from "./mime";
 import {
   MAX_DURATION_MS,
   RESTART_COUNTDOWN_SECONDS,
@@ -59,26 +60,6 @@ import type {
   ShareSource,
   SurfacePref,
 } from "./types";
-
-const CODECS = [
-  "video/webm;codecs=vp9,opus",
-  "video/webm;codecs=vp9",
-  "video/webm;codecs=vp8,opus",
-  "video/webm;codecs=vp8",
-  "video/webm",
-  // Safari has no WebM MediaRecorder; Phase 1 stores the mime per video.
-  "video/mp4;codecs=avc1,mp4a.40.2",
-  "video/mp4",
-  "",
-];
-
-function pickMimeType(): string {
-  return (
-    CODECS.find(
-      (c) => c === "" || (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(c)),
-    ) ?? ""
-  );
-}
 
 function stopStream(stream: MediaStream | null): void {
   stream?.getTracks().forEach((t) => t.stop());
@@ -734,7 +715,7 @@ export function useRecorder(): UseRecorderResult {
     clicksRef.current = [];
     keysRef.current = [];
 
-    const mimeType = pickMimeType();
+    const mimeType = pickMimeType(CAPTURE_CODECS);
     const recorder = new MediaRecorder(recordStream, {
       ...(mimeType ? { mimeType } : {}),
       videoBitsPerSecond: current.mode === "camera" ? 5_000_000 : 10_000_000,
